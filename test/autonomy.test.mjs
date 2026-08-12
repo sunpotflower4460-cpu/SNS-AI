@@ -61,7 +61,7 @@ function baseConfig() {
       maintenance: { historyRetentionDays: 365, metricsRetentionDays: 120, usageRetentionDays: 90, auditRetentionDays: 180, quarantineRetentionDays: 30, generatedMediaRetentionDays: 90 },
       media: {
         internalImageGeneration: true, internalVideoGeneration: true,
-        imageModel: 'gpt-image-2', imageSize: '1024x1024', imageQuality: 'medium',
+        imageModel: 'gpt-image-1', imageSize: '1024x1024', imageQuality: 'medium',
         videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, videoTimeoutMinutes: 15, videoPollSeconds: 8,
         maxDownloadBytes: 1000, maxHostedImageBytes: 1000, maxHostedVideoBytes: 2000,
         qa: { enabled: true, minScore: 75, maxRegenerations: 1, maxInputBytes: 1000, detail: 'high' }
