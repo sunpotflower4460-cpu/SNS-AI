@@ -70,6 +70,14 @@ export function validateConfig(config) {
     for (const key of ['historyRetentionDays', 'metricsRetentionDays', 'usageRetentionDays', 'auditRetentionDays', 'quarantineRetentionDays', 'generatedMediaRetentionDays']) positive(errors, id, `maintenance.${key}`, maintenance[key]);
 
     const media = merged(config, account, 'media');
+    const mediaType = media.type || 'image';
+    const strategy = media.strategy || 'none';
+    const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
+    const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
+    const canGenerateInternally = mediaType === 'image'
+      ? media.internalImageGeneration !== false
+      : mediaType === 'reel' && media.internalVideoGeneration !== false;
+    if (!['image', 'reel'].includes(mediaType)) errors.push(`${id}: media.type must be image or reel`);
     positive(errors, id, 'media.maxDownloadBytes', media.maxDownloadBytes);
     positive(errors, id, 'media.maxHostedImageBytes', media.maxHostedImageBytes);
     positive(errors, id, 'media.maxHostedVideoBytes', media.maxHostedVideoBytes);
@@ -92,19 +100,18 @@ export function validateConfig(config) {
     if (account.enabled && ['auto', 'approval'].includes(account.mode)) {
       if (!account.schedule?.times?.length) errors.push(`${id}: autonomous mode requires schedule.times`);
       if (account.platform === 'instagram') {
-        const strategy = media.strategy || 'none';
-        const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
-        const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
-        const mediaType = media.type || 'image';
-        const canGenerateInternally = mediaType === 'image'
-          ? media.internalImageGeneration !== false
-          : mediaType === 'reel' && media.internalVideoGeneration !== false;
-        if (!['image', 'reel'].includes(mediaType)) errors.push(`${id}: Instagram media.type must be image or reel`);
         if (strategy === 'none') errors.push(`${id}: Instagram autonomous mode requires media strategy`);
         if (strategy === 'pool' && !hasLibrary) errors.push(`${id}: Instagram media pool is empty`);
         if (['fixed', 'external'].includes(strategy) && !media.url) errors.push(`${id}: Instagram media.${strategy} requires media.url`);
         if (strategy === 'endpoint' && !hasEndpoint) errors.push(`${id}: Instagram media.endpoint requires an HTTPS endpoint`);
         if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !canGenerateInternally) errors.push(`${id}: Instagram ${strategy} requires library media, HTTPS media.endpoint, or matching built-in generation`);
+      }
+      if (account.platform === 'x' && strategy !== 'none') {
+        if (strategy === 'pool' && !hasLibrary) errors.push(`${id}: X media pool is empty`);
+        if (['fixed', 'external'].includes(strategy) && !media.url) errors.push(`${id}: X media.${strategy} requires media.url`);
+        if (strategy === 'endpoint' && !hasEndpoint) errors.push(`${id}: X media.endpoint requires an HTTPS endpoint`);
+        if (strategy === 'generate' && !hasEndpoint && !canGenerateInternally) errors.push(`${id}: X generate requires HTTPS media.endpoint or matching built-in generation`);
+        if (strategy === 'auto' && !hasLibrary && !hasEndpoint && !canGenerateInternally) errors.push(`${id}: X auto with media configured requires library media, HTTPS media.endpoint, or matching built-in generation`);
       }
     }
   }
