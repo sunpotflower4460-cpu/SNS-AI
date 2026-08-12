@@ -1,10 +1,15 @@
 import { fileURLToPath } from 'node:url';
 import { loadAccounts } from '../lib/config.mjs';
 import { readHistory } from '../lib/history.mjs';
+import { readAudit, recentAudit } from '../lib/audit.mjs';
 import { readMetricSnapshots, latestSnapshots } from '../analytics/store.mjs';
 import { scoreSnapshot } from '../analytics/scorer.mjs';
 import { loadStrategy } from '../learning/store.mjs';
 import { loadTrendBrief } from '../research/trends.mjs';
+import { loadExperimentState } from '../experiments/store.mjs';
+import { recentHumanFeedback } from '../feedback/store.mjs';
+import { circuitStatus } from '../ops/circuit.mjs';
+import { usageToday } from '../ops/budget.mjs';
 import { writeJsonAtomic } from '../lib/json-store.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -13,16 +18,34 @@ const JSON_PATH = fileURLToPath(new URL('../../data/reports/latest.json', import
 const MD_PATH = fileURLToPath(new URL('../../data/reports/latest.md', import.meta.url));
 
 export async function generateReport() {
-  const accounts = await loadAccounts(); const history = await readHistory(); const snapshots = await readMetricSnapshots(); const latest = latestSnapshots(snapshots);
+  const accounts = await loadAccounts(); const history = await readHistory(); const snapshots = await readMetricSnapshots(); const latest = latestSnapshots(snapshots); const audit = await readAudit();
   const result = { generatedAt: new Date().toISOString(), accounts: {} };
   for (const [accountId, account] of Object.entries(accounts)) {
     const posts = history.filter((h) => h.account === accountId && h.status === 'published').slice(-10).reverse(); const latestMetrics = latest.filter((s) => s.account === accountId);
     const scored = latestMetrics.map((s) => ({ providerPostId: s.providerPostId, checkpointMinutes: s.checkpointMinutes, ...scoreSnapshot(s, snapshots, account.objectives?.weights || {}) })).sort((a, b) => b.score - a.score);
-    const strategy = await loadStrategy(accountId); const trends = await loadTrendBrief(accountId);
+    const strategy = await loadStrategy(accountId); const trends = await loadTrendBrief(accountId); const experiments = await loadExperimentState(accountId);
+    const feedback = await recentHumanFeedback(accountId, 10);
+    const autopilotCircuit = await circuitStatus(accountId, 'autopilot', account.resilience);
+    const publishCircuit = await circuitStatus(accountId, 'publish', account.resilience);
+    const usage = {
+      openai: await usageToday(accountId, account, 'openai'),
+      webSearch: await usageToday(accountId, account, 'webSearch'),
+      media: await usageToday(accountId, account, 'media')
+    };
+    const recentEvents = recentAudit(audit, accountId, 30);
+    const errors = recentEvents.filter((row) => String(row.stage || '').includes('error')).slice(0, 5);
     result.accounts[accountId] = {
       platform: account.platform, enabled: Boolean(account.enabled), mode: account.mode || 'pause', postCount: posts.length,
-      lastPost: posts[0] || null, bestRecent: scored[0] || null, strategy: strategy ? { sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred, avoid: strategy.avoid } : null,
-      trends: trends ? { generatedAt: trends.generatedAt, summary: trends.summary, top: trends.items?.slice(0, 5) || [] } : null
+      lastPost: posts[0] || null, bestRecent: scored[0] || null,
+      strategy: strategy ? { generatedAt: strategy.generatedAt, sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred, avoid: strategy.avoid } : null,
+      trends: trends ? { generatedAt: trends.generatedAt, summary: trends.summary, top: trends.items?.slice(0, 5) || [] } : null,
+      experiment: experiments.active || null,
+      completedExperiments: (experiments.completed || []).slice(-3).reverse(),
+      humanFeedback: feedback,
+      circuits: { autopilot: autopilotCircuit, publish: publishCircuit },
+      usageToday: usage,
+      budgets: account.budgets || {},
+      recentErrors: errors
     };
   }
   await writeJsonAtomic(JSON_PATH, result);
@@ -31,7 +54,11 @@ export async function generateReport() {
     lines.push(`## ${id} (${row.platform})`, `- State: ${row.enabled ? 'enabled' : 'disabled'} / ${row.mode}`, `- Recent posts in memory: ${row.postCount}`);
     if (row.bestRecent) lines.push(`- Best recent performance score: ${row.bestRecent.score} (confidence ${row.bestRecent.confidence})`);
     if (row.strategy) { lines.push(`- Learning samples: ${row.strategy.sampleSize}, confidence ${row.strategy.confidence}`); if (row.strategy.preferred?.length) lines.push(`- Current winning signals: ${row.strategy.preferred.slice(0, 3).map((x) => `${x.dimension}=${x.value} (${x.lift >= 0 ? '+' : ''}${x.lift})`).join(', ')}`); }
-    if (row.trends?.top?.length) lines.push(`- Current trend candidates: ${row.trends.top.slice(0, 3).map((x) => `${x.topic} (${x.opportunityScore})`).join(', ')}`);
+    if (row.trends?.top?.length) lines.push(`- Current trend candidates: ${row.trends.top.slice(0, 3).map((x) => `${x.topic} (${x.opportunityScore ?? x.relevance})`).join(', ')}`);
+    if (row.experiment) lines.push(`- Active experiment: ${row.experiment.dimension} → ${row.experiment.variants.join(' vs ')}`);
+    lines.push(`- Usage today: OpenAI ${row.usageToday.openai}, web search ${row.usageToday.webSearch}, media ${row.usageToday.media}`);
+    if (row.circuits.autopilot?.open || row.circuits.publish?.open) lines.push('- ⚠ Circuit breaker is currently open.');
+    if (row.recentErrors.length) lines.push(`- Recent errors: ${row.recentErrors.map((x) => x.error || x.stage).join(' / ')}`);
     lines.push('');
   }
   await mkdir(dirname(MD_PATH), { recursive: true }); await writeFile(MD_PATH, `${lines.join('\n')}\n`, 'utf8'); return result;
