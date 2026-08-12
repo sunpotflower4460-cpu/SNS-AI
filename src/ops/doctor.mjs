@@ -7,10 +7,14 @@ import { validateConfig } from '../validate-config.mjs';
 const REPORT_JSON = fileURLToPath(new URL('../../data/reports/readiness.json', import.meta.url));
 const REPORT_MD = fileURLToPath(new URL('../../data/reports/readiness.md', import.meta.url));
 
+function xUsesMedia(account) {
+  return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
+}
+
 function credentialRequirements(account) {
   if (account.platform === 'x') {
     const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-    if ((account.media?.type || 'image') === 'reel' && account.media?.strategy !== 'none') required.push('oauth2AccessToken');
+    if (xUsesMedia(account)) required.push('oauth2AccessToken', 'oauth2RefreshToken');
     return required;
   }
   if (account.platform === 'instagram') return ['accessToken', 'igUserId'];
@@ -67,7 +71,7 @@ function mediaReadiness(account) {
   const warnings = [];
   if (account.platform === 'x') {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
-    if (mediaType === 'reel' && strategy !== 'none') warnings.push('X Reel/video upload uses OAuth2 user media-upload endpoints; credential.oauth2AccessToken is required in addition to the existing OAuth1 posting credentials.');
+    if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access; oauth2RefreshToken is required as evidence of offline authorization.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
     return { blockers, warnings };
   }
@@ -87,6 +91,7 @@ function mediaReadiness(account) {
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
   }
+  warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };
 }
@@ -134,7 +139,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
