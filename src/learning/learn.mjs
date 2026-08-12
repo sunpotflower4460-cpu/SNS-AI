@@ -18,10 +18,11 @@ export function buildStrategy({ accountId, account, history, snapshots, now = ne
   const windowSnapshots = snapshots.filter((s) => s.account === accountId && allowedPostIds.has(String(s.providerPostId)));
   const latest = latestSnapshots(windowSnapshots).filter((s) => Number(s.checkpointMinutes) >= Number(account.learning?.matureCheckpointMinutes ?? 1440));
   const byPost = new Map(recentHistory.map((h) => [String(h.providerPostId), h]));
+  const timeZone = account.schedule?.timezone || account.timezone || 'Asia/Tokyo';
   const samples = latest.map((snapshot) => {
     const post = byPost.get(String(snapshot.providerPostId)); if (!post) return null;
     const scored = scoreSnapshot(snapshot, windowSnapshots, account.objectives?.weights || {});
-    return { snapshot, post, score: scored.score, confidence: scored.confidence, features: historyFeatures(post, account.timezone) };
+    return { snapshot, post, score: scored.score, confidence: scored.confidence, features: historyFeatures(post, timeZone) };
   }).filter(Boolean);
   const overall = mean(samples.map((s) => s.score)) || 50;
   const featureStats = {};
@@ -61,14 +62,8 @@ export async function learnAll({ accountFilter } = {}) {
     const strategy = buildStrategy({ accountId, account, history, snapshots }); await saveStrategy(accountId, strategy);
     const experimentResult = account.experiments?.enabled === false ? { status: 'disabled' } : await evaluateExperiment(accountId, account, history, snapshots);
     const activeExperiment = account.experiments?.enabled === false ? null : await ensureExperiment(accountId, account, strategy);
-    await appendAudit({
-      account: accountId, stage: 'strategy-updated', sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence,
-      preferred: strategy.preferred.slice(0, 5), experimentEvaluation: experimentResult.status, activeExperiment: activeExperiment?.id || null
-    });
-    report.push({
-      account: accountId, sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3),
-      experiment: { evaluation: experimentResult.status, active: activeExperiment || null }
-    });
+    await appendAudit({ account: accountId, stage: 'strategy-updated', sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 5), experimentEvaluation: experimentResult.status, activeExperiment: activeExperiment?.id || null });
+    report.push({ account: accountId, sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3), experiment: { evaluation: experimentResult.status, active: activeExperiment || null } });
   }
   return report;
 }
