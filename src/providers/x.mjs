@@ -11,9 +11,7 @@ const pct = (value) => encodeURIComponent(String(value))
 
 function oauthHeader(method, url, credentials) {
   const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-  for (const key of required) {
-    if (!credentials[key]) throw new Error(`X credential is missing "${key}".`);
-  }
+  for (const key of required) if (!credentials[key]) throw new Error(`X credential is missing "${key}".`);
 
   const oauth = {
     oauth_consumer_key: credentials.consumerKey,
@@ -40,25 +38,27 @@ function oauthHeader(method, url, credentials) {
     .join(', ')}`;
 }
 
+function mediaMetadataPayload(mediaId, text) {
+  return { id: String(mediaId), metadata: { alt_text: { text: String(text || '').trim().slice(0, 1000) } } };
+}
+
 async function setAltText(mediaId, text, credentials) {
-  const altText = String(text || '').trim().slice(0, 1000);
-  if (!altText) return;
+  const payload = mediaMetadataPayload(mediaId, text);
+  if (!payload.metadata.alt_text.text) return;
   await fetchJson(MEDIA_METADATA_URL, {
     method: 'POST',
     headers: {
       Authorization: oauthHeader('POST', MEDIA_METADATA_URL, credentials),
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ id: String(mediaId), metadata: { alt_text: { text: altText } } })
+    body: JSON.stringify(payload)
   });
 }
 
 async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   const maxBytes = 5 * 1024 * 1024;
   const { bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes });
-  if (!contentType.startsWith('image/')) {
-    throw new Error(`X publisher currently accepts image media only; got ${contentType}.`);
-  }
+  if (!contentType.startsWith('image/')) throw new Error(`X publisher currently accepts image media only; got ${contentType}.`);
   if (bytes.byteLength > maxBytes) throw new Error('X image exceeds the 5 MB API upload limit.');
 
   const form = new FormData();
@@ -107,12 +107,7 @@ export async function publishX({ text = '', mediaUrl, mediaAltText = '', credent
     body: JSON.stringify(payload)
   });
 
-  return {
-    platform: 'x',
-    postId: body?.data?.id,
-    text: body?.data?.text ?? text,
-    raw: body
-  };
+  return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
 }
 
-export const __test = { pct };
+export const __test = { pct, mediaMetadataPayload };
