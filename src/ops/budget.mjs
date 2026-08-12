@@ -6,7 +6,8 @@ const FILE = fileURLToPath(new URL('../../data/usage.jsonl', import.meta.url));
 const LIMIT_KEYS = {
   openai: 'openaiCallsPerDay',
   webSearch: 'webSearchCallsPerDay',
-  media: 'mediaCallsPerDay'
+  media: 'mediaCallsPerDay',
+  image: 'imageGenerationsPerDay'
 };
 
 export async function usageToday(accountId, account, kind) {
