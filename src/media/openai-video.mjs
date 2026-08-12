@@ -49,14 +49,18 @@ async function createVideo(accountId, account, prompt) {
   if (reusable) return reusable;
 
   await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds) });
-  const body = { model, prompt, size, seconds };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
+      const form = new FormData();
+      form.set('model', model);
+      form.set('prompt', prompt);
+      form.set('size', size);
+      form.set('seconds', seconds);
       response = await fetch(OPENAI_VIDEOS_URL, {
         method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body)
+        headers: authHeaders(),
+        body: form
       });
     } catch (error) {
       if (attempt === 1) throw error;
