@@ -64,6 +64,19 @@ async function moderateImage(accountId, account, imageUrl) {
   };
 }
 
+async function requestQa(accountId, account, body) {
+  try {
+    return await openaiRequest('/responses', body, { accountId, account, operation: 'media-qa', retries: 1 });
+  } catch (error) {
+    if (Number(error.status) !== 400 || !body.text) throw error;
+    const fallback = structuredClone(body);
+    delete fallback.text;
+    const firstText = fallback.input?.[0]?.content?.find((part) => part.type === 'input_text');
+    if (firstText) firstText.text += '\nReturn ONLY one JSON object with keys: pass(boolean), score(0-100 number), issues(array of {type,severity,detail}), altText(string), correctionPrompt(string).';
+    return openaiRequest('/responses', fallback, { accountId, account, operation: 'media-qa-fallback', retries: 1 });
+  }
+}
+
 async function reviewImageUrl(accountId, account, imageUrl, context = {}) {
   const settings = qaSettings(account);
   if (!settings.enabled) return { pass: true, score: 100, issues: [], altText: '', correctionPrompt: '', skipped: true };
@@ -99,7 +112,7 @@ async function reviewImageUrl(accountId, account, imageUrl, context = {}) {
     text: { format: { type: 'json_schema', name: 'sns_media_qa', schema: QA_SCHEMA, strict: true } }
   };
 
-  const response = await openaiRequest('/responses', body, { accountId, account, operation: 'media-qa', retries: 1 });
+  const response = await requestQa(accountId, account, body);
   const parsed = parseJson(outputText(response));
   const issues = Array.isArray(parsed.issues) ? parsed.issues.slice(0, 8) : [];
   const score = Math.max(0, Math.min(100, Number(parsed.score) || 0));
