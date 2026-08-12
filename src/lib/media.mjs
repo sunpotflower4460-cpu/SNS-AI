@@ -1,4 +1,5 @@
 import { consumeUsage } from '../ops/budget.mjs';
+import { generateAndHostImage } from '../media/openai-image.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
@@ -16,6 +17,14 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const url = body.url || body.mediaUrl; if (!/^https:\/\//i.test(url || '')) throw new Error('Media endpoint must return { "url": "https://..." }.'); return url;
 }
 
+async function generateMedia(accountId, account, slotId, draft) {
+  if (account.media?.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, 'generate');
+  if (account.media?.internalImageGeneration !== false && (account.media?.type || 'image') === 'image') {
+    return generateAndHostImage(accountId, account, slotId, draft);
+  }
+  return null;
+}
+
 export async function resolveMedia(accountId, account, slotId, draft) {
   const media = account.media || {}; const strategy = media.strategy || 'none';
   if (strategy === 'none') return null;
@@ -24,21 +33,21 @@ export async function resolveMedia(accountId, account, slotId, draft) {
   if (strategy === 'endpoint') return requestMediaEndpoint(accountId, account, slotId, draft, draft?.features?.mediaDecision || 'generate');
   if (strategy === 'auto') {
     let decision = draft?.features?.mediaDecision || 'none';
-    if (account.platform === 'instagram' && decision === 'none') decision = media.defaultInstagramDecision || 'library';
+    if (account.platform === 'instagram' && decision === 'none') decision = media.defaultInstagramDecision || 'generate';
     if (decision === 'none') return null;
     if (decision === 'library') {
       const url = poolUrl(media, slotId); if (url) return url;
-      if (media.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, 'generate');
-      return null;
+      return generateMedia(accountId, account, slotId, draft);
     }
-    if (['search', 'generate'].includes(decision)) {
-      if (media.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, decision);
+    if (decision === 'search') {
+      if (media.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, 'search');
       const fallback = poolUrl(media, slotId); if (fallback) return fallback;
-      return null;
+      return generateMedia(accountId, account, slotId, draft);
     }
+    if (decision === 'generate') return generateMedia(accountId, account, slotId, draft);
   }
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
 export function ensureMediaForPlatform(account, mediaUrl) {
-  if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/auto and provide a public HTTPS media source.');
+  if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/auto; auto can use built-in OpenAI image generation on a public repository.');
 }
