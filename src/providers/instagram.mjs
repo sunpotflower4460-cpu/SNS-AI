@@ -21,7 +21,7 @@ async function waitForContainer({ base, containerId, accessToken }) {
   throw new Error('Instagram container did not finish processing in time.');
 }
 
-export async function verifyInstagramCredential({ credential, apiVersion = 'v23.0' }) {
+export async function verifyInstagramCredential({ credential, apiVersion = 'v25.0' }) {
   if (!credential?.igUserId) throw new Error('Instagram credential is missing "igUserId".');
   const base = `https://graph.instagram.com/${apiVersion}`;
   const body = await fetchJson(`${base}/${credential.igUserId}?fields=id,username`, {
@@ -32,7 +32,7 @@ export async function verifyInstagramCredential({ credential, apiVersion = 'v23.
   return { id: body.id, username: body.username || null };
 }
 
-export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image', credential, apiVersion = 'v23.0', dryRun = false }) {
+export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image', credential, apiVersion = 'v25.0', dryRun = false }) {
   if (!mediaUrl) throw new Error('Instagram publishing requires mediaUrl.');
   if (!/^https:\/\//i.test(mediaUrl)) throw new Error('Instagram mediaUrl must be a public https:// URL.');
   if (!credential?.igUserId) throw new Error('Instagram credential is missing "igUserId".');
