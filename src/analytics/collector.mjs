@@ -2,6 +2,7 @@ import { loadAccounts, resolveAccount } from '../lib/config.mjs';
 import { readHistory } from '../lib/history.mjs';
 import { appendAudit } from '../lib/audit.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from '../ops/circuit.mjs';
+import { evaluateAnomalyBrake } from '../ops/brake.mjs';
 import { readMetricSnapshots, snapshotsForPost, appendMetricSnapshot } from './store.mjs';
 import { nextDueCheckpoint } from './checkpoints.mjs';
 import { collectXMetrics } from './x-metrics.mjs';
@@ -40,6 +41,11 @@ export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
           metrics: result.metrics, warning: result.warning || null, unavailable: result.unavailable || []
         });
         existing.push(row);
+        const brake = await evaluateAnomalyBrake(accountId, account, existing);
+        if (brake.opened) {
+          await appendAudit({ account: accountId, stage: 'anomaly-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
+          report.push({ account: accountId, status: 'safety-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
+        }
         await recordCircuitSuccess(accountId, 'analytics', account.resilience);
         await appendAudit({ account: accountId, stage: 'metrics-collected', providerPostId: post.providerPostId, checkpointMinutes: due.checkpointMinutes });
         report.push({ account: accountId, providerPostId: post.providerPostId, status: 'collected', checkpointMinutes: due.checkpointMinutes });
