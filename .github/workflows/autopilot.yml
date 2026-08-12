@@ -1,0 +1,93 @@
+name: SNS Autopilot
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Optional account ID; leave blank for all accounts
+        required: false
+        type: string
+      force:
+        description: Generate now instead of waiting for a configured schedule slot
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: Generate/validate without publishing or creating approval issues
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  autopilot:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      GITHUB_TOKEN: ${{ github.token }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_FORCE: ${{ inputs.force }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate code and configuration
+        run: |
+          npm test
+          npm run validate
+          npm run check
+
+      - name: Run autopilot
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          if [[ "${INPUT_FORCE:-false}" == "true" ]]; then args+=(--force); fi
+
+          # Scheduled runs are live. Manual workflow runs default to dry-run=true.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-true}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+
+          node src/orchestrate.mjs "${args[@]}"
+
+      - name: Persist history/state
+        if: always()
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: persist SNS autopilot state"
+
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "State push attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 3))
+          done
+
+          echo "Could not persist SNS state after retries."
+          exit 1

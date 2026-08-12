@@ -1,17 +1,84 @@
 {
+  "defaults": {
+    "timezone": "Asia/Tokyo",
+    "mode": "pause",
+    "generation": {
+      "model": "gpt-5",
+      "historyWindow": 30,
+      "duplicateThreshold": 0.72,
+      "maxAttempts": 3
+    },
+    "safety": {
+      "moderation": true,
+      "maxPostsPerDay": 6,
+      "minMinutesBetweenPosts": 30
+    }
+  },
   "accounts": {
     "example-x": {
       "platform": "x",
       "enabled": false,
+      "mode": "pause",
       "credentialKey": "example-x",
-      "displayName": "Example X account"
+      "displayName": "Example X account",
+      "profile": {
+        "identity": "Describe who this account is.",
+        "goal": "Describe what this account is trying to achieve.",
+        "audience": "Describe the target audience.",
+        "topics": ["topic A", "topic B"],
+        "style": ["natural", "specific"],
+        "avoid": ["fabricated personal experiences", "repetitive hooks"]
+      },
+      "instructions": "Put account-specific operating rules here.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+        "times": ["08:00"],
+        "windowMinutes": 30
+      },
+      "generation": {
+        "maxChars": 280
+      },
+      "research": {
+        "webSearch": false
+      },
+      "media": {
+        "strategy": "none"
+      }
     },
     "example-instagram": {
       "platform": "instagram",
       "enabled": false,
+      "mode": "pause",
       "credentialKey": "example-instagram",
       "displayName": "Example Instagram account",
-      "apiVersion": "v23.0"
+      "apiVersion": "v23.0",
+      "profile": {
+        "identity": "Describe who this account is.",
+        "goal": "Describe what this account is trying to achieve.",
+        "audience": "Describe the target audience.",
+        "topics": ["topic A", "topic B"],
+        "style": ["visual", "clear"],
+        "avoid": ["unsupported claims", "repetitive captions"]
+      },
+      "instructions": "Put Instagram-specific operating rules here.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["tue", "thu", "sat"],
+        "times": ["18:00"],
+        "windowMinutes": 30
+      },
+      "generation": {
+        "maxChars": 1800
+      },
+      "research": {
+        "webSearch": false
+      },
+      "media": {
+        "strategy": "pool",
+        "type": "image",
+        "urls": []
+      }
     }
   }
 }
