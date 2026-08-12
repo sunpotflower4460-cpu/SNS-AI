@@ -1,9 +1,12 @@
+import { consumeUsage } from '../ops/budget.mjs';
+
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
 
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpoint = account.media?.endpoint;
   if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('Media generation/search requires an HTTPS media.endpoint.');
+  await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
   const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({
     account: accountId, platform: account.platform, slotId, mode, mediaType: account.media?.type || 'image',
