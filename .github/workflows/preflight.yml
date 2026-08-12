@@ -9,7 +9,11 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
 
 jobs:
   preflight:
@@ -17,11 +21,14 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       INPUT_ACCOUNT: ${{ inputs.account }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -38,9 +45,26 @@ jobs:
           args=(--strict)
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           npm run doctor -- "${args[@]}"
-      - name: Verify external credentials without posting
+      - name: Verify external credentials and model access without posting
         shell: bash
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           node src/ops/live-preflight.mjs "${args[@]}"
+      - name: Persist encrypted OAuth2 bootstrap state
+        if: success()
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/x-oauth2-state.json)" ]]; then
+            echo "No OAuth2 state changes."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/x-oauth2-state.json
+          git commit -m "chore: persist encrypted X OAuth2 state"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
