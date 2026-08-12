@@ -4,7 +4,7 @@ import { ensurePublicRelease, findAsset, uploadReleaseAsset } from './release-ho
 import { correctedMediaPrompt, reviewVisualBytes } from './qa.mjs';
 
 const OPENAI_VIDEOS_URL = 'https://api.openai.com/v1/videos';
-const MEDIA_QA_VERSION = 'qa-v1';
+const MEDIA_QA_VERSION = 'qa-v2-spritesheet';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safe(value) { return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video'; }
@@ -101,14 +101,25 @@ async function downloadAsset(videoId, variant, maxBytes) {
   const response = await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}/content${suffix}`, { headers: authHeaders() });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Could not download generated video ${variant || 'video'} (${response.status}): ${body.slice(0, 300)}`);
+    const error = new Error(`Could not download generated video ${variant || 'video'} (${response.status}): ${body.slice(0, 300)}`);
+    error.status = response.status;
+    throw error;
   }
-  const contentType = (response.headers.get('content-type') || (variant === 'thumbnail' ? 'image/jpeg' : 'video/mp4')).split(';')[0];
+  const fallbackType = variant && variant !== 'video' ? 'image/jpeg' : 'video/mp4';
+  const contentType = (response.headers.get('content-type') || fallbackType).split(';')[0];
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.byteLength > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
   return { bytes, contentType };
+}
+
+async function downloadQaPreview(videoId, maxBytes) {
+  try {
+    return { ...(await downloadAsset(videoId, 'spritesheet', maxBytes)), variant: 'spritesheet' };
+  } catch {
+    return { ...(await downloadAsset(videoId, 'thumbnail', maxBytes)), variant: 'thumbnail' };
+  }
 }
 
 async function deleteVideoQuietly(videoId) {
@@ -124,7 +135,7 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
   const seconds = Number(account.media?.videoSeconds ?? 8);
   const release = await ensurePublicRelease();
   const maxBytes = Number(account.media?.maxHostedVideoBytes ?? 250 * 1024 * 1024);
-  const maxThumbnailBytes = Number(account.media?.qa?.maxInputBytes ?? 15 * 1024 * 1024);
+  const maxPreviewBytes = Number(account.media?.qa?.maxInputBytes ?? 15 * 1024 * 1024);
   const maxRegenerations = Math.max(0, Number(account.media?.qa?.maxRegenerations ?? 1));
   let prompt = originalPrompt;
   let lastQa = null;
@@ -132,18 +143,20 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
   for (let attempt = 0; attempt <= maxRegenerations; attempt += 1) {
     const name = `${safe(accountId)}-${digest(`${MEDIA_QA_VERSION}|${slotId}|${model}|${size}|${seconds}|${prompt}`)}.mp4`;
     const cached = await findAsset(release, name);
-    if (cached) return { url: cached, qa: { pass: true, cached: true, score: null, issues: [] }, altText: '', attempt, prompt };
+    if (cached) return { url: cached, qa: { pass: true, cached: true, score: null, issues: [], previewVariant: 'cached-passed' }, altText: '', attempt, prompt };
 
     const created = await createVideo(accountId, account, prompt);
     const completed = await waitForVideo(created, account);
-    const thumbnail = await downloadAsset(completed.id, 'thumbnail', maxThumbnailBytes);
-    const qa = await reviewVisualBytes(accountId, account, thumbnail.bytes, thumbnail.contentType, {
-      mediaType: 'reel-thumbnail', prompt: originalPrompt, postText: draft?.text || ''
+    const preview = await downloadQaPreview(completed.id, maxPreviewBytes);
+    const qa = await reviewVisualBytes(accountId, account, preview.bytes, preview.contentType, {
+      mediaType: `reel-${preview.variant}`, prompt: originalPrompt, postText: draft?.text || ''
     });
+    qa.previewVariant = preview.variant;
     if (qa.pass) {
       const video = await downloadAsset(completed.id, 'video', maxBytes);
       const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
-      return { url, qa, altText: qa.altText || '', attempt, prompt, videoId: completed.id };
+      await deleteVideoQuietly(completed.id);
+      return { url, qa, altText: qa.altText || '', attempt, prompt };
     }
 
     lastQa = qa;
