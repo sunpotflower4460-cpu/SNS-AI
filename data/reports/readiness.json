@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 7,
+  "accountFilter": null,
+  "ready": true,
+  "state": "waiting_for_accounts",
+  "configErrors": [],
+  "environment": {
+    "openaiApiKeyPresent": false,
+    "xOAuth2StateKeyPresent": false,
+    "socialCredentialsPresent": false,
+    "socialCredentialsJsonValid": null,
+    "mediaServiceTokenPresent": false
+  },
+  "accounts": [
+    {
+      "account": "example-x",
+      "displayName": "Example X account",
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "ready": true,
+      "blockers": [],
+      "warnings": [
+        "Account is disabled or paused; live readiness checks are informational only."
+      ]
+    },
+    {
+      "account": "example-instagram",
+      "displayName": "Example Instagram account",
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "ready": true,
+      "blockers": [],
+      "warnings": [
+        "Account is disabled or paused; live readiness checks are informational only."
+      ]
+    }
+  ]
+}
