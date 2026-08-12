@@ -27,5 +27,9 @@ jobs:
           npm run validate
           npm run check
           npm run smoke
+          npm run secret-scan
+      - name: Parse every workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |f| YAML.safe_load(File.read(f), aliases: true); puts "YAML OK: #{f}" }'
       - name: Key-safe configuration doctor
         run: npm run doctor
