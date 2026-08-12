@@ -16,10 +16,41 @@ function parseArgs(argv) {
   return args;
 }
 
+function usesBuiltInImage(account) {
+  const media = account.media || {};
+  return media.internalImageGeneration !== false
+    && (media.type || 'image') === 'image'
+    && ['auto', 'generate'].includes(media.strategy || 'none')
+    && !/^https:\/\//i.test(media.endpoint || '');
+}
+
 function needsOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
-    || account.research?.trendIntelligence === true;
+    || account.research?.trendIntelligence === true
+    || usesBuiltInImage(account);
+}
+
+async function repositoryHostingCheck(required) {
+  if (!required) return { checked: false, ok: null, private: null, error: null };
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) return { checked: true, ok: false, private: null, error: 'GitHub runtime metadata/token is unavailable for built-in media hosting check.' };
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { checked: true, ok: false, private: null, error: body?.message || `GitHub repository check failed with ${response.status}` };
+    return {
+      checked: true,
+      ok: body.private === false,
+      private: Boolean(body.private),
+      error: body.private ? 'Built-in GitHub Release media hosting needs a public repository. Configure media.endpoint/CDN if this repository becomes private.' : null
+    };
+  } catch (error) {
+    return { checked: true, ok: false, private: null, error: error.message };
+  }
 }
 
 export async function runLivePreflight({ accountFilter } = {}) {
@@ -29,7 +60,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
     return account.enabled === true && account.mode !== 'pause';
   });
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false } };
+  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false }, mediaHosting: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
@@ -37,11 +68,14 @@ export async function runLivePreflight({ accountFilter } = {}) {
   if (selected.some(([, account]) => needsOpenAI(account))) {
     openaiChecked = true;
     try {
-      await openaiRequest('/moderations', { model: 'omni-moderation-latest', input: 'SNS-AI preflight health check' });
+      await openaiRequest('/moderations', { model: 'omni-moderation-latest', input: 'SNS-AI preflight health check' }, { retries: 1 });
     } catch (error) {
       openaiError = error.message;
     }
   }
+
+  const builtInMediaNeeded = selected.some(([, account]) => usesBuiltInImage(account));
+  const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
 
   for (const [id, account] of selected) {
     try {
@@ -50,17 +84,25 @@ export async function runLivePreflight({ accountFilter } = {}) {
       if (resolved.platform === 'x') identity = await verifyXCredential(resolved.credential);
       else if (resolved.platform === 'instagram') identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
       else throw new Error(`Unsupported platform: ${resolved.platform}`);
-      rows.push({ account: id, platform: resolved.platform, ok: true, identity });
+      const mediaReady = !usesBuiltInImage(account) || mediaHosting.ok;
+      rows.push({
+        account: id,
+        platform: resolved.platform,
+        ok: Boolean(mediaReady),
+        identity,
+        builtInImage: usesBuiltInImage(account) ? { configured: true, hostingReady: Boolean(mediaHosting.ok), note: 'Image-model access itself is confirmed on the first real generation; preflight does not spend an image generation.' } : { configured: false }
+      });
     } catch (error) {
       rows.push({ account: id, platform: account.platform, ok: false, error: error.message });
     }
   }
 
-  const ok = !openaiError && rows.every((row) => row.ok);
+  const ok = !openaiError && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError : null, error: openaiError },
+    mediaHosting,
     accounts: rows
   };
 }
