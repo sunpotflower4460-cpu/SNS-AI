@@ -1,0 +1,66 @@
+name: SNS Trend Intelligence
+
+on:
+  schedule:
+    - cron: '37 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Optional account ID
+        required: false
+        type: string
+      force:
+        description: Refresh even when cached trend brief is fresh
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_FORCE: ${{ inputs.force }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refresh trend briefs
+        shell: bash
+        run: |
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            echo "OPENAI_API_KEY is not configured; skipping trend intelligence."
+            exit 0
+          fi
+          args=()
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          if [[ "${INPUT_FORCE:-false}" == "true" ]]; then args+=(--force); fi
+          node src/research/trends.mjs "${args[@]}"
+      - name: Refresh readable report
+        run: node src/reports/generate.mjs
+      - name: Persist intelligence/report
+        if: always()
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: persist SNS intelligence"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
