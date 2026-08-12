@@ -42,12 +42,21 @@ function oauthHeader(method, url, credentials) {
 
 function bearerHeader(credentials) {
   const token = String(credentials.oauth2AccessToken || '').trim();
-  if (!token) throw new Error('X video upload requires credential.oauth2AccessToken (OAuth 2.0 user access token).');
+  if (!token) throw new Error('X media publishing requires credential.oauth2AccessToken from an OAuth 2.0 user authorization with tweet.write, users.read, media.write, and offline.access.');
   return `Bearer ${token}`;
 }
 
 function mediaMetadataPayload(mediaId, text) {
   return { id: String(mediaId), metadata: { alt_text: { text: String(text || '').trim().slice(0, 1000) } } };
+}
+
+function imageUploadPayload(bytes, contentType) {
+  return {
+    media: Buffer.from(bytes).toString('base64'),
+    media_category: 'tweet_image',
+    media_type: contentType,
+    shared: false
+  };
 }
 
 function videoInitializePayload(bytes, contentType) {
@@ -60,7 +69,7 @@ async function setAltText(mediaId, text, credentials) {
   if (!payload.metadata.alt_text.text) return;
   await fetchJson(MEDIA_METADATA_URL, {
     method: 'POST',
-    headers: { Authorization: oauthHeader('POST', MEDIA_METADATA_URL, credentials), 'Content-Type': 'application/json' },
+    headers: { Authorization: bearerHeader(credentials), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 }
@@ -71,12 +80,10 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   if (!contentType.startsWith('image/')) throw new Error(`X image publisher expected image media; got ${contentType}.`);
   if (bytes.byteLength > maxBytes) throw new Error('X image exceeds the 5 MB API upload limit.');
 
-  const form = new FormData();
-  form.set('media_category', 'tweet_image');
-  form.set('media_type', contentType);
-  form.set('media', new Blob([bytes], { type: contentType }), `upload.${contentType.split('/')[1] || 'bin'}`);
   const body = await fetchJson(MEDIA_UPLOAD_URL, {
-    method: 'POST', headers: { Authorization: oauthHeader('POST', MEDIA_UPLOAD_URL, credentials) }, body: form
+    method: 'POST',
+    headers: { Authorization: bearerHeader(credentials), 'Content-Type': 'application/json' },
+    body: JSON.stringify(imageUploadPayload(bytes, contentType))
   });
   const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
   if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
@@ -163,7 +170,8 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
     payload.media = { media_ids: [mediaId] };
   }
 
-  const authorization = mediaType === 'reel' ? bearerHeader(credential) : oauthHeader('POST', CREATE_POST_URL, credential);
+  // Media IDs are created in the OAuth2 user context, so keep Post creation in that same context.
+  const authorization = mediaUrl ? bearerHeader(credential) : oauthHeader('POST', CREATE_POST_URL, credential);
   const body = await fetchJson(CREATE_POST_URL, {
     method: 'POST',
     headers: { Authorization: authorization, 'Content-Type': 'application/json' },
@@ -173,4 +181,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
 }
 
-export const __test = { pct, mediaMetadataPayload, videoInitializePayload };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload };
