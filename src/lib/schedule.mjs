@@ -36,9 +36,31 @@ export function validateTimeString(value) {
   return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
 }
 
-export function findDueSlots(accountId, account, now = new Date()) {
+function learnedHourScore(time, strategy) {
+  const hour = `${time.slice(0, 2)}:00`;
+  const stat = strategy?.featureStats?.postingHour?.[hour];
+  if (!stat) return 50;
+  return Number(stat.averageScore || 50) * (0.5 + 0.5 * Number(stat.confidence ?? 0));
+}
+
+export function effectiveScheduleTimes(account, strategy = null) {
+  const base = (account.schedule?.times || []).filter(validateTimeString);
+  if (!base.length) return [];
+  if (account.learning?.adaptiveSchedule === false) return base;
+  if (Number(strategy?.confidence || 0) < Number(account.learning?.adaptiveScheduleMinConfidence ?? 0.45)) return base;
+  const candidates = (account.schedule?.adaptiveCandidateTimes || []).filter(validateTimeString);
+  if (candidates.length <= base.length) return base;
+  const count = Math.max(Number(account.learning?.adaptiveScheduleKeepAtLeast ?? 1), base.length);
+  return [...candidates]
+    .sort((a, b) => learnedHourScore(b, strategy) - learnedHourScore(a, strategy))
+    .slice(0, Math.min(count, candidates.length))
+    .sort();
+}
+
+export function findDueSlots(accountId, account, now = new Date(), strategy = null) {
   const schedule = account.schedule;
-  if (!schedule?.times?.length) return [];
+  const times = effectiveScheduleTimes(account, strategy);
+  if (!schedule || !times.length) return [];
 
   const timeZone = schedule.timezone || 'Asia/Tokyo';
   const windowMinutes = Number(schedule.windowMinutes ?? 30);
@@ -47,8 +69,7 @@ export function findDueSlots(accountId, account, now = new Date()) {
   if (!allowedDays.includes(local.weekday)) return [];
 
   const currentMinutes = local.hour * 60 + local.minute;
-  return schedule.times
-    .filter(validateTimeString)
+  return times
     .filter((time) => {
       const [hour, minute] = time.split(':').map(Number);
       const target = hour * 60 + minute;

@@ -20,25 +20,60 @@ function parseCredentials(raw) {
 }
 
 function usesOpenAI(account) {
+  const media = account.media || {};
+  const builtInImage = media.internalImageGeneration !== false && (media.type || 'image') === 'image' && ['auto', 'generate'].includes(media.strategy || 'none');
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
-    || account.research?.trendIntelligence === true;
+    || account.research?.trendIntelligence === true
+    || builtInImage;
 }
 
-function mediaBlockers(account) {
-  if (account.platform !== 'instagram') return [];
+function credentialExpiry(entry) {
+  if (!entry?.expiresAt) return { blockers: [], warnings: [] };
+  const expires = Date.parse(entry.expiresAt);
+  if (!Number.isFinite(expires)) return { blockers: [], warnings: ['Credential expiresAt is present but not a valid date.'] };
+  const days = (expires - Date.now()) / 86_400_000;
+  if (days <= 0) return { blockers: ['Credential is expired according to expiresAt.'], warnings: [] };
+  if (days <= 14) return { blockers: [], warnings: [`Credential expires in about ${Math.ceil(days)} day(s). Rotate it soon.`] };
+  return { blockers: [], warnings: [] };
+}
+
+function budgetWarnings(account) {
+  if (account.budgets?.enabled === false) return ['Usage budgets are disabled for this account.'];
+  const warnings = [];
+  for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay']) {
+    const value = Number(account.budgets?.[key]);
+    if (!Number.isFinite(value) || value <= 0) warnings.push(`${key} has no effective positive cap.`);
+  }
+  return warnings;
+}
+
+function mediaReadiness(account) {
+  if (account.platform !== 'instagram') return { blockers: [], warnings: [] };
   const media = account.media || {};
   const strategy = media.strategy || 'none';
-  if (strategy === 'none') return ['Instagram requires a media strategy.'];
-  if (strategy === 'pool' && !(media.urls || []).filter(Boolean).length) return ['Instagram media pool is empty.'];
-  if (['fixed', 'external'].includes(strategy) && !/^https:\/\//i.test(media.url || '')) return [`media.${strategy} requires a public HTTPS URL.`];
-  if (strategy === 'endpoint' && !/^https:\/\//i.test(media.endpoint || '')) return ['media.endpoint requires an HTTPS endpoint.'];
+  const blockers = [];
+  const warnings = [];
+  const isImage = (media.type || 'image') === 'image';
+  const hasBuiltIn = media.internalImageGeneration !== false && isImage;
+
+  if (strategy === 'none') blockers.push('Instagram requires a media strategy.');
+  if (strategy === 'pool' && !(media.urls || []).filter(Boolean).length) blockers.push('Instagram media pool is empty.');
+  if (['fixed', 'external'].includes(strategy) && !/^https:\/\//i.test(media.url || '')) blockers.push(`media.${strategy} requires a public HTTPS URL.`);
+  if (strategy === 'endpoint' && !/^https:\/\//i.test(media.endpoint || '')) blockers.push('media.endpoint requires an HTTPS endpoint.');
   if (strategy === 'auto') {
     const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
     const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
-    if (!hasLibrary && !hasEndpoint) return ['media.strategy=auto needs media.urls and/or media.endpoint before live Instagram publishing.'];
+    if (!hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push('media.strategy=auto needs media.urls, media.endpoint, or built-in image generation.');
+    if (!hasLibrary && !hasEndpoint && hasBuiltIn) warnings.push('Instagram will rely on built-in OpenAI image generation; SNS Live Preflight verifies that the repository is public for GitHub Release hosting.');
   }
-  return [];
+  if (strategy === 'generate' && !/^https:\/\//i.test(media.endpoint || '') && !hasBuiltIn) {
+    blockers.push('media.strategy=generate needs media.endpoint or built-in image generation.');
+  }
+  if ((media.type || 'image') === 'reel' && !/^https:\/\//i.test(media.endpoint || '') && !(media.urls || []).filter(Boolean).length && !/^https:\/\//i.test(media.url || '')) {
+    blockers.push('Reel automation requires an external video/media source; built-in image generation cannot create a Reel.');
+  }
+  return { blockers, warnings };
 }
 
 export async function buildReadinessReport({ accountFilter } = {}) {
@@ -54,7 +89,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
   for (const [id, account] of Object.entries(accounts)) {
     if (accountFilter && id !== accountFilter) continue;
     const blockers = [];
-    const warnings = [];
+    const warnings = [...budgetWarnings(account)];
     const liveRelevant = account.enabled === true && account.mode !== 'pause';
 
     if (liveRelevant && usesOpenAI(account) && !openaiPresent) blockers.push('OPENAI_API_KEY is missing.');
@@ -69,9 +104,14 @@ export async function buildReadinessReport({ accountFilter } = {}) {
           for (const key of credentialRequirements(account.platform)) {
             if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
           }
+          const expiry = credentialExpiry(entry);
+          blockers.push(...expiry.blockers);
+          warnings.push(...expiry.warnings);
         }
       }
-      blockers.push(...mediaBlockers(account));
+      const media = mediaReadiness(account);
+      blockers.push(...media.blockers);
+      warnings.push(...media.warnings);
     } else if (!account.enabled || account.mode === 'pause') {
       warnings.push('Account is disabled or paused; live readiness checks are informational only.');
     }
@@ -90,7 +130,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 1,
+    schemaVersion: 3,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
@@ -111,16 +151,15 @@ function markdown(report) {
     '',
     `Overall: **${report.state}**`,
     '',
-    '| Account | Platform | Mode | Ready | Blockers |',
+    '| Account | Platform | Mode | Ready | Blockers / warnings |',
     '|---|---|---|---:|---|'
   ];
   for (const row of report.accounts) {
-    lines.push(`| ${row.account} | ${row.platform} | ${row.mode} | ${row.ready ? 'yes' : 'no'} | ${row.blockers.join('<br>') || '-'} |`);
+    const notes = [...row.blockers, ...row.warnings.map((x) => `warning: ${x}`)];
+    lines.push(`| ${row.account} | ${row.platform} | ${row.mode} | ${row.ready ? 'yes' : 'no'} | ${notes.join('<br>') || '-'} |`);
   }
-  if (report.configErrors.length) {
-    lines.push('', '## Config errors', ...report.configErrors.map((value) => `- ${value}`));
-  }
-  lines.push('', '> Secret values are never written to this report; only presence/shape is checked.', '');
+  if (report.configErrors.length) lines.push('', '## Config errors', ...report.configErrors.map((value) => `- ${value}`));
+  lines.push('', '> Secret values are never written to this report; only presence/shape/optional expiry metadata is checked.', '');
   return lines.join('\n');
 }
 

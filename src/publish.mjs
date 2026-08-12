@@ -1,7 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { resolveAccount } from './lib/config.mjs';
 import { appendHistory } from './lib/history.mjs';
+import { appendAudit } from './lib/audit.mjs';
+import { validateDraftText } from './lib/safety.mjs';
 import { markSlot } from './lib/state.mjs';
+import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
 import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
 
@@ -10,17 +13,38 @@ async function loadPayload(args) { if (args.file) return JSON.parse(await readFi
 function providerPostId(result) { return result?.data?.id || result?.postId || result?.id || result?.mediaId || result?.media_id || result?.creationId || null; }
 
 export async function publish(payload) {
-  const account = await resolveAccount(payload.account); const common = { text: payload.text || '', mediaUrl: payload.mediaUrl || undefined, mediaType: payload.mediaType || 'image', credential: account.credential, dryRun: Boolean(payload.dryRun) };
-  let result; if (account.platform === 'x') result = await publishX(common); else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v23.0' }); else throw new Error(`Unsupported platform: ${account.platform}`);
-  if (!payload.dryRun) {
-    await appendHistory({
-      account: payload.account, platform: account.platform, status: 'published', source: payload.source || 'manual', slotId: payload.slotId || null,
-      text: payload.text || '', mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, providerPostId: providerPostId(result), ai: payload.ai || null,
-      features: payload.features || null, rationale: payload.rationale || null, predictedScore: payload.predictedScore ?? null, selectionMode: payload.selectionMode || null
-    });
-    if (payload.slotId) await markSlot(payload.slotId, 'published', { account: payload.account });
+  const account = await resolveAccount(payload.account);
+  const text = String(payload.text || '').trim();
+  if (text) validateDraftText(account, text);
+  const common = { text, mediaUrl: payload.mediaUrl || undefined, mediaType: payload.mediaType || 'image', credential: account.credential, dryRun: Boolean(payload.dryRun) };
+  if (!payload.dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
+  await appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length });
+
+  try {
+    let result;
+    if (account.platform === 'x') result = await publishX(common);
+    else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v23.0' });
+    else throw new Error(`Unsupported platform: ${account.platform}`);
+
+    if (!payload.dryRun) {
+      const postId = providerPostId(result);
+      await appendHistory({
+        account: payload.account, platform: account.platform, status: 'published', source: payload.source || 'manual', slotId: payload.slotId || null,
+        text, mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, mediaResolution: payload.mediaResolution || null,
+        providerPostId: postId, ai: payload.ai || null, features: payload.features || null, rationale: payload.rationale || null,
+        predictedScore: payload.predictedScore ?? null, selectionMode: payload.selectionMode || null,
+        experiment: payload.experiment || null, sources: (payload.sources || []).slice(0, 30)
+      });
+      if (payload.slotId) await markSlot(payload.slotId, 'published', { account: payload.account });
+      await recordCircuitSuccess(payload.account, 'publish', account.resilience);
+      await appendAudit({ account: payload.account, stage: 'publish-success', slotId: payload.slotId || null, platform: account.platform, providerPostId: postId, mediaResolution: payload.mediaResolution || null, experiment: payload.experiment || null, sourceCount: (payload.sources || []).length });
+    }
+    return result;
+  } catch (error) {
+    if (!payload.dryRun && error.code !== 'CIRCUIT_OPEN') await recordCircuitFailure(payload.account, 'publish', error, account.resilience);
+    await appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, error: String(error.message || error).slice(0, 500) });
+    throw error;
   }
-  return result;
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
   try { const payload = await loadPayload(parseArgs(process.argv.slice(2))); const result = await publish(payload); console.log(JSON.stringify({ ok: true, account: payload.account, result }, null, 2)); }

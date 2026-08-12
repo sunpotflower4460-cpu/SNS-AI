@@ -43,6 +43,19 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to change SNS-AI memory."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -113,4 +126,4 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Feedback could not be recorded. Check that the body is valid JSON and the account ID exists."
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Feedback could not be recorded. Check authorization, JSON shape, and account ID."

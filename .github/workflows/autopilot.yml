@@ -35,7 +35,9 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_FORCE: ${{ inputs.force }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
@@ -55,6 +57,7 @@ jobs:
           npm run validate
           npm run check
           npm run smoke
+          npm run secret-scan
 
       - name: Run autopilot
         shell: bash

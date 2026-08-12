@@ -40,13 +40,12 @@ function oauthHeader(method, url, credentials) {
 }
 
 async function uploadImage(mediaUrl, credentials) {
-  const { bytes, contentType } = await downloadMedia(mediaUrl);
+  const maxBytes = 5 * 1024 * 1024;
+  const { bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes });
   if (!contentType.startsWith('image/')) {
     throw new Error(`X publisher currently accepts image media only; got ${contentType}.`);
   }
-  if (bytes.byteLength > 5 * 1024 * 1024) {
-    throw new Error('X image exceeds the 5 MB API upload limit.');
-  }
+  if (bytes.byteLength > maxBytes) throw new Error('X image exceeds the 5 MB API upload limit.');
 
   const form = new FormData();
   form.set('media_category', 'tweet_image');

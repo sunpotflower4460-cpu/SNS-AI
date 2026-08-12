@@ -7,7 +7,8 @@
       "historyWindow": 30,
       "duplicateThreshold": 0.72,
       "maxAttempts": 3,
-      "candidateCount": 5
+      "candidateCount": 5,
+      "maxOutputTokens": 3000
     },
     "safety": {
       "moderation": true,
@@ -23,20 +24,57 @@
       "enabled": true,
       "exploreRate": 0.2,
       "matureCheckpointMinutes": 1440,
+      "strategyWindowDays": 60,
       "minSamplesPerPattern": 2,
       "fullConfidencePosts": 20,
-      "humanFeedbackWindow": 40
+      "humanFeedbackWindow": 40,
+      "adaptiveSchedule": true,
+      "adaptiveScheduleMinConfidence": 0.45,
+      "adaptiveScheduleKeepAtLeast": 1
     },
     "research": {
       "webSearch": false,
       "trendIntelligence": false,
       "trendRefreshHours": 6
     },
+    "resilience": {
+      "enabled": true,
+      "failureThreshold": 3,
+      "cooldownMinutes": 60
+    },
+    "budgets": {
+      "enabled": true,
+      "openaiCallsPerDay": 300,
+      "webSearchCallsPerDay": 60,
+      "mediaCallsPerDay": 60,
+      "imageGenerationsPerDay": 10
+    },
+    "experiments": {
+      "enabled": true,
+      "dimensions": ["hook", "format", "cta", "mediaDecision"],
+      "minSamplesPerVariant": 3,
+      "maxDays": 14,
+      "minimumStrategySamples": 6
+    },
+    "maintenance": {
+      "historyRetentionDays": 365,
+      "metricsRetentionDays": 120,
+      "usageRetentionDays": 90,
+      "auditRetentionDays": 180,
+      "quarantineRetentionDays": 30,
+      "generatedMediaRetentionDays": 90
+    },
     "objectives": {
       "weights": {}
     },
     "media": {
-      "strategy": "none"
+      "strategy": "none",
+      "internalImageGeneration": true,
+      "imageModel": "gpt-image-2",
+      "imageSize": "1024x1024",
+      "imageQuality": "medium",
+      "maxDownloadBytes": 26214400,
+      "maxHostedImageBytes": 15728640
     }
   },
   "accounts": {
@@ -95,7 +133,7 @@
         "type": "image",
         "urls": [],
         "endpoint": "",
-        "defaultInstagramDecision": "library"
+        "defaultInstagramDecision": "generate"
       }
     }
   }
