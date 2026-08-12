@@ -7,9 +7,13 @@ import { validateConfig } from '../validate-config.mjs';
 const REPORT_JSON = fileURLToPath(new URL('../../data/reports/readiness.json', import.meta.url));
 const REPORT_MD = fileURLToPath(new URL('../../data/reports/readiness.md', import.meta.url));
 
-function credentialRequirements(platform) {
-  if (platform === 'x') return ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-  if (platform === 'instagram') return ['accessToken', 'igUserId'];
+function credentialRequirements(account) {
+  if (account.platform === 'x') {
+    const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
+    if ((account.media?.type || 'image') === 'reel' && account.media?.strategy !== 'none') required.push('oauth2AccessToken');
+    return required;
+  }
+  if (account.platform === 'instagram') return ['accessToken', 'igUserId'];
   return [];
 }
 
@@ -56,12 +60,18 @@ function budgetWarnings(account) {
 }
 
 function mediaReadiness(account) {
-  if (account.platform !== 'instagram') return { blockers: [], warnings: [] };
   const media = account.media || {};
   const strategy = media.strategy || 'none';
   const mediaType = media.type || 'image';
   const blockers = [];
   const warnings = [];
+  if (account.platform === 'x') {
+    if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
+    if (mediaType === 'reel' && strategy !== 'none') warnings.push('X Reel/video upload uses OAuth2 user media-upload endpoints; credential.oauth2AccessToken is required in addition to the existing OAuth1 posting credentials.');
+    if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
+    return { blockers, warnings };
+  }
+  if (account.platform !== 'instagram') return { blockers, warnings };
   const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
   const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
   const hasBuiltIn = mediaType === 'reel'
@@ -106,7 +116,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
         const entry = credentials.parsed?.[credentialKey];
         if (!entry) blockers.push(`Credential entry "${credentialKey}" is missing.`);
         else {
-          for (const key of credentialRequirements(account.platform)) if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
+          for (const key of credentialRequirements(account)) if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
           const expiry = credentialExpiry(entry);
           blockers.push(...expiry.blockers);
           warnings.push(...expiry.warnings);
@@ -124,7 +134,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
