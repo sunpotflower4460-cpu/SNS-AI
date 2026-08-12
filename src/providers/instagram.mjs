@@ -7,8 +7,27 @@ function authHeaders(accessToken) {
   return { Authorization: `Bearer ${accessToken}` };
 }
 
-async function waitForContainer({ base, containerId, accessToken }) {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+function mediaContainerForm({ text = '', mediaUrl, mediaType = 'image' }) {
+  const form = new FormData();
+  if (text) form.set('caption', text);
+  if (mediaType === 'reel') {
+    form.set('media_type', 'REELS');
+    form.set('video_url', mediaUrl);
+  } else {
+    form.set('image_url', mediaUrl);
+  }
+  return form;
+}
+
+function publishContainerForm(containerId) {
+  const form = new FormData();
+  form.set('creation_id', String(containerId));
+  return form;
+}
+
+async function waitForContainer({ base, containerId, accessToken, timeoutMinutes = 5, pollSeconds = 3 }) {
+  const deadline = Date.now() + Math.max(1, Number(timeoutMinutes)) * 60_000;
+  while (Date.now() < deadline) {
     const status = await fetchJson(`${base}/${containerId}?fields=status_code,status`, {
       headers: authHeaders(accessToken)
     });
@@ -16,9 +35,9 @@ async function waitForContainer({ base, containerId, accessToken }) {
     if (['ERROR', 'EXPIRED'].includes(status.status_code)) {
       throw new Error(`Instagram container failed: ${status.status || status.status_code}`);
     }
-    await sleep(Math.min(1000 * (attempt + 1), 5000));
+    await sleep(Math.max(1, Number(pollSeconds)) * 1000);
   }
-  throw new Error('Instagram container did not finish processing in time.');
+  throw new Error(`Instagram container did not finish processing within ${Math.max(1, Number(timeoutMinutes))} minute(s).`);
 }
 
 export async function verifyInstagramCredential({ credential, apiVersion = 'v25.0' }) {
@@ -44,37 +63,27 @@ export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image
 
   const base = `https://graph.instagram.com/${apiVersion}`;
   const createUrl = `${base}/${credential.igUserId}/media`;
-  const params = new URLSearchParams();
-  if (text) params.set('caption', text);
-  if (mediaType === 'reel') {
-    params.set('media_type', 'REELS');
-    params.set('video_url', mediaUrl);
-  } else {
-    params.set('image_url', mediaUrl);
-  }
-
   const created = await fetchJson(createUrl, {
     method: 'POST',
-    headers: {
-      ...authHeaders(credential.accessToken),
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: params
+    headers: authHeaders(credential.accessToken),
+    body: mediaContainerForm({ text, mediaUrl, mediaType })
   });
   const containerId = created?.id;
   if (!containerId) throw new Error(`Instagram returned no container id: ${JSON.stringify(created)}`);
 
-  await waitForContainer({ base, containerId, accessToken: credential.accessToken });
+  await waitForContainer({
+    base,
+    containerId,
+    accessToken: credential.accessToken,
+    timeoutMinutes: credential.containerTimeoutMinutes ?? 5,
+    pollSeconds: credential.containerPollSeconds ?? 3
+  });
 
   const publishUrl = `${base}/${credential.igUserId}/media_publish`;
-  const publishParams = new URLSearchParams({ creation_id: String(containerId) });
   const published = await fetchJson(publishUrl, {
     method: 'POST',
-    headers: {
-      ...authHeaders(credential.accessToken),
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: publishParams
+    headers: authHeaders(credential.accessToken),
+    body: publishContainerForm(containerId)
   });
 
   return {
@@ -85,3 +94,5 @@ export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image
     raw: published
   };
 }
+
+export const __test = { mediaContainerForm, publishContainerForm };
