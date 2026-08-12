@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-12T18:06:46.686Z",
+  "generatedAt": "2026-08-12T18:38:06.623Z",
   "policies": {
     "x": null,
     "instagram": null
@@ -12,7 +12,13 @@
       "postCount": 0,
       "lastPost": null,
       "bestRecent": null,
-      "strategy": null,
+      "strategy": {
+        "generatedAt": "2026-08-12T18:38:06.567Z",
+        "sampleSize": 0,
+        "confidence": 0,
+        "preferred": [],
+        "avoid": []
+      },
       "trends": null,
       "experiment": null,
       "completedExperiments": [],
@@ -59,7 +65,13 @@
       "postCount": 0,
       "lastPost": null,
       "bestRecent": null,
-      "strategy": null,
+      "strategy": {
+        "generatedAt": "2026-08-12T18:38:06.569Z",
+        "sampleSize": 0,
+        "confidence": 0,
+        "preferred": [],
+        "avoid": []
+      },
       "trends": null,
       "experiment": null,
       "completedExperiments": [],
