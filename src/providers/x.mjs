@@ -3,6 +3,7 @@ import { fetchJson, downloadMedia } from '../lib/http.mjs';
 
 const CREATE_POST_URL = 'https://api.x.com/2/tweets';
 const MEDIA_UPLOAD_URL = 'https://api.x.com/2/media/upload';
+const VERIFY_USER_URL = 'https://api.x.com/2/users/me?user.fields=id,name,username';
 
 const pct = (value) => encodeURIComponent(String(value))
   .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -41,7 +42,7 @@ function oauthHeader(method, url, credentials) {
 async function uploadImage(mediaUrl, credentials) {
   const { bytes, contentType } = await downloadMedia(mediaUrl);
   if (!contentType.startsWith('image/')) {
-    throw new Error(`X v0.1 publisher currently accepts image media only; got ${contentType}.`);
+    throw new Error(`X publisher currently accepts image media only; got ${contentType}.`);
   }
   if (bytes.byteLength > 5 * 1024 * 1024) {
     throw new Error('X image exceeds the 5 MB API upload limit.');
@@ -61,6 +62,15 @@ async function uploadImage(mediaUrl, credentials) {
   const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
   if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
   return String(mediaId);
+}
+
+export async function verifyXCredential(credential) {
+  const body = await fetchJson(VERIFY_USER_URL, {
+    method: 'GET',
+    headers: { Authorization: oauthHeader('GET', VERIFY_USER_URL, credential) }
+  });
+  if (!body?.data?.id) throw new Error('X credential check returned no authenticated user.');
+  return { id: body.data.id, username: body.data.username || null, name: body.data.name || null };
 }
 
 export async function publishX({ text = '', mediaUrl, credential, dryRun = false }) {
