@@ -10,12 +10,17 @@ import { ensureExperiment, evaluateExperiment } from '../experiments/engine.mjs'
 function mean(values) { return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0; }
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
-export function buildStrategy({ accountId, account, history, snapshots }) {
-  const latest = latestSnapshots(snapshots).filter((s) => s.account === accountId && Number(s.checkpointMinutes) >= Number(account.learning?.matureCheckpointMinutes ?? 1440));
-  const byPost = new Map(history.filter((h) => h.account === accountId && h.providerPostId).map((h) => [String(h.providerPostId), h]));
+export function buildStrategy({ accountId, account, history, snapshots, now = new Date() }) {
+  const windowDays = Math.max(1, Number(account.learning?.strategyWindowDays ?? 60));
+  const cutoff = now.getTime() - windowDays * 86_400_000;
+  const recentHistory = history.filter((h) => h.account === accountId && h.providerPostId && Date.parse(h.at || '') >= cutoff);
+  const allowedPostIds = new Set(recentHistory.map((h) => String(h.providerPostId)));
+  const windowSnapshots = snapshots.filter((s) => s.account === accountId && allowedPostIds.has(String(s.providerPostId)));
+  const latest = latestSnapshots(windowSnapshots).filter((s) => Number(s.checkpointMinutes) >= Number(account.learning?.matureCheckpointMinutes ?? 1440));
+  const byPost = new Map(recentHistory.map((h) => [String(h.providerPostId), h]));
   const samples = latest.map((snapshot) => {
     const post = byPost.get(String(snapshot.providerPostId)); if (!post) return null;
-    const scored = scoreSnapshot(snapshot, snapshots, account.objectives?.weights || {});
+    const scored = scoreSnapshot(snapshot, windowSnapshots, account.objectives?.weights || {});
     return { snapshot, post, score: scored.score, confidence: scored.confidence, features: historyFeatures(post, account.timezone) };
   }).filter(Boolean);
   const overall = mean(samples.map((s) => s.score)) || 50;
@@ -41,11 +46,11 @@ export function buildStrategy({ accountId, account, history, snapshots }) {
   const preferred = ranked.filter((x) => x.lift > 0).slice(0, 8);
   const avoid = ranked.filter((x) => x.lift < 0).sort((a, b) => a.lift - b.lift).slice(0, 6);
   return {
-    account: accountId, generatedAt: new Date().toISOString(), sampleSize: samples.length,
+    account: accountId, generatedAt: now.toISOString(), strategyWindowDays: windowDays, sampleSize: samples.length,
     overallScore: Math.round(overall * 10) / 10,
     confidence: Math.round(clamp(samples.length / Number(account.learning?.fullConfidencePosts ?? 20), 0, 1) * 100) / 100,
     exploreRate: Number(account.learning?.exploreRate ?? 0.2), preferred, avoid, featureStats,
-    guardrail: 'Treat these as evidence, not identity. Never override profile, safety rules, or explicit human instructions.'
+    guardrail: 'Treat these as recent evidence, not identity. Never override profile, safety rules, or explicit human instructions.'
   };
 }
 
@@ -57,11 +62,11 @@ export async function learnAll({ accountFilter } = {}) {
     const experimentResult = account.experiments?.enabled === false ? { status: 'disabled' } : await evaluateExperiment(accountId, account, history, snapshots);
     const activeExperiment = account.experiments?.enabled === false ? null : await ensureExperiment(accountId, account, strategy);
     await appendAudit({
-      account: accountId, stage: 'strategy-updated', sampleSize: strategy.sampleSize, confidence: strategy.confidence,
+      account: accountId, stage: 'strategy-updated', sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence,
       preferred: strategy.preferred.slice(0, 5), experimentEvaluation: experimentResult.status, activeExperiment: activeExperiment?.id || null
     });
     report.push({
-      account: accountId, sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3),
+      account: accountId, sampleSize: strategy.sampleSize, strategyWindowDays: strategy.strategyWindowDays, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3),
       experiment: { evaluation: experimentResult.status, active: activeExperiment || null }
     });
   }
