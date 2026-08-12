@@ -59,7 +59,7 @@ export async function evaluateExperiment(accountId, account, history, snapshots)
   const groups = Object.fromEntries(experiment.variants.map((variant) => [variant, []]));
   for (const snapshot of latest) {
     const post = byPost.get(String(snapshot.providerPostId));
-    if (!post || post.experiment?.id !== experiment.id || !groups[post.experiment.variant]) continue;
+    if (!post || post.experiment?.id !== experiment.id || post.experiment?.applied === false || !groups[post.experiment.variant]) continue;
     groups[post.experiment.variant].push(scoreSnapshot(snapshot, snapshots, account.objectives?.weights || {}).score);
   }
   const stats = Object.fromEntries(Object.entries(groups).map(([variant, scores]) => [variant, {
