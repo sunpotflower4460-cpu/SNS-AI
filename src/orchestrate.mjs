@@ -54,15 +54,17 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId });
         const mediaUrl = await resolveMedia(accountId, account, slot.slotId, draft); ensureMediaForPlatform(account, mediaUrl);
         const experiment = experimentAssignment ? { ...experimentAssignment, applied: Boolean(draft.experimentApplied) } : null;
+        const sources = (draft.sources || []).slice(0, 30);
         const payload = {
           account: accountId, text: draft.text, mediaUrl: mediaUrl || undefined, mediaType: account.media?.type || 'image', dryRun,
           source: account.mode === 'approval' ? 'approval' : 'auto', slotId: slot.slotId,
-          features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment,
+          features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment, sources,
           ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length }
         };
         await appendAudit({
           account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore,
-          selectionMode: draft.selectionMode, features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(mediaUrl), experiment
+          selectionMode: draft.selectionMode, features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(mediaUrl), experiment,
+          sourceCount: sources.length
         });
 
         if (dryRun) {
