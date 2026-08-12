@@ -1,0 +1,68 @@
+name: SNS Maintenance
+
+on:
+  schedule:
+    - cron: '23 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      APPROVAL_MAX_AGE_DAYS: ${{ vars.APPROVAL_MAX_AGE_DAYS }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Verify repository before maintenance
+        run: |
+          npm test
+          npm run validate
+          npm run check
+          npm run smoke
+          npm run secret-scan
+
+      - name: Compact and verify persistent data
+        run: npm run maintenance
+
+      - name: Expire stale approval issues
+        run: npm run expire-approvals
+
+      - name: Refresh health and readable reports
+        run: |
+          npm run doctor -- --write
+          npm run report
+
+      - name: Persist maintenance state
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then
+            echo "No maintenance data changes."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: compact SNS-AI operational data"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
