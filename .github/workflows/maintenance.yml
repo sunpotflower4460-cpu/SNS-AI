@@ -49,6 +49,7 @@ jobs:
         run: |
           npm run doctor -- --write
           npm run report
+          npm run weekly-report
 
       - name: Persist maintenance state
         shell: bash
