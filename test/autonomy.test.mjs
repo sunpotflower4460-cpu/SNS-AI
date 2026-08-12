@@ -89,6 +89,15 @@ test('enabled Instagram Reel account can rely on built-in OpenAI video generatio
   assert.deepEqual(validateConfig(config), []);
 });
 
+test('enabled X Reel account can rely on built-in OpenAI video generation', () => {
+  const config = baseConfig();
+  config.accounts.xreel = {
+    platform: 'x', enabled: true, mode: 'auto', schedule: { times: ['18:00'] },
+    media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true, urls: [], endpoint: '' }
+  };
+  assert.deepEqual(validateConfig(config), []);
+});
+
 test('dry-run media generation never calls external endpoint, image API, or video API', async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('network should not be called during media dry-run'); };
