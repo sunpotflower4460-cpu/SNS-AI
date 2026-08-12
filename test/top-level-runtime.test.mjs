@@ -66,7 +66,7 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
   for (const path of tracked) savedFiles.set(path, await snapshot(path));
 
   try {
-    const config = JSON.parse((await readFile(CONFIG_FILE, 'utf8')));
+    const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
     config.accounts['example-x'] = {
       ...config.accounts['example-x'],
       enabled: true,
@@ -88,6 +88,7 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
         minMinutesBetweenPosts: 0,
         anomalyBrake: { enabled: false }
       },
+      resilience: { enabled: true, failureThreshold: 3, cooldownMinutes: 60 },
       media: { strategy: 'none' }
     };
     config.accounts['example-instagram'].enabled = false;
@@ -144,7 +145,17 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
       if (target === 'https://api.x.com/2/users/me?user.fields=id,name,username') {
         return jsonResponse({ data: { id: 'user-1', username: 'example', name: 'Example' } });
       }
+      if (target === 'https://api.x.com/2/tweets' && String(options.method || 'GET').toUpperCase() === 'POST') {
+        const body = JSON.parse(String(options.body || '{}'));
+        if (body.text === 'Forced publish failure.') {
+          return jsonResponse({ error: { message: 'forced publish failure' } }, 500);
+        }
+        return jsonResponse({ data: { id: 'post-123', text: body.text || '' } });
+      }
       if (target.startsWith('https://api.x.com/2/tweets/post-123?')) {
+        if (target.includes('non_public_metrics')) {
+          return jsonResponse({ title: 'Forbidden private metrics' }, 403);
+        }
         return jsonResponse({
           data: {
             id: 'post-123',
@@ -155,11 +166,6 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
               reply_count: 4,
               quote_count: 2,
               bookmark_count: 6
-            },
-            non_public_metrics: {
-              url_link_clicks: 11,
-              user_profile_clicks: 13,
-              engagements: 89
             }
           },
           includes: { media: [] }
@@ -169,11 +175,21 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
     };
 
     const now = new Date('2026-08-13T00:00:00.000Z');
-    const autopilot = await runAutopilot({ accountFilter: 'example-x', force: true, dryRun: true, now });
-    assert.equal(autopilot.length, 1);
-    assert.equal(autopilot[0].status, 'dry-run');
-    assert.equal(autopilot[0].payload.text, 'Top-level integration test post.');
-    assert.equal(autopilot[0].payload.mediaResolution.decision, 'none');
+    const dryAutopilot = await runAutopilot({ accountFilter: 'example-x', force: true, dryRun: true, now });
+    assert.equal(dryAutopilot.length, 1);
+    assert.equal(dryAutopilot[0].status, 'dry-run');
+    assert.equal(dryAutopilot[0].payload.text, 'Top-level integration test post.');
+    assert.equal(dryAutopilot[0].payload.mediaResolution.decision, 'none');
+
+    const liveAutopilot = await runAutopilot({
+      accountFilter: 'example-x',
+      force: true,
+      dryRun: false,
+      now: new Date(now.getTime() + 60_000)
+    });
+    assert.equal(liveAutopilot.length, 1);
+    assert.equal(liveAutopilot[0].status, 'published');
+    assert.equal(liveAutopilot[0].result.postId, 'post-123');
 
     const dryPublished = await publish({
       account: 'example-x',
@@ -185,26 +201,25 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
     assert.equal(dryPublished.dryRun, true);
     assert.equal(dryPublished.platform, 'x');
 
+    await assert.rejects(
+      publish({
+        account: 'example-x',
+        text: 'Forced publish failure.',
+        dryRun: false,
+        source: 'integration-test',
+        slotId: 'example-x:test:failure'
+      }),
+      /forced publish failure/
+    );
+
     const preflight = await runLivePreflight({ accountFilter: 'example-x' });
     assert.equal(preflight.ok, true);
     assert.equal(preflight.state, 'ready');
     assert.equal(preflight.openai.ok, true);
     assert.equal(preflight.accounts[0].identity.id, 'user-1');
 
-    const historyFile = fileURLToPath(new URL('../data/history.jsonl', import.meta.url));
-    const publishedAt = new Date(now.getTime() - 2 * 60_000).toISOString();
-    await mkdir(dirname(historyFile), { recursive: true });
-    await writeFile(historyFile, `${JSON.stringify({
-      at: publishedAt,
-      account: 'example-x',
-      platform: 'x',
-      status: 'published',
-      providerPostId: 'post-123',
-      text: 'Synthetic published post.',
-      mediaType: 'image'
-    })}\n`, 'utf8');
-
-    const metricsReport = await collectMetrics({ accountFilter: 'example-x', now });
+    const metricsNow = new Date(Date.now() + 2 * 60_000);
+    const metricsReport = await collectMetrics({ accountFilter: 'example-x', now: metricsNow });
     assert.equal(metricsReport.some((row) => row.status === 'failed'), false);
     const collected = metricsReport.find((row) => row.status === 'collected');
     assert.equal(collected?.providerPostId, 'post-123');
@@ -214,11 +229,21 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
     const metric = metricRows.find((row) => row.providerPostId === 'post-123');
     assert.equal(metric?.metrics?.impressions, 1200);
     assert.equal(metric?.metrics?.likes, 45);
-    assert.equal(metric?.metrics?.privateMetricsAvailable, true);
+    assert.equal(metric?.metrics?.privateMetricsAvailable, false);
+    assert.match(metric?.warning || '', /Private X metrics unavailable/);
+
+    config.accounts['example-x'].enabled = false;
+    config.accounts['example-x'].mode = 'pause';
+    await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    const nothingEnabled = await runLivePreflight();
+    assert.equal(nothingEnabled.ok, true);
+    assert.equal(nothingEnabled.state, 'nothing_enabled');
+    await assert.rejects(runLivePreflight({ accountFilter: 'missing-account' }), /Unknown account/);
 
     assert.equal(calls.some((row) => row.target === 'https://api.openai.com/v1/responses'), true);
     assert.equal(calls.some((row) => row.target === 'https://api.openai.com/v1/moderations'), true);
-    assert.equal(calls.some((row) => row.target.includes('/tweets/post-123?')), true);
+    assert.equal(calls.some((row) => row.target === 'https://api.x.com/2/tweets' && row.method === 'POST'), true);
+    assert.equal(calls.filter((row) => row.target.includes('/tweets/post-123?')).length, 2);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
