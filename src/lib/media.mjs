@@ -17,37 +17,50 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const url = body.url || body.mediaUrl; if (!/^https:\/\//i.test(url || '')) throw new Error('Media endpoint must return { "url": "https://..." }.'); return url;
 }
 
-async function generateMedia(accountId, account, slotId, draft) {
-  if (account.media?.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, 'generate');
+async function generated(accountId, account, slotId, draft) {
+  if (account.media?.endpoint) return { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'generate'), decision: 'generate', source: 'endpoint' };
   if (account.media?.internalImageGeneration !== false && (account.media?.type || 'image') === 'image') {
-    return generateAndHostImage(accountId, account, slotId, draft);
+    return { url: await generateAndHostImage(accountId, account, slotId, draft), decision: 'generate', source: 'openai-image' };
   }
-  return null;
+  return { url: null, decision: 'none', source: null };
 }
 
-export async function resolveMedia(accountId, account, slotId, draft) {
+export async function resolveMediaDetailed(accountId, account, slotId, draft) {
   const media = account.media || {}; const strategy = media.strategy || 'none';
-  if (strategy === 'none') return null;
-  if (strategy === 'fixed' || strategy === 'external') return media.url || null;
-  if (strategy === 'pool') return poolUrl(media, slotId);
-  if (strategy === 'endpoint') return requestMediaEndpoint(accountId, account, slotId, draft, draft?.features?.mediaDecision || 'generate');
+  if (strategy === 'none') return { url: null, decision: 'none', source: null };
+  if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy };
+  if (strategy === 'pool') {
+    const url = poolUrl(media, slotId);
+    return { url, decision: url ? 'library' : 'none', source: 'pool' };
+  }
+  if (strategy === 'endpoint') {
+    const decision = ['search', 'generate'].includes(draft?.features?.mediaDecision) ? draft.features.mediaDecision : 'generate';
+    return { url: await requestMediaEndpoint(accountId, account, slotId, draft, decision), decision, source: 'endpoint' };
+  }
   if (strategy === 'auto') {
     let decision = draft?.features?.mediaDecision || 'none';
     if (account.platform === 'instagram' && decision === 'none') decision = media.defaultInstagramDecision || 'generate';
-    if (decision === 'none') return null;
+    if (decision === 'none') return { url: null, decision: 'none', source: null };
     if (decision === 'library') {
-      const url = poolUrl(media, slotId); if (url) return url;
-      return generateMedia(accountId, account, slotId, draft);
+      const url = poolUrl(media, slotId);
+      if (url) return { url, decision: 'library', source: 'pool' };
+      return generated(accountId, account, slotId, draft);
     }
     if (decision === 'search') {
-      if (media.endpoint) return requestMediaEndpoint(accountId, account, slotId, draft, 'search');
-      const fallback = poolUrl(media, slotId); if (fallback) return fallback;
-      return generateMedia(accountId, account, slotId, draft);
+      if (media.endpoint) return { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'search'), decision: 'search', source: 'endpoint' };
+      const fallback = poolUrl(media, slotId);
+      if (fallback) return { url: fallback, decision: 'library', source: 'pool-fallback' };
+      return generated(accountId, account, slotId, draft);
     }
-    if (decision === 'generate') return generateMedia(accountId, account, slotId, draft);
+    if (decision === 'generate') return generated(accountId, account, slotId, draft);
   }
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
+
+export async function resolveMedia(accountId, account, slotId, draft) {
+  return (await resolveMediaDetailed(accountId, account, slotId, draft)).url;
+}
+
 export function ensureMediaForPlatform(account, mediaUrl) {
   if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/auto; auto can use built-in OpenAI image generation on a public repository.');
 }
