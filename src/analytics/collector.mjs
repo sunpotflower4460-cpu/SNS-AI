@@ -8,6 +8,19 @@ import { nextDueCheckpoint } from './checkpoints.mjs';
 import { collectXMetrics } from './x-metrics.mjs';
 import { collectInstagramMetrics } from './instagram-metrics.mjs';
 
+async function evaluateBrakeSafely(accountId, account, snapshots, report) {
+  try {
+    const brake = await evaluateAnomalyBrake(accountId, account, snapshots);
+    if (brake.opened) {
+      await appendAudit({ account: accountId, stage: 'anomaly-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
+      report.push({ account: accountId, status: 'safety-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
+    }
+  } catch (error) {
+    await appendAudit({ account: accountId, stage: 'anomaly-brake-error', error: String(error.message || error).slice(0, 500) });
+    report.push({ account: accountId, status: 'safety-brake-check-failed', error: error.message });
+  }
+}
+
 export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
   const accounts = await loadAccounts();
   const history = await readHistory();
@@ -41,11 +54,7 @@ export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
           metrics: result.metrics, warning: result.warning || null, unavailable: result.unavailable || []
         });
         existing.push(row);
-        const brake = await evaluateAnomalyBrake(accountId, account, existing);
-        if (brake.opened) {
-          await appendAudit({ account: accountId, stage: 'anomaly-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
-          report.push({ account: accountId, status: 'safety-brake-opened', reason: brake.reason, openUntil: brake.openUntil, evidence: brake.evidence });
-        }
+        await evaluateBrakeSafely(accountId, account, existing, report);
         await recordCircuitSuccess(accountId, 'analytics', account.resilience);
         await appendAudit({ account: accountId, stage: 'metrics-collected', providerPostId: post.providerPostId, checkpointMinutes: due.checkpointMinutes });
         report.push({ account: accountId, providerPostId: post.providerPostId, status: 'collected', checkpointMinutes: due.checkpointMinutes });
