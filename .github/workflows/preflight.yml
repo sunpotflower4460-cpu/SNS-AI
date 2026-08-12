@@ -17,6 +17,8 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
       INPUT_ACCOUNT: ${{ inputs.account }}
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +31,7 @@ jobs:
           npm run validate
           npm run check
           npm run smoke
+          npm run secret-scan
       - name: Secret shape check
         shell: bash
         run: |
