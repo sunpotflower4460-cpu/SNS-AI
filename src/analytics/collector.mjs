@@ -44,9 +44,13 @@ export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
         await appendAudit({ account: accountId, stage: 'metrics-collected', providerPostId: post.providerPostId, checkpointMinutes: due.checkpointMinutes });
         report.push({ account: accountId, providerPostId: post.providerPostId, status: 'collected', checkpointMinutes: due.checkpointMinutes });
       } catch (error) {
-        await recordCircuitFailure(accountId, 'analytics', error, account.resilience);
-        await appendAudit({ account: accountId, stage: 'metrics-error', providerPostId: post.providerPostId, error: String(error.message || error).slice(0, 500) });
+        const circuit = await recordCircuitFailure(accountId, 'analytics', error, account.resilience);
+        await appendAudit({ account: accountId, stage: 'metrics-error', providerPostId: post.providerPostId, error: String(error.message || error).slice(0, 500), circuitOpenUntil: circuit?.openUntil || null });
         report.push({ account: accountId, providerPostId: post.providerPostId, status: 'failed', error: error.message });
+        if (circuit?.openUntil) {
+          report.push({ account: accountId, status: 'circuit-open', openUntil: circuit.openUntil, reason: 'Stopping remaining metrics calls for this account in the current run.' });
+          break;
+        }
       }
     }
   }
