@@ -6,12 +6,36 @@
       "model": "gpt-5",
       "historyWindow": 30,
       "duplicateThreshold": 0.72,
-      "maxAttempts": 3
+      "maxAttempts": 3,
+      "candidateCount": 5
     },
     "safety": {
       "moderation": true,
       "maxPostsPerDay": 6,
       "minMinutesBetweenPosts": 30
+    },
+    "analytics": {
+      "enabled": true,
+      "checkpointsMinutes": [60, 360, 1440, 4320, 10080],
+      "maxAgeDays": 30
+    },
+    "learning": {
+      "enabled": true,
+      "exploreRate": 0.2,
+      "matureCheckpointMinutes": 1440,
+      "minSamplesPerPattern": 2,
+      "fullConfidencePosts": 20
+    },
+    "research": {
+      "webSearch": false,
+      "trendIntelligence": false,
+      "trendRefreshHours": 6
+    },
+    "objectives": {
+      "weights": {}
+    },
+    "media": {
+      "strategy": "none"
     }
   },
   "accounts": {
@@ -36,15 +60,9 @@
         "times": ["08:00"],
         "windowMinutes": 30
       },
-      "generation": {
-        "maxChars": 280
-      },
-      "research": {
-        "webSearch": false
-      },
-      "media": {
-        "strategy": "none"
-      }
+      "generation": { "maxChars": 280 },
+      "research": { "webSearch": false, "trendIntelligence": false },
+      "media": { "strategy": "none" }
     },
     "example-instagram": {
       "platform": "instagram",
@@ -68,16 +86,15 @@
         "times": ["18:00"],
         "windowMinutes": 30
       },
-      "generation": {
-        "maxChars": 1800
-      },
-      "research": {
-        "webSearch": false
-      },
+      "generation": { "maxChars": 1800 },
+      "research": { "webSearch": false, "trendIntelligence": false },
+      "analytics": { "maxAgeDays": 14 },
       "media": {
-        "strategy": "pool",
+        "strategy": "auto",
         "type": "image",
-        "urls": []
+        "urls": [],
+        "endpoint": "",
+        "defaultInstagramDecision": "library"
       }
     }
   }
