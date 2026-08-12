@@ -30,8 +30,7 @@ function needsOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
     || account.research?.trendIntelligence === true
-    || Boolean(builtInMediaKind(account))
-    || account.media?.qa?.enabled === true;
+    || Boolean(builtInMediaKind(account));
 }
 
 async function repositoryHostingCheck(required) {
