@@ -30,7 +30,11 @@ jobs:
           npm run check
           npm run smoke
       - name: Secret shape check
-        run: npm run doctor -- --strict
+        shell: bash
+        run: |
+          args=(--strict)
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          npm run doctor -- "${args[@]}"
       - name: Verify external credentials without posting
         shell: bash
         run: |
