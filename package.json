@@ -1,16 +1,18 @@
 {
   "name": "sns-ai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Multi-account autonomous social publishing engine for X and Instagram via GitHub Actions.",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "Multi-account autonomous social publishing, analytics and learning engine for X and Instagram via GitHub Actions.",
+  "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/publish.mjs && node --check src/orchestrate.mjs && node --check src/validate-config.mjs && node --check src/providers/x.mjs && node --check src/providers/instagram.mjs",
+    "check": "node --check src/publish.mjs && node --check src/orchestrate.mjs && node --check src/validate-config.mjs && node --check src/analytics/collector.mjs && node --check src/learning/learn.mjs && node --check src/research/trends.mjs && node --check src/reports/generate.mjs && node --check src/providers/x.mjs && node --check src/providers/instagram.mjs",
     "validate": "node src/validate-config.mjs",
-    "autopilot": "node src/orchestrate.mjs"
+    "autopilot": "node src/orchestrate.mjs",
+    "metrics": "node src/analytics/collector.mjs",
+    "learn": "node src/learning/learn.mjs",
+    "trends": "node src/research/trends.mjs",
+    "report": "node src/reports/generate.mjs"
   }
 }
