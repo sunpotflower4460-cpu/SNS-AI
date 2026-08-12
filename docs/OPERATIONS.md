@@ -1,6 +1,6 @@
 # SNS-AI Operations
 
-この文書は、初回開通・長期無人運用・障害・人間フィードバックの運用手順です。
+この文書は、初回開通・長期無人運用・障害・人間フィードバック・安全停止の運用手順です。
 
 ## 1. 鍵を入れる前
 
@@ -15,14 +15,14 @@ npm run secret-scan
 npm run doctor
 ```
 
-- `check` — `src/**/*.mjs` を自動発見して全て構文確認
+- `check` — `src/**/*.mjs`を自動発見して全構文確認
 - `smoke` — 外部APIなしで主要ロジックを合成データ検証
-- `secret-scan` — ソース・設定・Workflow・docs内の典型的な秘密情報リテラルを検出
-- `doctor` — Secret値を出さず、設定・必要credential・media準備・任意の`expiresAt`を確認
+- `secret-scan` — ソース・設定・Workflow・docs内の典型的秘密情報を検出
+- `doctor` — Secret値を表示せず、設定・credential・media準備・任意`expiresAt`を確認
 
 ## 2. Secrets / Variables
 
-必須:
+必須（自律生成を使う通常構成）:
 
 - `OPENAI_API_KEY`
 - `SOCIAL_CREDENTIALS_JSON`
@@ -34,53 +34,77 @@ npm run doctor
 任意Variables:
 
 - `OPENAI_MODEL`
-- `SNS_COMMAND_ADMINS` — カンマ区切り。所有者以外に `[publish]` / `[feedback]` を許可するGitHubユーザー
-- `APPROVAL_MAX_AGE_DAYS` — approvalの失効日数。未設定7日
+- `SNS_COMMAND_ADMINS`
+- `APPROVAL_MAX_AGE_DAYS`
 
 鍵はIssue / README / configへ貼らないでください。
 
-## 3. 鍵を入れた後
+## 3. Live Preflight
 
 Actions → **SNS Live Preflight**。
 
-投稿は作成せず次を確認します。
+実投稿や有料media生成を行わず次を確認します。
 
-- OpenAI API認証
+- 必要な場合のOpenAI API認証
 - X `/2/users/me`
 - Instagram対象アカウント読取
-- 内蔵画像hostingを使う場合、GitHub repositoryがpublicか
+- 内蔵画像/Reel hostingを使う場合、GitHub repositoryがpublicか
 
-内蔵画像生成そのものは費用が発生するためPreflightでは生成しません。画像モデルの実利用可否は最初のgenerationで確定します。
+Image / Video modelの実利用可否は最初の実generationで確定します。Preflightは確認目的だけで画像・動画を生成しません。
 
-次に:
+初回推奨順:
 
-1. Autopilot `force=true / dry_run=true`
-2. 1件の実投稿
-3. Metrics Collector確認
-4. `approval` で短期間運用
-5. 問題なければ `auto`
+1. `pause`または`approval`で実アカウント登録
+2. Live Preflight
+3. Autopilot `force=true / dry_run=true`
+4. 1件の実投稿
+5. Metrics Collector確認
+6. 短期間`approval`
+7. 問題なければ`auto`
 
-## 4. 内蔵画像生成
+## 4. 内蔵画像 / Reel生成
 
-静止画は `OPENAI_API_KEY` だけで生成可能です。
+### Image
 
 ```text
 OpenAI Image API
   ↓
+Moderation + Visual QA
+  ↓ pass only
 GitHub Release: sns-ai-media
-  ↓
-public browser_download_url
   ↓
 X / Instagram
 ```
 
-同一slot + promptはRelease asset名が決定論的なので、Workflow retry時は既存assetを再利用します。
+### Reel
 
-公開GitHub repository向けです。Privateへ変更した場合は `media.endpoint` で外部CDNを用意してください。Reel/動画も外部media sourceが必要です。
+```text
+OpenAI Video API
+  ↓ completed
+thumbnail取得
+  ↓
+Moderation + Visual QA
+  ↓ pass only
+MP4取得
+  ↓
+GitHub Release: sns-ai-media
+  ↓
+Instagram Reel
+```
 
-週次Maintenanceが古いassetを削除します。
+QA不合格時は、QAが明示した問題だけを元promptへ追記して、設定された`maxRegenerations`内で再生成します。不合格素材はReleaseへuploadしません。
 
-## 5. Readiness / Current Report
+公開GitHub repository向けです。Privateへ変更する場合は`media.endpoint`などで外部public CDNを用意してください。
+
+週次Maintenanceが古い生成media assetを削除します。
+
+## 5. X alt text
+
+画像QAから生成した客観的alt textを、Xではmedia upload後のmetadataへ登録してから投稿します。alt textは投稿履歴にも保存します。
+
+Instagramは未確認のAPI parameterを推測して送らず、生成alt textを履歴/監査情報として保持します。
+
+## 6. Readiness / Current Report
 
 **SNS Health Report**:
 
@@ -92,9 +116,9 @@ X / Instagram
 - `data/reports/latest.json`
 - `data/reports/latest.md`
 
-Current Reportには、投稿成績、学習strategy、trend、Web出典、A/B実験、API利用量、Circuit、直近error等を集約します。
+Current Reportには投稿成績、strategy、trend、source、A/B実験、API利用量、Circuit、media QA、安全ブレーキ、直近error等を集約します。
 
-## 6. 人間フィードバック
+## 7. 人間フィードバック
 
 保存先:
 
@@ -116,21 +140,9 @@ Issue title:
 [feedback] account-id
 ```
 
-Body:
+所有者または`SNS_COMMAND_ADMINS`のユーザーだけ処理できます。
 
-```json
-{
-  "account": "account-id",
-  "action": "avoid",
-  "note": "この方向は使わない",
-  "dimension": "hook",
-  "source": "chatgpt"
-}
-```
-
-所有者または `SNS_COMMAND_ADMINS` のユーザーだけ処理できます。
-
-## 7. 優先順位
+## 8. 優先順位
 
 1. identity / explicit instructions / safety
 2. human feedback
@@ -138,18 +150,11 @@ Body:
 4. learned strategy
 5. experiments / trend
 
-反応が良くても、人間が禁止した方向へ自動最適化しません。
+数字が良くても、人間が禁止した方向へ自動最適化しません。
 
-## 8. A/B実験
+## 9. A/B実験
 
-Daily Learningが十分なdataを検出するとexperimentを開始します。
-
-- hook
-- format
-- CTA
-- mediaDecision
-
-通常の投稿slotをvariantへ割り当てるので、実験だけを理由に投稿数を増やしません。最低sample未満ではwinnerを決めません。
+Daily Learningが十分なdataを検出すると、通常投稿slotの中で`hook / format / CTA / mediaDecision`を検証します。実験だけを理由に投稿数を増やさず、最低sample未満ではwinnerを決めません。
 
 状態:
 
@@ -157,9 +162,7 @@ Daily Learningが十分なdataを検出するとexperimentを開始します。
 data/experiments/<account>.json
 ```
 
-## 9. Adaptive Schedule
-
-AIが任意時刻を作ることは禁止しています。
+## 10. Adaptive Schedule
 
 ```json
 "schedule": {
@@ -168,9 +171,9 @@ AIが任意時刻を作ることは禁止しています。
 }
 ```
 
-confidenceが基準を超えた後、許可済みcandidate内から既存slot数と同じ数だけ選びます。
+AIがcandidate外の任意時刻を作ることは禁止しています。
 
-## 10. Circuit Breaker
+## 11. Circuit Breaker
 
 対象:
 
@@ -179,7 +182,7 @@ confidenceが基準を超えた後、許可済みcandidate内から既存slot数
 - analytics
 - research
 
-既定は連続3失敗 → 60分open。open中はAPIを叩かず、cooldown後の定期runから自動復帰を試します。
+既定は連続3失敗 → 60分open。open中は対象APIを叩かず、cooldown後の定期runから再試行します。
 
 状態:
 
@@ -187,53 +190,74 @@ confidenceが基準を超えた後、許可済みcandidate内から既存slot数
 data/runtime-health.json
 ```
 
-## 11. 利用量上限
+## 12. 反応異常ブレーキ
+
+Circuit Breakerは「API障害」用、Anomaly Brakeは「投稿反応の極端な異常」用です。
+
+十分なbaseline / confidence / exposureを持つ成熟投稿だけを評価し、極端なperformance collapseや低score + conversation spikeを検出すると、新しいAutopilot生成を一時停止します。
+
+状態:
+
+```text
+data/brakes.json
+```
+
+特徴:
+
+- 少し伸びない程度ではopenしない
+- 過去投稿を自動削除しない
+- brake state保存エラーはMetrics API Circuitから分離
+- cooldown後は自動close
+- Current Reportに状態表示
+
+## 13. 利用量上限
 
 対象:
 
-- OpenAI text/moderation calls
-- Web Search calls
-- external media calls
-- image generations
+- OpenAI text / moderation / QA
+- Web Search
+- external media
+- image generation
+- video generation
 
 保存:
 
 ```text
 data/usage.jsonl
+data/usage-state.json
 ```
 
-上限に達した処理は `BUDGET_EXHAUSTED` として安全に停止し、日付が変われば再開します。
+上限に達すると`BUDGET_EXHAUSTED`として安全に停止し、日付更新後に再開します。
 
-## 12. 安全表記・リンク制約
+## 14. 安全表記・リンク制約
 
-`safety` で必須表記、広告表記候補、リンク数、allowlist/blocklist等をアカウント単位設定できます。これはAI投稿だけでなくmanual publishingにも適用されます。
+`safety`で必須表記、広告表記候補、リンク数、allowlist/blocklist等をアカウント単位設定できます。AI投稿だけでなくmanual publishingにも適用されます。
 
-## 13. Web情報の根拠
+## 15. Web情報の根拠
 
-Web Searchを使ったResponsesから取得できたURL citationを保存します。
+Web Searchで取得できたURL citationを保存します。
 
 - trend: `data/trends/<account>.json`
 - published post: `data/history.jsonl`
 
 後から「この情報の根拠は？」を追跡できます。
 
-## 14. 長期データ保守
+## 16. 長期データ保守
 
-**SNS Maintenance** が週次実行:
+**SNS Maintenance**が週次実行:
 
-- history / metrics / usage / audit の重複除去
-- 保存期間超過のraw rowを `data/archive/monthly-summary.json` へcount集約
-- broken JSONLを `data/quarantine/invalid-jsonl.jsonl` へ隔離
-- quarantine自体も期限整理
-- stale approval Issueを自動close
-- old generated image assetsを削除
+- history / metrics / usage / auditの重複除去
+- 保存期間超過raw rowの月次count集約
+- broken JSONLのquarantine
+- stale approval Issue close
+- old generated media assets削除
 - reports再生成
 
 人間フィードバックは自動削除しません。
 
-## 15. CI
+## 17. CI
 
-**SNS-AI CI** はPR / main pushで:
+**SNS-AI CI**はPR / main pushで次を実行します。
 
 - unit/integration tests
 - config validation
@@ -243,40 +267,33 @@ Web Searchを使ったResponsesから取得できたURL citationを保存しま�
 - 全Workflow YAML parse
 - key-safe doctor
 
-を実行します。
+## 18. Workflow Failure Watch
 
-## 16. Workflow Failure Watch
+主要Workflowが失敗すると`[health] <workflow> failure` Issueを1件だけ維持します。同一障害でIssueを増殖させず、後続run成功時にcloseします。
 
-主要Workflowが失敗すると:
+## 19. ChatGPTから確認するとき
 
-```text
-[health] <workflow> failure
-```
+GitHub上の実記録から次を確認できます。
 
-Issueを1件だけ維持します。同一障害でIssueを増殖させず、後続runが成功すると自動Closeします。
-
-## 17. ChatGPTから確認するとき
-
-GitHub上の実記録を読み、例えば次を回答できます。
-
-- 現在状態 / readiness
+- readiness / current state
 - 最近の投稿・成績
-- 学習した勝ち筋 / 弱い型
+- 勝ち筋 / 弱い型
 - trend / source
-- active/completed experiments
-- current API usage
-- circuit status
+- A/B experiment
+- API usage
+- Circuit / anomaly brake
+- media QA
 - recent errors
 - human feedback
-- なぜその投稿・画像を選んだか
+- 投稿・画像を選んだ理由
 
-## 18. 障害時の確認順
+## 20. 障害時の確認順
 
 1. `[health]` Issue
 2. `data/reports/readiness.md`
 3. `data/reports/latest.md`
 4. Actions run
-5. Circuit state
+5. Anomaly Brake / Circuit state
 6. daily usage budget
 7. Live Preflight
 8. platform permission / token expiry
