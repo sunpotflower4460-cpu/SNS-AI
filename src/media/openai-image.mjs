@@ -41,18 +41,23 @@ async function ensurePublicRelease() {
     return await githubApi(`/repos/${repo}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`);
   } catch (error) {
     if (error.status !== 404) throw error;
-    return githubApi(`/repos/${repo}/releases`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tag_name: RELEASE_TAG,
-        target_commitish: process.env.GITHUB_REF_NAME || 'main',
-        name: 'SNS-AI generated media',
-        body: 'Automatically generated media assets used by SNS-AI. Managed by GitHub Actions.',
-        draft: false,
-        prerelease: false
-      })
-    });
+    try {
+      return await githubApi(`/repos/${repo}/releases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tag_name: RELEASE_TAG,
+          target_commitish: process.env.GITHUB_REF_NAME || 'main',
+          name: 'SNS-AI generated media',
+          body: 'Automatically generated media assets used by SNS-AI. Managed by GitHub Actions.',
+          draft: false,
+          prerelease: false
+        })
+      });
+    } catch (createError) {
+      if (createError.status !== 422) throw createError;
+      return githubApi(`/repos/${repo}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`);
+    }
   }
 }
 
@@ -88,7 +93,8 @@ async function generateImage(accountId, account, prompt) {
       return Buffer.from(encoded, 'base64');
     }
     if ((response.status === 429 || response.status >= 500) && attempt === 0) {
-      await sleep(1500);
+      const retryAfter = Number(response.headers.get('retry-after') || 0);
+      await sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 1500);
       continue;
     }
     const error = new Error(parsed?.error?.message || `OpenAI image generation failed with ${response.status}`);
@@ -99,11 +105,20 @@ async function generateImage(accountId, account, prompt) {
   throw new Error('OpenAI image generation failed.');
 }
 
+async function listAllAssets(releaseId) {
+  const assets = [];
+  for (let page = 1; page <= 50; page += 1) {
+    const batch = await githubApi(`/repos/${repoName()}/releases/${releaseId}/assets?per_page=100&page=${page}`);
+    assets.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return assets;
+}
+
 async function findAsset(release, name) {
   const existing = (release.assets || []).find((asset) => asset.name === name);
   if (existing?.browser_download_url) return existing.browser_download_url;
-  const repo = repoName();
-  const assets = await githubApi(`/repos/${repo}/releases/${release.id}/assets?per_page=100`);
+  const assets = await listAllAssets(release.id);
   return assets.find((asset) => asset.name === name)?.browser_download_url || null;
 }
 
@@ -117,13 +132,18 @@ async function uploadReleaseAsset(release, name, bytes) {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${token}`,
       'Content-Type': 'image/png',
-      'Content-Length': String(bytes.byteLength),
       'X-GitHub-Api-Version': '2022-11-28'
     },
     body: bytes
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.message || `GitHub release asset upload failed with ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 422) {
+      const cached = await findAsset(release, name);
+      if (cached) return cached;
+    }
+    throw new Error(body?.message || `GitHub release asset upload failed with ${response.status}`);
+  }
   if (!body.browser_download_url) throw new Error('GitHub release asset upload returned no public download URL.');
   return body.browser_download_url;
 }
@@ -147,20 +167,16 @@ export async function cleanupGeneratedMedia({ retentionDays = 90 } = {}) {
   try { release = await githubApi(`/repos/${repoName()}/releases/tags/${encodeURIComponent(RELEASE_TAG)}`); }
   catch (error) { if (error.status === 404) return { skipped: true, reason: 'No generated-media release exists', deleted: 0 }; throw error; }
   const cutoff = Date.now() - Math.max(1, Number(retentionDays)) * 86_400_000;
+  const assets = await listAllAssets(release.id);
+  const old = assets.filter((asset) => Date.parse(asset.created_at || '') < cutoff);
   let deleted = 0;
-  for (let page = 1; page <= 20; page += 1) {
-    const assets = await githubApi(`/repos/${repoName()}/releases/${release.id}/assets?per_page=100&page=${page}`);
-    for (const asset of assets) {
-      if (Date.parse(asset.created_at || '') < cutoff) {
-        const response = await fetch(`https://api.github.com/repos/${repoName()}/releases/assets/${asset.id}`, {
-          method: 'DELETE',
-          headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${githubToken()}`, 'X-GitHub-Api-Version': '2022-11-28' }
-        });
-        if (!response.ok && response.status !== 404) throw new Error(`Could not delete old generated media asset ${asset.id}: HTTP ${response.status}`);
-        deleted += 1;
-      }
-    }
-    if (assets.length < 100) break;
+  for (const asset of old) {
+    const response = await fetch(`https://api.github.com/repos/${repoName()}/releases/assets/${asset.id}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${githubToken()}`, 'X-GitHub-Api-Version': '2022-11-28' }
+    });
+    if (!response.ok && response.status !== 404) throw new Error(`Could not delete old generated media asset ${asset.id}: HTTP ${response.status}`);
+    deleted += 1;
   }
-  return { skipped: false, deleted };
+  return { skipped: false, scanned: assets.length, deleted };
 }
