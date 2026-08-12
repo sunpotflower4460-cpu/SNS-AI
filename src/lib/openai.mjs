@@ -4,7 +4,7 @@ import { rankCandidates, shouldExplore } from './strategy-rank.mjs';
 import { consumeUsage } from '../ops/budget.mjs';
 
 const OPENAI_BASE = 'https://api.openai.com/v1';
-export const PROMPT_VERSION = 'sns-ai-2026-08-v2';
+export const PROMPT_VERSION = 'sns-ai-2026-08-v3';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Missing OPENAI_API_KEY for autonomous content generation.'); return key; }
 
@@ -84,7 +84,7 @@ async function requestAndParse(body, meta) {
 }
 
 async function responseJson({ model, system, user, webSearch = false, schema = CANDIDATE_SCHEMA, name = 'social_output', accountId, account, operation }) {
-  const body = { model, store: false, input: [
+  const body = { model, store: false, max_output_tokens: Number(account?.generation?.maxOutputTokens ?? 3000), input: [
     { role: 'system', content: [{ type: 'input_text', text: system }] },
     { role: 'user', content: [{ type: 'input_text', text: user }] }
   ], text: { format: { type: 'json_schema', name, schema, strict: true } } };
@@ -111,7 +111,7 @@ export async function moderateText(text, account, accountId) {
 
 function generationPrompt(accountId, account, history, context, feedback) {
   const recent = history.slice(0, Number(account.generation?.historyWindow ?? 30)).map((entry) => ({ at: entry.at, text: entry.text, features: entry.features || null }));
-  const humanFeedback = (context.humanFeedback || []).slice(0, 40).map((row) => ({
+  const humanFeedback = (context.humanFeedback || []).map((row) => ({
     at: row.at, action: row.action, note: row.note, dimension: row.dimension || null, value: row.value || null
   }));
   const experiment = context.experimentAssignment || null;
@@ -121,6 +121,7 @@ function generationPrompt(accountId, account, history, context, feedback) {
       'Generate several genuinely different publishable candidates and estimate their spread potential conservatively.',
       'Use trend information only when relevant and factual. Never fabricate personal experience, results, affiliations, or product usage.',
       'Explicit account identity/instructions and active human feedback outrank learned strategy. Learned strategy is only probabilistic evidence.',
+      'Human feedback is ordered newest first. If human feedback conflicts, follow the newest applicable instruction; pinned instructions remain persistent unless a newer instruction explicitly supersedes them.',
       'Never let performance optimization override explicit human feedback, account identity, safety rules, or factual accuracy.',
       'mediaDecision: none when text alone is best; library for existing account assets; search only for a licensed/trusted media service; generate for a new original visual.',
       'Avoid repeating recent posts in topic, hook, structure, and wording.',
