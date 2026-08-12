@@ -7,7 +7,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/publish.mjs && node --check src/orchestrate.mjs && node --check src/validate-config.mjs && node --check src/analytics/collector.mjs && node --check src/learning/learn.mjs && node --check src/research/trends.mjs && node --check src/reports/generate.mjs && node --check src/feedback/store.mjs && node --check src/feedback/record.mjs && node --check src/experiments/engine.mjs && node --check src/experiments/store.mjs && node --check src/ops/doctor.mjs && node --check src/ops/smoke.mjs && node --check src/ops/live-preflight.mjs && node --check src/ops/circuit.mjs && node --check src/ops/budget.mjs && node --check src/ops/maintenance.mjs && node --check src/ops/stale-approvals.mjs && node --check src/ops/secret-scan.mjs && node --check src/providers/x.mjs && node --check src/providers/instagram.mjs",
+    "check": "node src/ops/check-all.mjs",
     "validate": "node src/validate-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
     "metrics": "node src/analytics/collector.mjs",
