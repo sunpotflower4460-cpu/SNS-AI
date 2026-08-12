@@ -1,0 +1,67 @@
+name: SNS Metrics Collector
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Optional account ID
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    env:
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate
+        run: |
+          npm test
+          npm run validate
+          npm run check
+      - name: Collect due metrics
+        shell: bash
+        run: |
+          if [[ ! -s data/history.jsonl ]]; then
+            echo "No published post history yet; nothing to collect."
+            exit 0
+          fi
+          if [[ -z "${SOCIAL_CREDENTIALS_JSON:-}" ]]; then
+            echo "SOCIAL_CREDENTIALS_JSON is not configured; skipping metrics collection."
+            exit 0
+          fi
+          args=()
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          node src/analytics/collector.mjs "${args[@]}"
+      - name: Refresh readable report
+        run: node src/reports/generate.mjs
+      - name: Persist metrics/report
+        if: always()
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: persist SNS metrics"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
