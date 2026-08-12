@@ -1,0 +1,94 @@
+name: SNS Policy Watch
+
+on:
+  schedule:
+    - cron: '41 18 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Validate
+        run: |
+          npm test
+          npm run validate
+          npm run check
+          npm run smoke
+          npm run secret-scan
+
+      - name: Check official platform policies
+        shell: bash
+        run: |
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            echo "OPENAI_API_KEY is not configured; policy watch cannot run."
+            exit 0
+          fi
+          node src/research/policy-watch.mjs > policy-result.json
+          cat policy-result.json
+
+      - name: Reconcile policy review issues
+        if: env.OPENAI_API_KEY != ''
+        shell: bash
+        run: |
+          for platform in x instagram; do
+            row=$(jq -c --arg p "$platform" '.[] | select(.platform == $p)' policy-result.json)
+            status=$(jq -r '.status // "missing"' <<<"$row")
+            if [[ "$status" != "updated" ]]; then
+              echo "Policy watch for $platform did not update successfully."
+              exit 1
+            fi
+            review=$(jq -r '.requiresHumanReview // false' <<<"$row")
+            changed=$(jq -r '.changed // false' <<<"$row")
+            title="[policy] ${platform} automation review"
+            issue_number=$(gh issue list --repo "$REPO" --state open --limit 100 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n1)
+            if [[ "$review" == "true" ]]; then
+              summary=$(jq -r '.report.summary // "Policy review requested."' <<<"$row")
+              sources=$(jq -r '[.report.sources[]?.url] | join("\n")' <<<"$row")
+              body="SNS-AI Policy Watch found an item that should be reviewed before changing automation.\n\nChanged from previous: ${changed}\n\n${summary}\n\nOfficial source URLs captured:\n${sources}"
+              if [[ -z "$issue_number" ]]; then
+                gh issue create --repo "$REPO" --title "$title" --body "$body"
+              elif [[ "$changed" == "true" ]]; then
+                gh issue comment "$issue_number" --repo "$REPO" --body "Policy Watch detected a new change candidate. Review data/policies/${platform}.json."
+              fi
+            elif [[ -n "$issue_number" ]]; then
+              gh issue comment "$issue_number" --repo "$REPO" --body "✅ Latest official-source policy check no longer requests human review. Closing this policy incident."
+              gh issue close "$issue_number" --repo "$REPO"
+            fi
+          done
+
+      - name: Persist policy intelligence
+        if: env.OPENAI_API_KEY != ''
+        shell: bash
+        run: |
+          rm -f policy-result.json
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "data: refresh platform policy watch"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
