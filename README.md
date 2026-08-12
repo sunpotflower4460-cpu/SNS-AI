@@ -20,12 +20,13 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 - 人間が許可した候補時刻内だけで投稿時間を自動最適化
 - AIによる `none / library / search / generate` のメディア判断
 - OpenAI Image APIによる静止画生成
-- OpenAI Video APIによる短尺Reel動画生成
-- 生成画像 / Reel thumbnailのModeration + 視覚QA
+- OpenAI Video APIによる短尺Reel/動画生成
+- 生成画像 / Reel spritesheet（fallback: thumbnail）のModeration + 視覚QA
 - QA不合格時の限定修正・自動再生成
 - QA合格素材だけをGitHub Releaseへ公開hosting
 - QAからalt textを生成し、X画像へmedia metadataとして登録
 - X / Instagram公式API投稿
+- X動画は公式v2 chunked media uploadで投稿
 - 投稿後1h / 6h / 24h / 72h / 7dメトリクス収集
 - アカウント自身のbaselineと比較した相対評価
 - 極端な成熟反応異常を検知する一時AUTOブレーキ
@@ -101,7 +102,7 @@ Account Strategy
 }
 ```
 
-### Reel
+### Reel / 動画
 
 ```json
 "media": {
@@ -114,7 +115,9 @@ Account Strategy
 }
 ```
 
-標準的な短尺Reel生成は外部video serviceを必須としません。外部`media.endpoint`は独自生成・素材検索・private repository用CDNなどの任意拡張です。
+標準的な短尺動画生成は外部video serviceを必須としません。外部`media.endpoint`は独自生成・素材検索・private repository用CDNなどの任意拡張です。
+
+Instagramでは生成した公開MP4 URLをReel containerへ渡します。Xでは動画をv2 chunked upload（initialize → append → finalize → status）してからPostへ`media_id`を添付します。
 
 ### 公開前メディアQA
 
@@ -131,7 +134,9 @@ Account Strategy
 }
 ```
 
-生成画像は画像本体、Reelは生成jobのthumbnailを確認します。主な検査対象は次です。
+生成画像は画像本体、Reelは生成jobのspritesheetを優先して確認し、取得できなければthumbnailへfallbackします。
+
+主な検査対象:
 
 - 破損・壊れた描画
 - 明確な人体/物体崩れ
@@ -145,7 +150,7 @@ Account Strategy
 
 ## X alt text
 
-生成静止画のQA時に客観的なalt textを作成し、Xでは画像upload後にmedia metadataへ登録してから投稿します。Instagramについては、公開APIで確実に扱える値だけを送る方針のため、生成alt textは履歴・監査用に保持します。
+生成静止画のQA時に客観的なalt textを作成し、Xでは画像upload後にmedia metadataへ登録してから投稿します。Xのalt textは画像向けとして扱い、動画QAの説明文は履歴/監査用に保持します。
 
 ## 反応異常ブレーキ
 
@@ -252,6 +257,7 @@ Repository → Settings → Secrets and variables → Actions
     "consumerSecret": "...",
     "accessToken": "...",
     "accessTokenSecret": "...",
+    "oauth2AccessToken": "... X動画を使う場合のみ ...",
     "expiresAt": "2027-01-01T00:00:00Z"
   },
   "brand-a-instagram": {
@@ -261,6 +267,8 @@ Repository → Settings → Secrets and variables → Actions
   }
 }
 ```
+
+Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。**X動画を使うアカウントだけ**OAuth 2.0 user access tokenを`oauth2AccessToken`として追加します。Live PreflightはOAuth1/OAuth2が同じXユーザーを指しているかも確認します。
 
 `expiresAt`は任意ですが、入れるとDoctorが期限切れ/期限接近を警告します。
 
@@ -314,12 +322,13 @@ Repository → Settings → Secrets and variables → Actions
 
 1. X / Meta側で必要な投稿・Insights権限を取得
 2. GitHub Secretsへ`SOCIAL_CREDENTIALS_JSON`と`OPENAI_API_KEY`を登録
-3. `config/accounts.json`へ実アカウントを追加
-4. 最初は`pause`または`approval`
-5. **SNS Live Preflight**で認証・public hosting前提を確認
-6. **SNS Autopilot**を`force=true / dry_run=true`で確認
-7. 最初の実投稿を確認
-8. 問題なければ`auto`
+3. X動画を使う場合はOAuth2 user access tokenも同じcredential entryへ追加
+4. `config/accounts.json`へ実アカウントを追加
+5. 最初は`pause`または`approval`
+6. **SNS Live Preflight**で認証・public hosting前提を確認
+7. **SNS Autopilot**を`force=true / dry_run=true`で確認
+8. 最初の実投稿を確認
+9. 問題なければ`auto`
 
 詳細な運用手順は`docs/OPERATIONS.md`、AIが変更してよい範囲/いけない範囲は`docs/AUTONOMY.md`を参照してください。
 
