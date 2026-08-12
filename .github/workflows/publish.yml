@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
