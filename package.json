@@ -13,6 +13,7 @@
     "metrics": "node src/analytics/collector.mjs",
     "learn": "node src/learning/learn.mjs",
     "trends": "node src/research/trends.mjs",
+    "policy-watch": "node src/research/policy-watch.mjs",
     "report": "node src/reports/generate.mjs",
     "weekly-report": "node src/reports/weekly.mjs",
     "doctor": "node src/ops/doctor.mjs",
