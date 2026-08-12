@@ -163,9 +163,10 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
     payload.media = { media_ids: [mediaId] };
   }
 
+  const authorization = mediaType === 'reel' ? bearerHeader(credential) : oauthHeader('POST', CREATE_POST_URL, credential);
   const body = await fetchJson(CREATE_POST_URL, {
     method: 'POST',
-    headers: { Authorization: oauthHeader('POST', CREATE_POST_URL, credential), 'Content-Type': 'application/json' },
+    headers: { Authorization: authorization, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 
