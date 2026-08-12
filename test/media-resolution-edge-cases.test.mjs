@@ -140,6 +140,6 @@ test('stale approval function is statically exercised in coverage and skips clea
   const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
   try {
-    assert.deepEqual(await expireStaleApprovals({ maxAgeDays: 7 }), { skipped: true, reason: 'GitHub runtime credentials unavailable', closed: [] });
+    assert.deepEqual(await expireStaleApprovals({ maxAgeDays: 7 }), { skipped: true, reason: 'GH_TOKEN or GITHUB_REPOSITORY missing', closed: [] });
   } finally { restoreEnv(env); }
 });
