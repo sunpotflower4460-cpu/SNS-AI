@@ -28,6 +28,8 @@ jobs:
           npm run check
           npm run smoke
           npm run secret-scan
+      - name: Source coverage audit
+        run: npm run coverage
       - name: Parse every workflow YAML
         run: |
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |f| YAML.safe_load(File.read(f), aliases: true); puts "YAML OK: #{f}" }'
