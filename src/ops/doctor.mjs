@@ -19,13 +19,21 @@ function parseCredentials(raw) {
   catch (error) { return { parsed: null, error: error.message }; }
 }
 
-function usesOpenAI(account) {
+function usesBuiltInMedia(account) {
   const media = account.media || {};
-  const builtInImage = media.internalImageGeneration !== false && (media.type || 'image') === 'image' && ['auto', 'generate'].includes(media.strategy || 'none');
+  const strategy = media.strategy || 'none';
+  if (!['auto', 'generate'].includes(strategy) || /^https:\/\//i.test(media.endpoint || '')) return false;
+  const type = media.type || 'image';
+  if (type === 'reel') return media.internalVideoGeneration !== false;
+  return type === 'image' && media.internalImageGeneration !== false;
+}
+
+function usesOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
     || account.research?.trendIntelligence === true
-    || builtInImage;
+    || usesBuiltInMedia(account)
+    || account.media?.qa?.enabled === true;
 }
 
 function credentialExpiry(entry) {
@@ -41,7 +49,7 @@ function credentialExpiry(entry) {
 function budgetWarnings(account) {
   if (account.budgets?.enabled === false) return ['Usage budgets are disabled for this account.'];
   const warnings = [];
-  for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay']) {
+  for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay']) {
     const value = Number(account.budgets?.[key]);
     if (!Number.isFinite(value) || value <= 0) warnings.push(`${key} has no effective positive cap.`);
   }
@@ -52,27 +60,25 @@ function mediaReadiness(account) {
   if (account.platform !== 'instagram') return { blockers: [], warnings: [] };
   const media = account.media || {};
   const strategy = media.strategy || 'none';
+  const mediaType = media.type || 'image';
   const blockers = [];
   const warnings = [];
-  const isImage = (media.type || 'image') === 'image';
-  const hasBuiltIn = media.internalImageGeneration !== false && isImage;
+  const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
+  const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
+  const hasBuiltIn = mediaType === 'reel'
+    ? media.internalVideoGeneration !== false
+    : mediaType === 'image' && media.internalImageGeneration !== false;
 
+  if (!['image', 'reel'].includes(mediaType)) blockers.push('Instagram media.type must be image or reel.');
   if (strategy === 'none') blockers.push('Instagram requires a media strategy.');
-  if (strategy === 'pool' && !(media.urls || []).filter(Boolean).length) blockers.push('Instagram media pool is empty.');
+  if (strategy === 'pool' && !hasLibrary) blockers.push('Instagram media pool is empty.');
   if (['fixed', 'external'].includes(strategy) && !/^https:\/\//i.test(media.url || '')) blockers.push(`media.${strategy} requires a public HTTPS URL.`);
-  if (strategy === 'endpoint' && !/^https:\/\//i.test(media.endpoint || '')) blockers.push('media.endpoint requires an HTTPS endpoint.');
-  if (strategy === 'auto') {
-    const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
-    const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
-    if (!hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push('media.strategy=auto needs media.urls, media.endpoint, or built-in image generation.');
-    if (!hasLibrary && !hasEndpoint && hasBuiltIn) warnings.push('Instagram will rely on built-in OpenAI image generation; SNS Live Preflight verifies that the repository is public for GitHub Release hosting.');
+  if (strategy === 'endpoint' && !hasEndpoint) blockers.push('media.endpoint requires an HTTPS endpoint.');
+  if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push(`${strategy} needs library media, media.endpoint, or matching built-in media generation.`);
+  if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
+    warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
   }
-  if (strategy === 'generate' && !/^https:\/\//i.test(media.endpoint || '') && !hasBuiltIn) {
-    blockers.push('media.strategy=generate needs media.endpoint or built-in image generation.');
-  }
-  if ((media.type || 'image') === 'reel' && !/^https:\/\//i.test(media.endpoint || '') && !(media.urls || []).filter(Boolean).length && !/^https:\/\//i.test(media.url || '')) {
-    blockers.push('Reel automation requires an external video/media source; built-in image generation cannot create a Reel.');
-  }
+  if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };
 }
 
@@ -101,9 +107,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
         const entry = credentials.parsed?.[credentialKey];
         if (!entry) blockers.push(`Credential entry "${credentialKey}" is missing.`);
         else {
-          for (const key of credentialRequirements(account.platform)) {
-            if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
-          }
+          for (const key of credentialRequirements(account.platform)) if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
           const expiry = credentialExpiry(entry);
           blockers.push(...expiry.blockers);
           warnings.push(...expiry.warnings);
@@ -116,21 +120,12 @@ export async function buildReadinessReport({ accountFilter } = {}) {
       warnings.push('Account is disabled or paused; live readiness checks are informational only.');
     }
 
-    rows.push({
-      account: id,
-      displayName: account.displayName || id,
-      platform: account.platform,
-      enabled: Boolean(account.enabled),
-      mode: account.mode || 'pause',
-      ready: blockers.length === 0,
-      blockers,
-      warnings
-    });
+    rows.push({ account: id, displayName: account.displayName || id, platform: account.platform, enabled: Boolean(account.enabled), mode: account.mode || 'pause', ready: blockers.length === 0, blockers, warnings });
   }
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
@@ -146,14 +141,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 }
 
 function markdown(report) {
-  const lines = [
-    '# SNS-AI Readiness',
-    '',
-    `Overall: **${report.state}**`,
-    '',
-    '| Account | Platform | Mode | Ready | Blockers / warnings |',
-    '|---|---|---|---:|---|'
-  ];
+  const lines = ['# SNS-AI Readiness', '', `Overall: **${report.state}**`, '', '| Account | Platform | Mode | Ready | Blockers / warnings |', '|---|---|---|---:|---|'];
   for (const row of report.accounts) {
     const notes = [...row.blockers, ...row.warnings.map((x) => `warning: ${x}`)];
     lines.push(`| ${row.account} | ${row.platform} | ${row.mode} | ${row.ready ? 'yes' : 'no'} | ${notes.join('<br>') || '-'} |`);
@@ -175,17 +163,11 @@ async function writeIfChanged(path, content) {
 export async function writeReadinessReport(report) {
   const json = `${JSON.stringify(report, null, 2)}\n`;
   const md = `${markdown(report)}\n`;
-  const [jsonChanged, mdChanged] = await Promise.all([
-    writeIfChanged(REPORT_JSON, json),
-    writeIfChanged(REPORT_MD, md)
-  ]);
+  const [jsonChanged, mdChanged] = await Promise.all([writeIfChanged(REPORT_JSON, json), writeIfChanged(REPORT_MD, md)]);
   return jsonChanged || mdChanged;
 }
 
-function parseArgValue(argv, name) {
-  const index = argv.indexOf(name);
-  return index >= 0 ? argv[index + 1] : undefined;
-}
+function parseArgValue(argv, name) { const index = argv.indexOf(name); return index >= 0 ? argv[index + 1] : undefined; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const write = process.argv.includes('--write');
