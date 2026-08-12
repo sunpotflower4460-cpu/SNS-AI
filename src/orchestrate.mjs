@@ -30,7 +30,6 @@ function bool(value) {
 
 export async function runAutopilot({ now = new Date(), accountFilter, force = false, dryRun = false } = {}) {
   const accounts = await loadAccounts();
-  const fullHistory = await readHistory();
   const report = [];
 
   for (const [accountId, account] of Object.entries(accounts)) {
@@ -54,7 +53,8 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         continue;
       }
 
-      const rate = checkRateLimits(accountId, account, fullHistory, now);
+      const currentHistory = await readHistory();
+      const rate = checkRateLimits(accountId, account, currentHistory, now);
       if (!rate.ok) {
         report.push({ account: accountId, slot: slot.slotId, status: 'rate-limited', reason: rate.reason });
         continue;
