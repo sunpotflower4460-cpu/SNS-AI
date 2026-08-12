@@ -1,0 +1,51 @@
+name: SNS Failure Watch
+
+on:
+  workflow_run:
+    workflows:
+      - SNS Autopilot
+      - SNS Metrics Collector
+      - SNS Trend Intelligence
+      - SNS Daily Learning
+      - Publish social post
+      - SNS Health Report
+      - SNS Human Feedback
+      - SNS Live Preflight
+    types: [completed]
+
+permissions:
+  issues: write
+  actions: read
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Open, update, or resolve one deduplicated health issue
+        shell: bash
+        run: |
+          title="[health] ${WORKFLOW_NAME} failure"
+          issue_number=$(gh issue list --repo "$REPO" --state open --limit 100 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n1)
+
+          if [[ "$CONCLUSION" == "failure" || "$CONCLUSION" == "timed_out" || "$CONCLUSION" == "cancelled" ]]; then
+            body="SNS-AI detected a workflow failure. No secret values are included here.\n\nWorkflow: ${WORKFLOW_NAME}\nConclusion: ${CONCLUSION}\nRun: ${RUN_URL}\nRun ID: ${RUN_ID}"
+            if [[ -z "$issue_number" ]]; then
+              gh issue create --repo "$REPO" --title "$title" --body "$body"
+            else
+              gh issue comment "$issue_number" --repo "$REPO" --body "❌ Another failure: ${CONCLUSION} — ${RUN_URL}"
+            fi
+            exit 0
+          fi
+
+          if [[ "$CONCLUSION" == "success" && -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" --repo "$REPO" --body "✅ A later ${WORKFLOW_NAME} run succeeded. Closing this health incident. ${RUN_URL}"
+            gh issue close "$issue_number" --repo "$REPO"
+          fi
