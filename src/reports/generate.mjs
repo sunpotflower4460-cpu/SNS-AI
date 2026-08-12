@@ -10,16 +10,18 @@ import { loadExperimentState } from '../experiments/store.mjs';
 import { recentHumanFeedback } from '../feedback/store.mjs';
 import { circuitStatus } from '../ops/circuit.mjs';
 import { usageToday } from '../ops/budget.mjs';
-import { writeJsonAtomic } from '../lib/json-store.mjs';
+import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const JSON_PATH = fileURLToPath(new URL('../../data/reports/latest.json', import.meta.url));
 const MD_PATH = fileURLToPath(new URL('../../data/reports/latest.md', import.meta.url));
+const POLICY_PATH = (platform) => fileURLToPath(new URL(`../../data/policies/${platform}.json`, import.meta.url));
 
 export async function generateReport() {
   const accounts = await loadAccounts(); const history = await readHistory(); const snapshots = await readMetricSnapshots(); const latest = latestSnapshots(snapshots); const audit = await readAudit();
-  const result = { generatedAt: new Date().toISOString(), accounts: {} };
+  const policies = Object.fromEntries(await Promise.all(['x', 'instagram'].map(async (platform) => [platform, await readJson(POLICY_PATH(platform), null)])));
+  const result = { generatedAt: new Date().toISOString(), policies, accounts: {} };
   for (const [accountId, account] of Object.entries(accounts)) {
     const posts = history.filter((h) => h.account === accountId && h.status === 'published').slice(-10).reverse(); const latestMetrics = latest.filter((s) => s.account === accountId);
     const scored = latestMetrics.map((s) => ({ providerPostId: s.providerPostId, checkpointMinutes: s.checkpointMinutes, ...scoreSnapshot(s, snapshots, account.objectives?.weights || {}) })).sort((a, b) => b.score - a.score);
@@ -50,6 +52,12 @@ export async function generateReport() {
   }
   await writeJsonAtomic(JSON_PATH, result);
   const lines = ['# SNS-AI Current Report', '', `Generated: ${result.generatedAt}`, ''];
+  const reviewPlatforms = Object.entries(policies).filter(([, row]) => row?.requiresHumanReview).map(([platform]) => platform);
+  if (reviewPlatforms.length) lines.push(`⚠ Policy review requested: ${reviewPlatforms.join(', ')}`, '');
+  for (const [platform, policy] of Object.entries(policies)) {
+    if (policy) lines.push(`- ${platform} policy checked: ${policy.checkedAt}; official sources: ${(policy.sources || []).length}; changed: ${Boolean(policy.changedFromPrevious)}`);
+  }
+  if (Object.values(policies).some(Boolean)) lines.push('');
   for (const [id, row] of Object.entries(result.accounts)) {
     lines.push(`## ${id} (${row.platform})`, `- State: ${row.enabled ? 'enabled' : 'disabled'} / ${row.mode}`, `- Recent posts in memory: ${row.postCount}`);
     if (row.bestRecent) lines.push(`- Best recent performance score: ${row.bestRecent.score} (confidence ${row.bestRecent.confidence})`);
