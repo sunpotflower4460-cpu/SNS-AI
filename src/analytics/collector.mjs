@@ -46,7 +46,7 @@ export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
         let result;
         if (account.platform === 'x') result = await collectXMetrics({ postId: post.providerPostId, credential: resolved.credential });
         else result = await collectInstagramMetrics({
-          postId: post.providerPostId, credential: resolved.credential, apiVersion: account.apiVersion || 'v23.0', mediaType: post.mediaType || account.media?.type || 'image'
+          postId: post.providerPostId, credential: resolved.credential, apiVersion: account.apiVersion || 'v25.0', mediaType: post.mediaType || account.media?.type || 'image'
         });
         const row = await appendMetricSnapshot({
           account: accountId, platform: account.platform, providerPostId: post.providerPostId,

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { fetchJson, downloadMedia } from '../lib/http.mjs';
+import { xOAuth2FetchJson, verifyXOAuth2Session } from './x-oauth2.mjs';
 
 const CREATE_POST_URL = 'https://api.x.com/2/tweets';
 const MEDIA_UPLOAD_URL = 'https://api.x.com/2/media/upload';
@@ -40,14 +41,17 @@ function oauthHeader(method, url, credentials) {
     .join(', ')}`;
 }
 
-function bearerHeader(credentials) {
-  const token = String(credentials.oauth2AccessToken || '').trim();
-  if (!token) throw new Error('X video upload requires credential.oauth2AccessToken (OAuth 2.0 user access token).');
-  return `Bearer ${token}`;
-}
-
 function mediaMetadataPayload(mediaId, text) {
   return { id: String(mediaId), metadata: { alt_text: { text: String(text || '').trim().slice(0, 1000) } } };
+}
+
+function imageUploadPayload(bytes, contentType) {
+  return {
+    media: Buffer.from(bytes).toString('base64'),
+    media_category: 'tweet_image',
+    media_type: contentType,
+    shared: false
+  };
 }
 
 function videoInitializePayload(bytes, contentType) {
@@ -58,11 +62,11 @@ function videoInitializePayload(bytes, contentType) {
 async function setAltText(mediaId, text, credentials) {
   const payload = mediaMetadataPayload(mediaId, text);
   if (!payload.metadata.alt_text.text) return;
-  await fetchJson(MEDIA_METADATA_URL, {
+  await xOAuth2FetchJson(MEDIA_METADATA_URL, {
     method: 'POST',
-    headers: { Authorization: oauthHeader('POST', MEDIA_METADATA_URL, credentials), 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
-  });
+  }, credentials);
 }
 
 async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
@@ -71,13 +75,11 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   if (!contentType.startsWith('image/')) throw new Error(`X image publisher expected image media; got ${contentType}.`);
   if (bytes.byteLength > maxBytes) throw new Error('X image exceeds the 5 MB API upload limit.');
 
-  const form = new FormData();
-  form.set('media_category', 'tweet_image');
-  form.set('media_type', contentType);
-  form.set('media', new Blob([bytes], { type: contentType }), `upload.${contentType.split('/')[1] || 'bin'}`);
-  const body = await fetchJson(MEDIA_UPLOAD_URL, {
-    method: 'POST', headers: { Authorization: oauthHeader('POST', MEDIA_UPLOAD_URL, credentials) }, body: form
-  });
+  const body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(imageUploadPayload(bytes, contentType))
+  }, credentials);
   const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
   if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
   if (mediaAltText) await setAltText(mediaId, mediaAltText, credentials);
@@ -85,11 +87,11 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
 }
 
 async function initializeVideo(bytes, contentType, credentials) {
-  const body = await fetchJson(MEDIA_INIT_URL, {
+  const body = await xOAuth2FetchJson(MEDIA_INIT_URL, {
     method: 'POST',
-    headers: { Authorization: bearerHeader(credentials), 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(videoInitializePayload(bytes, contentType))
-  });
+  }, credentials);
   const id = body?.data?.id;
   if (!id) throw new Error('X video initialize returned no media id.');
   return String(id);
@@ -101,11 +103,11 @@ async function appendVideo(mediaId, bytes, credentials) {
   for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
     const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkBytes));
     const url = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/append`;
-    await fetchJson(url, {
+    await xOAuth2FetchJson(url, {
       method: 'POST',
-      headers: { Authorization: bearerHeader(credentials), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ media: chunk.toString('base64'), segment_index: segment })
-    });
+    }, credentials);
     segment += 1;
   }
 }
@@ -118,7 +120,7 @@ async function waitVideoProcessing(mediaId, initial, credentials) {
     if (Date.now() >= deadline) throw new Error('X video processing did not finish within 10 minutes.');
     await sleep(Math.max(1, Math.min(30, Number(info.check_after_secs || 2))) * 1000);
     const statusUrl = `${MEDIA_UPLOAD_URL}?media_id=${encodeURIComponent(mediaId)}`;
-    const status = await fetchJson(statusUrl, { method: 'GET', headers: { Authorization: bearerHeader(credentials) } });
+    const status = await xOAuth2FetchJson(statusUrl, { method: 'GET' }, credentials);
     info = status?.data?.processing_info || null;
     if (!info) return;
   }
@@ -133,7 +135,7 @@ async function uploadVideo(mediaUrl, credentials) {
   const mediaId = await initializeVideo(bytes, contentType, credentials);
   await appendVideo(mediaId, bytes, credentials);
   const finalizeUrl = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/finalize`;
-  const finalized = await fetchJson(finalizeUrl, { method: 'POST', headers: { Authorization: bearerHeader(credentials) } });
+  const finalized = await xOAuth2FetchJson(finalizeUrl, { method: 'POST' }, credentials);
   await waitVideoProcessing(mediaId, finalized, credentials);
   return mediaId;
 }
@@ -145,9 +147,10 @@ export async function verifyXCredential(credential) {
 }
 
 export async function verifyXOAuth2Credential(credential) {
-  const body = await fetchJson(VERIFY_USER_URL, { method: 'GET', headers: { Authorization: bearerHeader(credential) } });
+  const body = await xOAuth2FetchJson(VERIFY_USER_URL, { method: 'GET' }, credential);
   if (!body?.data?.id) throw new Error('X OAuth2 credential check returned no authenticated user.');
-  return { id: body.data.id, username: body.data.username || null, name: body.data.name || null };
+  const session = await verifyXOAuth2Session(credential);
+  return { id: body.data.id, username: body.data.username || null, name: body.data.name || null, session };
 }
 
 export async function publishX({ text = '', mediaUrl, mediaType = 'image', mediaAltText = '', credential, dryRun = false }) {
@@ -163,14 +166,12 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
     payload.media = { media_ids: [mediaId] };
   }
 
-  const authorization = mediaType === 'reel' ? bearerHeader(credential) : oauthHeader('POST', CREATE_POST_URL, credential);
-  const body = await fetchJson(CREATE_POST_URL, {
-    method: 'POST',
-    headers: { Authorization: authorization, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
+  const body = mediaUrl
+    ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
+    : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
 
   return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
 }
 
-export const __test = { pct, mediaMetadataPayload, videoInitializePayload };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload };

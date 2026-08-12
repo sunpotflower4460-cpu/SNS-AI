@@ -12,6 +12,15 @@ function digest(value) { return createHash('sha256').update(String(value)).diges
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Built-in video generation requires OPENAI_API_KEY.'); return key; }
 function authHeaders(extra = {}) { return { Authorization: `Bearer ${apiKey()}`, ...extra }; }
 
+function createVideoForm({ model, prompt, size, seconds }) {
+  const form = new FormData();
+  form.set('model', String(model));
+  form.set('prompt', String(prompt));
+  form.set('size', String(size));
+  form.set('seconds', String(seconds));
+  return form;
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const body = await response.json().catch(() => ({}));
@@ -49,14 +58,13 @@ async function createVideo(accountId, account, prompt) {
   if (reusable) return reusable;
 
   await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds) });
-  const body = { model, prompt, size, seconds };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
       response = await fetch(OPENAI_VIDEOS_URL, {
         method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body)
+        headers: authHeaders(),
+        body: createVideoForm({ model, prompt, size, seconds })
       });
     } catch (error) {
       if (attempt === 1) throw error;
@@ -176,3 +184,5 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
 export async function generateAndHostVideo(accountId, account, slotId, draft) {
   return (await generateAndHostVideoDetailed(accountId, account, slotId, draft)).url;
 }
+
+export const __test = { createVideoForm };

@@ -48,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -65,6 +66,7 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
+        id: checkout
         with:
           fetch-depth: 0
 
@@ -115,8 +117,8 @@ jobs:
       - name: Publish
         run: node src/publish.mjs --file payload.json
 
-      - name: Persist published history/state
-        if: success()
+      - name: Persist published history/state and rotating OAuth2 state
+        if: always() && steps.checkout.outcome == 'success'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/)" ]]; then
@@ -127,11 +129,11 @@ jobs:
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
           git add data/
-          git commit -m "chore: record SNS publish"
+          git commit -m "chore: record SNS publish state"
 
           for attempt in 1 2 3; do
             git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
-            echo "History push attempt ${attempt} failed; retrying..."
+            echo "State push attempt ${attempt} failed; retrying..."
             sleep $((attempt * 3))
           done
 

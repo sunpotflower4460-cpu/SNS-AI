@@ -2,7 +2,7 @@ name: SNS Autopilot
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch:
     inputs:
       account:
@@ -35,6 +35,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}

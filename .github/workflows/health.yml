@@ -18,6 +18,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
     steps:
       - uses: actions/checkout@v7

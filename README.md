@@ -26,7 +26,8 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 - QA合格素材だけをGitHub Releaseへ公開hosting
 - QAからalt textを生成し、X画像へmedia metadataとして登録
 - X / Instagram公式API投稿
-- X動画は公式v2 chunked media uploadで投稿
+- X画像はv2 media upload、X動画はv2 chunked media upload
+- X OAuth2 access tokenの自動refresh + AES-256-GCM暗号化state保存
 - 投稿後1h / 6h / 24h / 72h / 7dメトリクス収集
 - アカウント自身のbaselineと比較した相対評価
 - 極端な成熟反応異常を検知する一時AUTOブレーキ
@@ -96,7 +97,7 @@ Account Strategy
   "strategy": "auto",
   "type": "image",
   "internalImageGeneration": true,
-  "imageModel": "gpt-image-2",
+  "imageModel": "gpt-image-1",
   "imageSize": "1024x1024",
   "imageQuality": "medium"
 }
@@ -115,7 +116,7 @@ Account Strategy
 }
 ```
 
-標準的な短尺動画生成は外部video serviceを必須としません。外部`media.endpoint`は独自生成・素材検索・private repository用CDNなどの任意拡張です。
+Sora createはOpenAI Video APIのmultipart form contractで送信します。標準的な短尺動画生成は外部video serviceを必須としません。外部`media.endpoint`は独自生成・素材検索・private repository用CDNなどの任意拡張です。
 
 Instagramでは生成した公開MP4 URLをReel containerへ渡します。Xでは動画をv2 chunked upload（initialize → append → finalize → status）してからPostへ`media_id`を添付します。
 
@@ -148,9 +149,22 @@ Instagramでは生成した公開MP4 URLをReel containerへ渡します。Xで�
 
 主観的な好みだけではrejectしません。NG素材はReleaseへ公開せず、QAが示した問題だけを修正して設定回数内で再生成します。
 
+## X media OAuth2
+
+Xの**画像・動画media uploadはOAuth2 user context**を使います。OAuth2 authorizationには少なくとも次を含めます。
+
+- `tweet.write`
+- `users.read`
+- `media.write`
+- `offline.access`
+
+`offline.access`で得たrefresh tokenとClient IDを`SOCIAL_CREDENTIALS_JSON`へ登録します。初回Live Preflightでrefresh flowを通し、以後のaccess/refresh tokenは`X_OAUTH2_STATE_KEY`でAES-256-GCM暗号化して`data/x-oauth2-state.json`へ保存します。access tokenが期限接近または401になった場合は自動refreshし、更新stateを通常のworkflow state commitで引き継ぎます。
+
+Xのテキストのみの投稿・現在のX metrics経路はOAuth1 credentialsを継続利用できます。Live PreflightはOAuth1とOAuth2が同じXユーザーを指しているかも確認します。
+
 ## X alt text
 
-生成静止画のQA時に客観的なalt textを作成し、Xでは画像upload後にmedia metadataへ登録してから投稿します。Xのalt textは画像向けとして扱い、動画QAの説明文は履歴/監査用に保持します。
+生成静止画のQA時に客観的なalt textを作成し、Xでは画像upload後にmedia metadataへ登録してから投稿します。動画QAの説明文は履歴/監査用に保持します。
 
 ## 反応異常ブレーキ
 
@@ -185,7 +199,7 @@ Instagramでは生成した公開MP4 URLをReel containerへ渡します。Xで�
 }
 ```
 
-AIは`adaptiveCandidateTimes`の外へ勝手に投稿時刻を移動しません。候補がなければ固定scheduleのままです。
+AIは`adaptiveCandidateTimes`の外へ勝手に投稿時刻を移動しません。候補がなければ固定scheduleのままです。GitHub Actions scheduleはhard real-time schedulerではないため、投稿時刻は`windowMinutes`内で拾う設計です。
 
 ## トレンド調査と出典
 
@@ -242,9 +256,9 @@ Autopilot / Publish / Analytics / Researchを別々のCircuitとして監視し�
 }
 ```
 
-金額ではなくAPI呼び出し回数で上限を掛けるため、料金改定があっても安全装置として機能します。
+金額ではなくAPI呼び出し回数で上限を掛けます。X API / OpenAI API側のcredits・billing・provider側rate limitは別途有効である必要があります。
 
-## 必要なSecrets
+## 実接続に必要なSecrets
 
 Repository → Settings → Secrets and variables → Actions
 
@@ -255,10 +269,12 @@ Repository → Settings → Secrets and variables → Actions
   "brand-a-x": {
     "consumerKey": "...",
     "consumerSecret": "...",
-    "accessToken": "...",
-    "accessTokenSecret": "...",
-    "oauth2AccessToken": "... X動画を使う場合のみ ...",
-    "expiresAt": "2027-01-01T00:00:00Z"
+    "accessToken": "... OAuth1 ...",
+    "accessTokenSecret": "... OAuth1 ...",
+    "oauth2ClientId": "...",
+    "oauth2RefreshToken": "... offline.access ...",
+    "oauth2AccessToken": "... optional current token ...",
+    "oauth2Scope": "tweet.write users.read media.write offline.access"
   },
   "brand-a-instagram": {
     "accessToken": "...",
@@ -268,13 +284,17 @@ Repository → Settings → Secrets and variables → Actions
 }
 ```
 
-Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。**X動画を使うアカウントだけ**OAuth 2.0 user access tokenを`oauth2AccessToken`として追加します。Live PreflightはOAuth1/OAuth2が同じXユーザーを指しているかも確認します。
+Xでmediaを使わないテキスト-only accountならOAuth2項目は不要です。Xで画像または動画を使う場合はOAuth2 Client ID + offline refresh tokenが必要です。
 
-`expiresAt`は任意ですが、入れるとDoctorが期限切れ/期限接近を警告します。
+InstagramはProfessional（Business / Creator）アカウントを使い、Instagram Login構成なら少なくとも`instagram_business_basic`と`instagram_business_content_publish`を付与します。Metricsを使う場合は対象Insightsを読める権限も必要です。既定Graph API versionは`v25.0`です。
+
+### `X_OAUTH2_STATE_KEY`（X mediaを使う場合）
+
+32文字以上のランダムな秘密値です。更新されたX OAuth2 tokenをリポジトリへ**暗号化stateとしてのみ**保存するために使います。Secret値そのものはGitへ書きません。
 
 ### `OPENAI_API_KEY`
 
-投稿生成、Web Search、Trend Intelligence、Moderation、media QA、内蔵画像/動画生成で使用します。
+投稿生成、Web Search、Trend Intelligence、Moderation、media QA、内蔵画像/動画生成で使用します。ChatGPT契約とは別のOpenAI API billing/creditsが必要です。
 
 ### `MEDIA_SERVICE_TOKEN`（任意）
 
@@ -285,6 +305,20 @@ Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。*
 - `OPENAI_MODEL` — 投稿生成モデルの上書き
 - `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可ユーザー、カンマ区切り
 - `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数
+
+## Live Preflightで確認するもの
+
+- Secretの存在・JSON shape
+- X OAuth1 identity
+- X media利用時のOAuth2 refresh bootstrap
+- X OAuth1 / OAuth2が同じユーザーか
+- OAuth2 scope情報が取得できる場合の必須scope
+- Instagram対象Professional accountの読取
+- OpenAI Moderation API認証
+- 設定されたOpenAI text / image / video / QA modelの`/v1/models/{model}` availability
+- 内蔵media hosting時のGitHub repository public状態
+
+PreflightはSNS投稿や画像/動画generationを行いません。したがって、**モデルが見えること**までは無料/低副作用で確認できますが、Image / Video endpointの最終利用可否とbilling/rate limitを含む完全な証明は最初のcontrolled generationで行います。
 
 ## GitHub Actions
 
@@ -299,7 +333,7 @@ Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。*
 - **SNS Failure Watch** — Workflow障害Issue
 - **SNS Maintenance** — retention / archive / stale approval / generated media cleanup
 - **SNS Policy Watch** — X / Instagram公式情報の定期確認
-- **SNS-AI CI** — test / config / syntax / smoke / secret scan / workflow YAML
+- **SNS-AI CI** — test / config / syntax / smoke / secret scan / workflow YAML / operational runtime
 
 状態を書き換えるworkflowは`concurrency: sns-ai-write`で直列化します。
 
@@ -315,20 +349,22 @@ Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。*
 - `data/audit.jsonl` — 判断・実行・障害監査
 - `data/runtime-health.json` — Circuit状態
 - `data/brakes.json` — 反応異常ブレーキ状態
+- `data/x-oauth2-state.json` — 暗号化されたX OAuth2 rotating token state
 - `data/reports/latest.json` / `.md` — Current Report
 - `data/reports/readiness.json` / `.md` — 起動準備状態
 
-## セットアップ
+## 推奨セットアップ順
 
-1. X / Meta側で必要な投稿・Insights権限を取得
-2. GitHub Secretsへ`SOCIAL_CREDENTIALS_JSON`と`OPENAI_API_KEY`を登録
-3. X動画を使う場合はOAuth2 user access tokenも同じcredential entryへ追加
-4. `config/accounts.json`へ実アカウントを追加
-5. 最初は`pause`または`approval`
-6. **SNS Live Preflight**で認証・public hosting前提を確認
-7. **SNS Autopilot**を`force=true / dry_run=true`で確認
-8. 最初の実投稿を確認
-9. 問題なければ`auto`
+1. X / Meta / OpenAI側で必要なapp・権限・billingを準備
+2. `SOCIAL_CREDENTIALS_JSON` / `OPENAI_API_KEY`をGitHub Secretsへ登録
+3. X media利用時は`X_OAUTH2_STATE_KEY`も登録
+4. `config/accounts.json`へ実アカウントを追加し、まず`enabled: true / mode: approval`
+5. **SNS Live Preflight**を実行
+6. **SNS Autopilot**を`force=true / dry_run=true`で実行
+7. 内蔵mediaを使う場合は最初のcontrolled image/video generation + 1件のapproval投稿を確認
+8. **SNS Metrics Collector**で投稿後データ取得を確認
+9. 問題なければ`mode: auto`
+10. 以後は10分pollingが設定slotを拾い、自動投稿→計測→学習を継続
 
 詳細な運用手順は`docs/OPERATIONS.md`、AIが変更してよい範囲/いけない範囲は`docs/AUTONOMY.md`を参照してください。
 
@@ -336,11 +372,12 @@ Xの通常テキスト/画像投稿は既存OAuth1 credentialで動きます。*
 
 リポジトリ側で安全に自動化できる標準処理は可能な限り内蔵しています。残る主な外部境界は次です。
 
-- X / Meta / OpenAIのAPIキー・OAuth token発行
+- X / Meta / OpenAIのapp・API key・最初のOAuth authorization
+- X API credits / OpenAI API billing・credits
 - developer app審査・権限承認
 - 実アカウントのidentity / goal / audience /禁止事項という最上位方針
 - 法律・契約・規約解釈が曖昧なケースの最終判断
 - private repositoryで公開media URLが必要な場合の外部CDN
-- API提供者側のmodel access・障害・料金・サービス停止
+- provider側のmodel access・rate limit・障害・料金変更・サービス停止
 
 SNS-AIは外部境界そのものを勝手に回避せず、Doctor / Preflight / Policy Watch / Health Issueで状態を見える化します。

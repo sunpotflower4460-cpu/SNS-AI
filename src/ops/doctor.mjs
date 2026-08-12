@@ -7,10 +7,14 @@ import { validateConfig } from '../validate-config.mjs';
 const REPORT_JSON = fileURLToPath(new URL('../../data/reports/readiness.json', import.meta.url));
 const REPORT_MD = fileURLToPath(new URL('../../data/reports/readiness.md', import.meta.url));
 
+function xUsesMedia(account) {
+  return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
+}
+
 function credentialRequirements(account) {
   if (account.platform === 'x') {
     const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-    if ((account.media?.type || 'image') === 'reel' && account.media?.strategy !== 'none') required.push('oauth2AccessToken');
+    if (xUsesMedia(account)) required.push('oauth2ClientId', 'oauth2RefreshToken');
     return required;
   }
   if (account.platform === 'instagram') return ['accessToken', 'igUserId'];
@@ -67,7 +71,7 @@ function mediaReadiness(account) {
   const warnings = [];
   if (account.platform === 'x') {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
-    if (mediaType === 'reel' && strategy !== 'none') warnings.push('X Reel/video upload uses OAuth2 user media-upload endpoints; credential.oauth2AccessToken is required in addition to the existing OAuth1 posting credentials.');
+    if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access. Refreshed OAuth2 tokens are encrypted into data/x-oauth2-state.json using X_OAUTH2_STATE_KEY.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
     return { blockers, warnings };
   }
@@ -87,6 +91,7 @@ function mediaReadiness(account) {
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
   }
+  warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };
 }
@@ -97,6 +102,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   const configErrors = validateConfig(config);
   const openaiPresent = Boolean(process.env.OPENAI_API_KEY);
+  const xStateKeyPresent = String(process.env.X_OAUTH2_STATE_KEY || '').length >= 32;
   const rawCredentials = process.env.SOCIAL_CREDENTIALS_JSON || '';
   const credentials = parseCredentials(rawCredentials);
   const rows = [];
@@ -108,6 +114,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
     const liveRelevant = account.enabled === true && account.mode !== 'pause';
 
     if (liveRelevant && usesOpenAI(account) && !openaiPresent) blockers.push('OPENAI_API_KEY is missing.');
+    if (liveRelevant && xUsesMedia(account) && !xStateKeyPresent) blockers.push('X_OAUTH2_STATE_KEY is missing or shorter than 32 characters.');
     if (liveRelevant) {
       if (!rawCredentials) blockers.push('SOCIAL_CREDENTIALS_JSON is missing.');
       else if (credentials.error) blockers.push(`SOCIAL_CREDENTIALS_JSON is invalid JSON: ${credentials.error}`);
@@ -134,13 +141,14 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 5,
+    schemaVersion: 7,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
     configErrors,
     environment: {
       openaiApiKeyPresent: openaiPresent,
+      xOAuth2StateKeyPresent: xStateKeyPresent,
       socialCredentialsPresent: Boolean(rawCredentials),
       socialCredentialsJsonValid: rawCredentials ? !credentials.error : null,
       mediaServiceTokenPresent: Boolean(process.env.MEDIA_SERVICE_TOKEN)
