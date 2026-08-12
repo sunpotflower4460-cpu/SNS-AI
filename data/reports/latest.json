@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-12T13:46:37.930Z",
+  "generatedAt": "2026-08-12T14:02:20.325Z",
   "policies": {
     "x": null,
     "instagram": null
@@ -31,18 +31,24 @@
           "open": false
         }
       },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
       "usageToday": {
         "openai": 0,
         "webSearch": 0,
         "media": 0,
-        "image": 0
+        "image": 0,
+        "video": 0
       },
       "budgets": {
         "enabled": true,
         "openaiCallsPerDay": 300,
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
-        "imageGenerationsPerDay": 10
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4
       },
       "recentErrors": []
     },
@@ -72,18 +78,24 @@
           "open": false
         }
       },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
       "usageToday": {
         "openai": 0,
         "webSearch": 0,
         "media": 0,
-        "image": 0
+        "image": 0,
+        "video": 0
       },
       "budgets": {
         "enabled": true,
         "openaiCallsPerDay": 300,
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
-        "imageGenerationsPerDay": 10
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4
       },
       "recentErrors": []
     }
