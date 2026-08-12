@@ -9,16 +9,23 @@ import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
 
 function parseArgs(argv) { const args = {}; for (let i = 0; i < argv.length; i += 1) { const token = argv[i]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[i + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; i += 1; } } return args; }
-async function loadPayload(args) { if (args.file) return JSON.parse(await readFile(args.file, 'utf8')); if (args.json) return JSON.parse(args.json); return { account: args.account, text: args.text || '', mediaUrl: args['media-url'], mediaType: args['media-type'] || 'image', dryRun: args['dry-run'] === true || args['dry-run'] === 'true', source: args.source || 'manual', slotId: args['slot-id'] }; }
+async function loadPayload(args) { if (args.file) return JSON.parse(await readFile(args.file, 'utf8')); if (args.json) return JSON.parse(args.json); return { account: args.account, text: args.text || '', mediaUrl: args['media-url'], mediaType: args['media-type'] || 'image', mediaAltText: args['media-alt-text'] || '', dryRun: args['dry-run'] === true || args['dry-run'] === 'true', source: args.source || 'manual', slotId: args['slot-id'] }; }
 function providerPostId(result) { return result?.data?.id || result?.postId || result?.id || result?.mediaId || result?.media_id || result?.creationId || null; }
 
 export async function publish(payload) {
   const account = await resolveAccount(payload.account);
   const text = String(payload.text || '').trim();
   if (text) validateDraftText(account, text);
-  const common = { text, mediaUrl: payload.mediaUrl || undefined, mediaType: payload.mediaType || 'image', credential: account.credential, dryRun: Boolean(payload.dryRun) };
+  const common = {
+    text,
+    mediaUrl: payload.mediaUrl || undefined,
+    mediaType: payload.mediaType || 'image',
+    mediaAltText: String(payload.mediaAltText || '').slice(0, 1000),
+    credential: account.credential,
+    dryRun: Boolean(payload.dryRun)
+  };
   if (!payload.dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
-  await appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length });
+  await appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length });
 
   try {
     let result;
@@ -30,14 +37,15 @@ export async function publish(payload) {
       const postId = providerPostId(result);
       await appendHistory({
         account: payload.account, platform: account.platform, status: 'published', source: payload.source || 'manual', slotId: payload.slotId || null,
-        text, mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, mediaResolution: payload.mediaResolution || null,
+        text, mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, mediaAltText: String(payload.mediaAltText || '').slice(0, 1000) || null,
+        mediaQa: payload.mediaQa || null, mediaResolution: payload.mediaResolution || null,
         providerPostId: postId, ai: payload.ai || null, features: payload.features || null, rationale: payload.rationale || null,
         predictedScore: payload.predictedScore ?? null, selectionMode: payload.selectionMode || null,
         experiment: payload.experiment || null, sources: (payload.sources || []).slice(0, 30)
       });
       if (payload.slotId) await markSlot(payload.slotId, 'published', { account: payload.account });
       await recordCircuitSuccess(payload.account, 'publish', account.resilience);
-      await appendAudit({ account: payload.account, stage: 'publish-success', slotId: payload.slotId || null, platform: account.platform, providerPostId: postId, mediaResolution: payload.mediaResolution || null, experiment: payload.experiment || null, sourceCount: (payload.sources || []).length });
+      await appendAudit({ account: payload.account, stage: 'publish-success', slotId: payload.slotId || null, platform: account.platform, providerPostId: postId, mediaResolution: payload.mediaResolution || null, mediaQaScore: payload.mediaQa?.score ?? null, experiment: payload.experiment || null, sourceCount: (payload.sources || []).length });
     }
     return result;
   } catch (error) {

@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { consumeUsage } from '../ops/budget.mjs';
 import { cleanupGeneratedAssets, ensurePublicRelease, findAsset, uploadReleaseAsset } from './release-host.mjs';
+import { correctedMediaPrompt, reviewVisualBytes, reviewVisualUrl } from './qa.mjs';
 
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations';
+const MEDIA_QA_VERSION = 'qa-v1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safe(value) { return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'media'; }
@@ -52,17 +54,50 @@ async function generateImage(accountId, account, prompt) {
   throw new Error('OpenAI image generation failed.');
 }
 
-export async function generateAndHostImage(accountId, account, slotId, draft) {
-  const prompt = String(draft?.mediaPrompt || '').trim();
-  if (!prompt) throw new Error('AI selected image generation but supplied no mediaPrompt.');
+export async function generateAndHostImageDetailed(accountId, account, slotId, draft) {
+  const originalPrompt = String(draft?.mediaPrompt || '').trim();
+  if (!originalPrompt) throw new Error('AI selected image generation but supplied no mediaPrompt.');
   const release = await ensurePublicRelease();
-  const name = `${safe(accountId)}-${digest(`${slotId}|${prompt}`)}.png`;
-  const cached = await findAsset(release, name);
-  if (cached) return cached;
-  const bytes = await generateImage(accountId, account, prompt);
+  const maxRegenerations = Math.max(0, Number(account.media?.qa?.maxRegenerations ?? 1));
   const maxBytes = Number(account.media?.maxHostedImageBytes ?? 15 * 1024 * 1024);
-  if (bytes.byteLength > maxBytes) throw new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
-  return uploadReleaseAsset(release, name, bytes, 'image/png');
+  let prompt = originalPrompt;
+  let lastQa = null;
+
+  for (let attempt = 0; attempt <= maxRegenerations; attempt += 1) {
+    const name = `${safe(accountId)}-${digest(`${MEDIA_QA_VERSION}|${slotId}|${prompt}`)}.png`;
+    const cached = await findAsset(release, name);
+    if (cached) {
+      const qa = await reviewVisualUrl(accountId, account, cached, { mediaType: 'image', prompt: originalPrompt, postText: draft?.text || '' });
+      if (qa.pass) return { url: cached, qa: { ...qa, cached: true }, altText: qa.altText || '', attempt, prompt };
+      lastQa = qa;
+      if (attempt < maxRegenerations) {
+        prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
+        continue;
+      }
+    } else {
+      const bytes = await generateImage(accountId, account, prompt);
+      if (bytes.byteLength > maxBytes) throw new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
+      const qa = await reviewVisualBytes(accountId, account, bytes, 'image/png', { mediaType: 'image', prompt: originalPrompt, postText: draft?.text || '' });
+      if (qa.pass) {
+        const url = await uploadReleaseAsset(release, name, bytes, 'image/png');
+        return { url, qa, altText: qa.altText || '', attempt, prompt };
+      }
+      lastQa = qa;
+      if (attempt < maxRegenerations) {
+        prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
+        continue;
+      }
+    }
+  }
+
+  const error = new Error(`Generated image failed pre-publish QA after ${maxRegenerations + 1} attempt(s).`);
+  error.code = 'MEDIA_QA_FAILED';
+  error.qa = lastQa;
+  throw error;
+}
+
+export async function generateAndHostImage(accountId, account, slotId, draft) {
+  return (await generateAndHostImageDetailed(accountId, account, slotId, draft)).url;
 }
 
 export async function cleanupGeneratedMedia({ retentionDays = 90 } = {}) {

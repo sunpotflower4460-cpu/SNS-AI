@@ -1,6 +1,6 @@
 import { loadAccounts, resolveAccount } from '../lib/config.mjs';
 import { openaiRequest } from '../lib/openai.mjs';
-import { verifyXCredential } from '../providers/x.mjs';
+import { verifyXCredential, verifyXOAuth2Credential } from '../providers/x.mjs';
 import { verifyInstagramCredential } from '../providers/instagram.mjs';
 
 function parseArgs(argv) {
@@ -16,19 +16,21 @@ function parseArgs(argv) {
   return args;
 }
 
-function usesBuiltInImage(account) {
+function builtInMediaKind(account) {
   const media = account.media || {};
-  return media.internalImageGeneration !== false
-    && (media.type || 'image') === 'image'
-    && ['auto', 'generate'].includes(media.strategy || 'none')
-    && !/^https:\/\//i.test(media.endpoint || '');
+  if (!['auto', 'generate'].includes(media.strategy || 'none')) return null;
+  if (/^https:\/\//i.test(media.endpoint || '')) return null;
+  const type = media.type || 'image';
+  if (type === 'reel' && media.internalVideoGeneration !== false) return 'video';
+  if (type === 'image' && media.internalImageGeneration !== false) return 'image';
+  return null;
 }
 
 function needsOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
     || account.research?.trendIntelligence === true
-    || usesBuiltInImage(account);
+    || Boolean(builtInMediaKind(account));
 }
 
 async function repositoryHostingCheck(required) {
@@ -55,10 +57,7 @@ async function repositoryHostingCheck(required) {
 
 export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
-  const selected = Object.entries(accounts).filter(([id, account]) => {
-    if (accountFilter) return id === accountFilter;
-    return account.enabled === true && account.mode !== 'pause';
-  });
+  const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false }, mediaHosting: { checked: false } };
 
@@ -74,25 +73,40 @@ export async function runLivePreflight({ accountFilter } = {}) {
     }
   }
 
-  const builtInMediaNeeded = selected.some(([, account]) => usesBuiltInImage(account));
+  const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
 
   for (const [id, account] of selected) {
     try {
       const resolved = await resolveAccount(id, { allowDisabled: Boolean(accountFilter) });
       let identity;
-      if (resolved.platform === 'x') identity = await verifyXCredential(resolved.credential);
-      else if (resolved.platform === 'instagram') identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
-      else throw new Error(`Unsupported platform: ${resolved.platform}`);
-      const mediaReady = !usesBuiltInImage(account) || mediaHosting.ok;
+      let videoIdentity = null;
+      if (resolved.platform === 'x') {
+        identity = await verifyXCredential(resolved.credential);
+        if ((resolved.media?.type || 'image') === 'reel' && resolved.media?.strategy !== 'none') {
+          videoIdentity = await verifyXOAuth2Credential(resolved.credential);
+          if (String(videoIdentity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
+        }
+      } else if (resolved.platform === 'instagram') {
+        identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
+      } else throw new Error(`Unsupported platform: ${resolved.platform}`);
+      const kind = builtInMediaKind(account);
+      const mediaReady = !kind || mediaHosting.ok;
       rows.push({
         account: id,
         platform: resolved.platform,
         ok: Boolean(mediaReady),
         identity,
+        xVideoOAuth2Identity: videoIdentity,
         enabled: Boolean(account.enabled),
         mode: account.mode || 'pause',
-        builtInImage: usesBuiltInImage(account) ? { configured: true, hostingReady: Boolean(mediaHosting.ok), note: 'Image-model access itself is confirmed on the first real generation; preflight does not spend an image generation.' } : { configured: false }
+        builtInMedia: kind ? {
+          configured: true,
+          kind,
+          hostingReady: Boolean(mediaHosting.ok),
+          qaEnabled: account.media?.qa?.enabled !== false,
+          note: `${kind === 'video' ? 'Video' : 'Image'} model access itself is confirmed on the first real generation; preflight deliberately does not spend a generation.`
+        } : { configured: false }
       });
     } catch (error) {
       rows.push({ account: id, platform: account.platform, ok: false, error: error.message });

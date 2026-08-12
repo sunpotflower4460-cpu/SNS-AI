@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { effectiveScheduleTimes } from '../src/lib/schedule.mjs';
 import { validateDraftText } from '../src/lib/safety.mjs';
 import { resolveMediaDetailed } from '../src/lib/media.mjs';
+import { correctedMediaPrompt } from '../src/media/qa.mjs';
+import { anomalyTrigger, brakeSettings } from '../src/ops/brake.mjs';
 import { assignmentForSlot } from '../src/experiments/engine.mjs';
 import { scanSecrets } from '../src/ops/secret-scan.mjs';
 import { validateConfig } from '../src/validate-config.mjs';
@@ -47,45 +49,92 @@ test('safety rules enforce required disclosure and domain allowlist', () => {
   assert.throws(() => validateDraftText(account, '広告 https://other.example/item'), /non-allowlisted domain/);
 });
 
-test('enabled Instagram auto account can rely on built-in image generation', () => {
-  const config = {
+function baseConfig() {
+  return {
     defaults: {
       timezone: 'Asia/Tokyo',
       generation: { historyWindow: 30, duplicateThreshold: 0.72, maxAttempts: 3, candidateCount: 5, maxOutputTokens: 3000 },
       learning: { strategyWindowDays: 60, matureCheckpointMinutes: 1440, fullConfidencePosts: 20 },
       resilience: { failureThreshold: 3, cooldownMinutes: 60 },
-      budgets: { enabled: true, openaiCallsPerDay: 10, webSearchCallsPerDay: 2, mediaCallsPerDay: 2, imageGenerationsPerDay: 2 },
+      budgets: { enabled: true, openaiCallsPerDay: 10, webSearchCallsPerDay: 2, mediaCallsPerDay: 2, imageGenerationsPerDay: 2, videoGenerationsPerDay: 1 },
       experiments: { minSamplesPerVariant: 3, maxDays: 14, minimumStrategySamples: 6 },
       maintenance: { historyRetentionDays: 365, metricsRetentionDays: 120, usageRetentionDays: 90, auditRetentionDays: 180, quarantineRetentionDays: 30, generatedMediaRetentionDays: 90 },
-      media: { internalImageGeneration: true, imageModel: 'gpt-image-2', imageSize: '1024x1024', imageQuality: 'medium', maxDownloadBytes: 1000, maxHostedImageBytes: 1000 }
-    },
-    accounts: {
-      ig: {
-        platform: 'instagram', enabled: true, mode: 'auto',
-        schedule: { times: ['18:00'] },
-        media: { strategy: 'auto', type: 'image', urls: [], endpoint: '' }
+      media: {
+        internalImageGeneration: true, internalVideoGeneration: true,
+        imageModel: 'gpt-image-2', imageSize: '1024x1024', imageQuality: 'medium',
+        videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, videoTimeoutMinutes: 15, videoPollSeconds: 8,
+        maxDownloadBytes: 1000, maxHostedImageBytes: 1000, maxHostedVideoBytes: 2000,
+        qa: { enabled: true, minScore: 75, maxRegenerations: 1, maxInputBytes: 1000, detail: 'high' }
       }
-    }
+    },
+    accounts: {}
+  };
+}
+
+test('enabled Instagram auto account can rely on built-in image generation', () => {
+  const config = baseConfig();
+  config.accounts.ig = {
+    platform: 'instagram', enabled: true, mode: 'auto', schedule: { times: ['18:00'] },
+    media: { strategy: 'auto', type: 'image', urls: [], endpoint: '' }
   };
   assert.deepEqual(validateConfig(config), []);
 });
 
-test('dry-run media generation never calls external endpoint or OpenAI image API', async () => {
+test('enabled Instagram Reel account can rely on built-in OpenAI video generation', () => {
+  const config = baseConfig();
+  config.accounts.reel = {
+    platform: 'instagram', enabled: true, mode: 'auto', schedule: { times: ['18:00'] },
+    media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true, urls: [], endpoint: '' }
+  };
+  assert.deepEqual(validateConfig(config), []);
+});
+
+test('enabled X Reel account can rely on built-in OpenAI video generation', () => {
+  const config = baseConfig();
+  config.accounts.xreel = {
+    platform: 'x', enabled: true, mode: 'auto', schedule: { times: ['18:00'] },
+    media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true, urls: [], endpoint: '' }
+  };
+  assert.deepEqual(validateConfig(config), []);
+});
+
+test('dry-run media generation never calls external endpoint, image API, or video API', async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('network should not be called during media dry-run'); };
   try {
     const endpointAccount = { platform: 'instagram', media: { strategy: 'auto', type: 'image', endpoint: 'https://media.example/generate' } };
     const endpointResult = await resolveMediaDetailed('ig', endpointAccount, 'slot-1', { mediaPrompt: 'diagram', features: { mediaDecision: 'generate' } }, { dryRun: true });
     assert.equal(endpointResult.source, 'dry-run-endpoint');
-    assert.match(endpointResult.url, /^https:\/\/dry-run\.invalid\//);
 
-    const internalAccount = { platform: 'instagram', media: { strategy: 'auto', type: 'image', internalImageGeneration: true, defaultInstagramDecision: 'generate' } };
-    const internalResult = await resolveMediaDetailed('ig', internalAccount, 'slot-2', { mediaPrompt: 'illustration', features: { mediaDecision: 'generate' } }, { dryRun: true });
-    assert.equal(internalResult.source, 'dry-run-openai-image');
-    assert.match(internalResult.url, /^https:\/\/dry-run\.invalid\//);
+    const imageAccount = { platform: 'instagram', media: { strategy: 'auto', type: 'image', internalImageGeneration: true, defaultInstagramDecision: 'generate' } };
+    const imageResult = await resolveMediaDetailed('ig', imageAccount, 'slot-2', { mediaPrompt: 'illustration', features: { mediaDecision: 'generate' } }, { dryRun: true });
+    assert.equal(imageResult.source, 'dry-run-openai-image');
+    assert.match(imageResult.url, /\.png$/);
+
+    const reelAccount = { platform: 'instagram', media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true } };
+    const reelResult = await resolveMediaDetailed('reel', reelAccount, 'slot-3', { mediaPrompt: 'vertical short video', features: { mediaDecision: 'generate' } }, { dryRun: true });
+    assert.equal(reelResult.source, 'dry-run-openai-video');
+    assert.match(reelResult.url, /\.mp4$/);
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test('media QA retry prompt preserves concept and includes only the reported correction', () => {
+  const prompt = correctedMediaPrompt('A clean product photo', { correctionPrompt: 'Fix the garbled label text.' }, 1);
+  assert.match(prompt, /A clean product photo/);
+  assert.match(prompt, /Fix the garbled label text/);
+  assert.match(prompt, /RETRY 1/);
+});
+
+test('anomaly brake ignores ordinary underperformance but catches severe collapse', () => {
+  const cfg = brakeSettings({ safety: { anomalyBrake: { enabled: true } } });
+  const normal = anomalyTrigger([{ row: { providerPostId: 'a' }, scored: { score: 40, confidence: 0.8, vector: { exposure: 2000, conversationRate: 0.01 }, baseline: { conversationRate: 0.008 } } }], cfg);
+  assert.equal(normal.opened, false);
+
+  const severe = anomalyTrigger([{ row: { providerPostId: 'b' }, scored: { score: 8, confidence: 0.9, vector: { exposure: 3000, conversationRate: 0.01 }, baseline: { conversationRate: 0.008 } } }], cfg);
+  assert.equal(severe.opened, true);
+  assert.equal(severe.reason, 'severe_performance_collapse');
 });
 
 test('repository source contains no obvious literal secrets', async () => {

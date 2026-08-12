@@ -13,6 +13,7 @@ import { recentHumanFeedback } from './feedback/store.mjs';
 import { loadExperimentState } from './experiments/store.mjs';
 import { assignmentForSlot } from './experiments/engine.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
+import { assertAutonomyBrakeClear } from './ops/brake.mjs';
 import { publish } from './publish.mjs';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
@@ -30,6 +31,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 
     for (const slot of slots) {
       if (!force && await slotHandled(slot.slotId)) { report.push({ account: accountId, slot: slot.slotId, status: 'already-handled' }); continue; }
+      try { await assertAutonomyBrakeClear(accountId, account); }
+      catch (error) {
+        report.push({ account: accountId, slot: slot.slotId, status: 'safety-brake', reason: error.reason || error.message, openUntil: error.openUntil || null });
+        await appendAudit({ account: accountId, stage: 'autopilot-safety-brake', slotId: slot.slotId, reason: error.reason || null, openUntil: error.openUntil || null });
+        continue;
+      }
       try { await assertCircuitClosed(accountId, 'autopilot', account.resilience); }
       catch (error) { report.push({ account: accountId, slot: slot.slotId, status: 'circuit-open', reason: error.message, openUntil: error.openUntil || null }); continue; }
 
@@ -56,12 +63,18 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const sources = (draft.sources || []).slice(0, 30);
         const payload = {
           account: accountId, text: draft.text, mediaUrl: media.url || undefined, mediaType: account.media?.type || 'image', dryRun,
+          mediaAltText: String(media.altText || '').slice(0, 1000), mediaQa: media.qa || null,
           source: account.mode === 'approval' ? 'approval' : 'auto', slotId: slot.slotId,
           features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment, sources,
           mediaResolution: { decision: media.decision, source: media.source },
           ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length }
         };
-        await appendAudit({ account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(media.url), mediaSource: media.source, experiment, sourceCount: sources.length, dryRun });
+        await appendAudit({
+          account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode,
+          features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(media.url), mediaSource: media.source,
+          mediaQa: media.qa ? { pass: media.qa.pass, score: media.qa.score, issues: media.qa.issues?.slice(0, 5) || [] } : null,
+          experiment, sourceCount: sources.length, dryRun
+        });
 
         if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
@@ -71,9 +84,17 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
         report.push({ account: accountId, slot: slot.slotId, status: 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        if (!['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN'].includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
-        await appendAudit({ account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null, error: String(error.message || error).slice(0, 500), dryRun });
-        const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted' : error.code === 'CIRCUIT_OPEN' ? 'circuit-open' : 'failed'; report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE'];
+        if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
+        await appendAudit({
+          account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
+          error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
+        });
+        const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted'
+          : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
+            : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
+              : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
+        report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }
   }
