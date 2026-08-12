@@ -9,11 +9,15 @@ export async function readHumanFeedback() {
 }
 
 export async function recentHumanFeedback(accountId, limit = 40) {
-  const rows = await readHumanFeedback();
-  return rows
-    .filter((row) => row.account === accountId && row.active !== false)
-    .slice(-Math.max(1, Number(limit) || 40))
-    .reverse();
+  const rows = (await readHumanFeedback()).filter((row) => row.account === accountId && row.active !== false);
+  const pinned = rows.filter((row) => row.action === 'pin');
+  const rolling = rows.filter((row) => row.action !== 'pin').slice(-Math.max(1, Number(limit) || 40));
+  const deduped = new Map();
+  for (const row of [...pinned, ...rolling]) {
+    const key = `${row.at || ''}|${row.action || ''}|${row.note || ''}|${row.dimension || ''}|${row.value || ''}`;
+    deduped.set(key, row);
+  }
+  return [...deduped.values()].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
 }
 
 export async function recordHumanFeedback(input = {}) {
