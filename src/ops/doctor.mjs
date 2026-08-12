@@ -32,8 +32,7 @@ function usesOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
     || account.research?.trendIntelligence === true
-    || usesBuiltInMedia(account)
-    || account.media?.qa?.enabled === true;
+    || usesBuiltInMedia(account);
 }
 
 function credentialExpiry(entry) {
