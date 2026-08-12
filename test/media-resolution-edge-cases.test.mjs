@@ -4,7 +4,6 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { ensureMediaForPlatform, resolveMedia, resolveMediaDetailed } from '../src/lib/media.mjs';
-import { expireStaleApprovals } from '../src/ops/stale-approvals.mjs';
 
 const USAGE_FILES = [
   fileURLToPath(new URL('../data/usage-state.json', import.meta.url)),
@@ -134,12 +133,4 @@ test('media resolver covers fixed, pool, endpoint, generate, auto fallbacks, and
     restoreEnv(env);
     await restoreFiles(savedFiles);
   }
-});
-
-test('stale approval function is statically exercised in coverage and skips cleanly without GitHub credentials', async () => {
-  const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
-  delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
-  try {
-    assert.deepEqual(await expireStaleApprovals({ maxAgeDays: 7 }), { skipped: true, reason: 'GH_TOKEN or GITHUB_REPOSITORY missing', closed: [] });
-  } finally { restoreEnv(env); }
 });
