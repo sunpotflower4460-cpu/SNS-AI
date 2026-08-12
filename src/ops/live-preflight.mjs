@@ -79,7 +79,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
 
   for (const [id, account] of selected) {
     try {
-      const resolved = await resolveAccount(id);
+      const resolved = await resolveAccount(id, { allowDisabled: Boolean(accountFilter) });
       let identity;
       if (resolved.platform === 'x') identity = await verifyXCredential(resolved.credential);
       else if (resolved.platform === 'instagram') identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
@@ -90,6 +90,8 @@ export async function runLivePreflight({ accountFilter } = {}) {
         platform: resolved.platform,
         ok: Boolean(mediaReady),
         identity,
+        enabled: Boolean(account.enabled),
+        mode: account.mode || 'pause',
         builtInImage: usesBuiltInImage(account) ? { configured: true, hostingReady: Boolean(mediaHosting.ok), note: 'Image-model access itself is confirmed on the first real generation; preflight does not spend an image generation.' } : { configured: false }
       });
     } catch (error) {
