@@ -15,9 +15,19 @@ export function validateConfig(config) {
     for (const time of account.schedule?.times || []) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
     for (const time of account.schedule?.adaptiveCandidateTimes || []) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
 
+    const generation = merged(config, account, 'generation');
+    positive(errors, id, 'generation.historyWindow', generation.historyWindow);
+    positive(errors, id, 'generation.maxAttempts', generation.maxAttempts);
+    positive(errors, id, 'generation.candidateCount', generation.candidateCount);
+    positive(errors, id, 'generation.maxOutputTokens', generation.maxOutputTokens);
+    if (generation.duplicateThreshold != null && (Number(generation.duplicateThreshold) < 0 || Number(generation.duplicateThreshold) > 1)) errors.push(`${id}: generation.duplicateThreshold must be 0..1`);
+
     const learning = merged(config, account, 'learning');
     if (learning.exploreRate != null && (Number(learning.exploreRate) < 0 || Number(learning.exploreRate) > 1)) errors.push(`${id}: learning.exploreRate must be 0..1`);
     if (learning.adaptiveScheduleMinConfidence != null && (Number(learning.adaptiveScheduleMinConfidence) < 0 || Number(learning.adaptiveScheduleMinConfidence) > 1)) errors.push(`${id}: learning.adaptiveScheduleMinConfidence must be 0..1`);
+    positive(errors, id, 'learning.strategyWindowDays', learning.strategyWindowDays);
+    positive(errors, id, 'learning.matureCheckpointMinutes', learning.matureCheckpointMinutes);
+    positive(errors, id, 'learning.fullConfidencePosts', learning.fullConfidencePosts);
 
     const analytics = merged(config, account, 'analytics');
     const checkpoints = analytics.checkpointsMinutes || [];
