@@ -13,7 +13,20 @@
     "safety": {
       "moderation": true,
       "maxPostsPerDay": 6,
-      "minMinutesBetweenPosts": 30
+      "minMinutesBetweenPosts": 30,
+      "anomalyBrake": {
+        "enabled": true,
+        "matureCheckpointMinutes": 1440,
+        "minBaselinePosts": 5,
+        "minConfidence": 0.55,
+        "minExposure": 500,
+        "severeScoreThreshold": 12,
+        "lowScoreThreshold": 25,
+        "consecutiveLowPosts": 2,
+        "conversationSpikeMultiplier": 5,
+        "minimumConversationRate": 0.02,
+        "cooldownHours": 12
+      }
     },
     "analytics": {
       "enabled": true,
@@ -47,7 +60,8 @@
       "openaiCallsPerDay": 300,
       "webSearchCallsPerDay": 60,
       "mediaCallsPerDay": 60,
-      "imageGenerationsPerDay": 10
+      "imageGenerationsPerDay": 10,
+      "videoGenerationsPerDay": 4
     },
     "experiments": {
       "enabled": true,
@@ -70,11 +84,26 @@
     "media": {
       "strategy": "none",
       "internalImageGeneration": true,
+      "internalVideoGeneration": true,
       "imageModel": "gpt-image-2",
       "imageSize": "1024x1024",
       "imageQuality": "medium",
+      "videoModel": "sora-2",
+      "videoSize": "720x1280",
+      "videoSeconds": 8,
+      "videoTimeoutMinutes": 15,
+      "videoPollSeconds": 8,
       "maxDownloadBytes": 26214400,
-      "maxHostedImageBytes": 15728640
+      "maxHostedImageBytes": 15728640,
+      "maxHostedVideoBytes": 262144000,
+      "qa": {
+        "enabled": true,
+        "model": "gpt-5",
+        "detail": "high",
+        "minScore": 75,
+        "maxRegenerations": 1,
+        "maxInputBytes": 15728640
+      }
     }
   },
   "accounts": {
