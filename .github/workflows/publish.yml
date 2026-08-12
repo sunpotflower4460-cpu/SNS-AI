@@ -1,0 +1,103 @@
+name: Publish social post
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Account ID from config/accounts.json
+        required: true
+        type: string
+      text:
+        description: Post text/caption
+        required: false
+        type: string
+      media_url:
+        description: Public HTTPS media URL (required by Instagram)
+        required: false
+        type: string
+      media_type:
+        description: image or reel (Instagram); X v0.1 supports image media
+        required: false
+        default: image
+        type: choice
+        options: [image, reel]
+      dry_run:
+        description: Validate without publishing
+        required: false
+        default: true
+        type: boolean
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[publish]')
+    runs-on: ubuntu-latest
+    env:
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build payload
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_ACCOUNT: ${{ inputs.account }}
+          INPUT_TEXT: ${{ inputs.text }}
+          INPUT_MEDIA_URL: ${{ inputs.media_url }}
+          INPUT_MEDIA_TYPE: ${{ inputs.media_type }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+
+          let payload;
+          if (process.env.EVENT_NAME === 'issues') {
+            try {
+              payload = JSON.parse(process.env.ISSUE_BODY || '');
+            } catch {
+              throw new Error('For [publish] issues, the issue body must be valid JSON.');
+            }
+          } else {
+            payload = {
+              account: process.env.INPUT_ACCOUNT,
+              text: process.env.INPUT_TEXT || '',
+              mediaUrl: process.env.INPUT_MEDIA_URL || undefined,
+              mediaType: process.env.INPUT_MEDIA_TYPE || 'image',
+              dryRun: String(process.env.INPUT_DRY_RUN).toLowerCase() === 'true'
+            };
+          }
+          writeFileSync('payload.json', JSON.stringify(payload));
+          NODE
+
+      - name: Validate source
+        run: npm test
+
+      - name: Publish
+        run: node src/publish.mjs --file payload.json
+
+      - name: Close command issue on success
+        if: success() && github.event_name == 'issues'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ Published successfully by GitHub Actions."
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
+
+      - name: Comment on command issue on failure
+        if: failure() && github.event_name == 'issues'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Publishing failed. Open the linked Actions run for details."
