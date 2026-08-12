@@ -22,9 +22,10 @@ test('every source module can be imported in a keyless runtime', async () => {
   const files = (await sourceModules(SRC)).sort();
   assert.ok(files.length > 20, `Expected a substantial source tree; found ${files.length} modules.`);
   const failures = [];
-  for (const [index, path] of files.entries()) {
+  for (const path of files) {
     try {
-      await import(`${pathToFileURL(path).href}?import_all=${index}`);
+      // Use the canonical URL so V8 coverage merges this load with executions from other tests.
+      await import(pathToFileURL(path).href);
     } catch (error) {
       failures.push(`${path}: ${error?.stack || error}`);
     }
