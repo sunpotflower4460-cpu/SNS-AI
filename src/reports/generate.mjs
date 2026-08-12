@@ -29,7 +29,8 @@ export async function generateReport() {
     const usage = {
       openai: await usageToday(accountId, account, 'openai'),
       webSearch: await usageToday(accountId, account, 'webSearch'),
-      media: await usageToday(accountId, account, 'media')
+      media: await usageToday(accountId, account, 'media'),
+      image: await usageToday(accountId, account, 'image')
     };
     const recentEvents = recentAudit(audit, accountId, 30);
     const errors = recentEvents.filter((row) => String(row.stage || '').includes('error')).slice(0, 5);
@@ -56,7 +57,7 @@ export async function generateReport() {
     if (row.trends?.top?.length) lines.push(`- Current trend candidates: ${row.trends.top.slice(0, 3).map((x) => `${x.topic} (${x.opportunityScore ?? x.relevance})`).join(', ')}`);
     if (row.trends?.sources?.length) lines.push(`- Trend sources recorded: ${row.trends.sources.length}`);
     if (row.experiment) lines.push(`- Active experiment: ${row.experiment.dimension} → ${row.experiment.variants.join(' vs ')}`);
-    lines.push(`- Usage today: OpenAI ${row.usageToday.openai}, web search ${row.usageToday.webSearch}, media ${row.usageToday.media}`);
+    lines.push(`- Usage today: OpenAI ${row.usageToday.openai}, web search ${row.usageToday.webSearch}, external media ${row.usageToday.media}, image generation ${row.usageToday.image}`);
     const openCircuits = Object.entries(row.circuits).filter(([, value]) => value?.open).map(([stage]) => stage);
     if (openCircuits.length) lines.push(`- ⚠ Open circuit(s): ${openCircuits.join(', ')}`);
     if (row.recentErrors.length) lines.push(`- Recent errors: ${row.recentErrors.map((x) => x.error || x.stage).join(' / ')}`);
