@@ -64,18 +64,22 @@ export async function moderateText(text, account) {
 
 function generationPrompt(accountId, account, history, context, feedback) {
   const recent = history.slice(0, Number(account.generation?.historyWindow ?? 30)).map((entry) => ({ at: entry.at, text: entry.text, features: entry.features || null }));
+  const humanFeedback = (context.humanFeedback || []).slice(0, 40).map((row) => ({
+    at: row.at, action: row.action, note: row.note, dimension: row.dimension || null, value: row.value || null
+  }));
   return {
     system: [
       'You operate exactly one social-media account. Never leak identity, facts, voice, or goals from another account.',
       'Generate several genuinely different publishable candidates and estimate their spread potential conservatively.',
       'Use trend information only when relevant and factual. Never fabricate personal experience, results, affiliations, or product usage.',
-      'Treat learned strategy as probabilistic evidence, never as permission to change the account identity or violate explicit instructions.',
+      'Explicit account identity/instructions and active human feedback outrank learned strategy. Learned strategy is only probabilistic evidence.',
+      'Never let performance optimization override explicit human feedback, account identity, safety rules, or factual accuracy.',
       'mediaDecision: none when text alone is best; library for existing account assets; search only for a licensed/trusted media service; generate for a new original visual.',
       'Avoid repeating recent posts in topic, hook, structure, and wording.'
     ].join('\n'),
     user: JSON.stringify({
       accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', generation: account.generation || {},
-      objectives: account.objectives || {}, recentPosts: recent, learnedStrategy: context.strategy || null, trendBrief: context.trends || null,
+      objectives: account.objectives || {}, recentPosts: recent, humanFeedback, learnedStrategy: context.strategy || null, trendBrief: context.trends || null,
       candidateCount: Number(account.generation?.candidateCount ?? 5), retryFeedback: feedback || ''
     }, null, 2)
   };
