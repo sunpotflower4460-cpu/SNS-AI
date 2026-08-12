@@ -44,7 +44,8 @@
       "enabled": true,
       "openaiCallsPerDay": 300,
       "webSearchCallsPerDay": 60,
-      "mediaCallsPerDay": 60
+      "mediaCallsPerDay": 60,
+      "imageGenerationsPerDay": 10
     },
     "experiments": {
       "enabled": true,
@@ -58,14 +59,20 @@
       "metricsRetentionDays": 120,
       "usageRetentionDays": 90,
       "auditRetentionDays": 180,
-      "quarantineRetentionDays": 30
+      "quarantineRetentionDays": 30,
+      "generatedMediaRetentionDays": 90
     },
     "objectives": {
       "weights": {}
     },
     "media": {
       "strategy": "none",
-      "maxDownloadBytes": 26214400
+      "internalImageGeneration": true,
+      "imageModel": "gpt-image-2",
+      "imageSize": "1024x1024",
+      "imageQuality": "medium",
+      "maxDownloadBytes": 26214400,
+      "maxHostedImageBytes": 15728640
     }
   },
   "accounts": {
@@ -124,7 +131,7 @@
         "type": "image",
         "urls": [],
         "endpoint": "",
-        "defaultInstagramDecision": "library"
+        "defaultInstagramDecision": "generate"
       }
     }
   }
