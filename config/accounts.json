@@ -85,7 +85,7 @@
       "strategy": "none",
       "internalImageGeneration": true,
       "internalVideoGeneration": true,
-      "imageModel": "gpt-image-2",
+      "imageModel": "gpt-image-1",
       "imageSize": "1024x1024",
       "imageQuality": "medium",
       "videoModel": "sora-2",
@@ -138,7 +138,7 @@
       "mode": "pause",
       "credentialKey": "example-instagram",
       "displayName": "Example Instagram account",
-      "apiVersion": "v23.0",
+      "apiVersion": "v25.0",
       "profile": {
         "identity": "Describe who this account is.",
         "goal": "Describe what this account is trying to achieve.",
