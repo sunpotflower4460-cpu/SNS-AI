@@ -1,6 +1,6 @@
 import { loadAccounts, resolveAccount } from '../lib/config.mjs';
 import { openaiRequest } from '../lib/openai.mjs';
-import { verifyXCredential } from '../providers/x.mjs';
+import { verifyXCredential, verifyXOAuth2Credential } from '../providers/x.mjs';
 import { verifyInstagramCredential } from '../providers/instagram.mjs';
 
 function parseArgs(argv) {
@@ -80,9 +80,16 @@ export async function runLivePreflight({ accountFilter } = {}) {
     try {
       const resolved = await resolveAccount(id, { allowDisabled: Boolean(accountFilter) });
       let identity;
-      if (resolved.platform === 'x') identity = await verifyXCredential(resolved.credential);
-      else if (resolved.platform === 'instagram') identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
-      else throw new Error(`Unsupported platform: ${resolved.platform}`);
+      let videoIdentity = null;
+      if (resolved.platform === 'x') {
+        identity = await verifyXCredential(resolved.credential);
+        if ((resolved.media?.type || 'image') === 'reel' && resolved.media?.strategy !== 'none') {
+          videoIdentity = await verifyXOAuth2Credential(resolved.credential);
+          if (String(videoIdentity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
+        }
+      } else if (resolved.platform === 'instagram') {
+        identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v23.0' });
+      } else throw new Error(`Unsupported platform: ${resolved.platform}`);
       const kind = builtInMediaKind(account);
       const mediaReady = !kind || mediaHosting.ok;
       rows.push({
@@ -90,6 +97,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
         platform: resolved.platform,
         ok: Boolean(mediaReady),
         identity,
+        xVideoOAuth2Identity: videoIdentity,
         enabled: Boolean(account.enabled),
         mode: account.mode || 'pause',
         builtInMedia: kind ? {
