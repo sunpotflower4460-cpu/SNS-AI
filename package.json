@@ -1,18 +1,22 @@
 {
   "name": "sns-ai",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Multi-account autonomous social publishing, analytics and learning engine for X and Instagram via GitHub Actions.",
+  "description": "Multi-account autonomous social publishing, analytics, learning and operations engine for X and Instagram via GitHub Actions.",
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/publish.mjs && node --check src/orchestrate.mjs && node --check src/validate-config.mjs && node --check src/analytics/collector.mjs && node --check src/learning/learn.mjs && node --check src/research/trends.mjs && node --check src/reports/generate.mjs && node --check src/providers/x.mjs && node --check src/providers/instagram.mjs",
+    "check": "node --check src/publish.mjs && node --check src/orchestrate.mjs && node --check src/validate-config.mjs && node --check src/analytics/collector.mjs && node --check src/learning/learn.mjs && node --check src/research/trends.mjs && node --check src/reports/generate.mjs && node --check src/feedback/store.mjs && node --check src/feedback/record.mjs && node --check src/ops/doctor.mjs && node --check src/ops/smoke.mjs && node --check src/ops/live-preflight.mjs && node --check src/providers/x.mjs && node --check src/providers/instagram.mjs",
     "validate": "node src/validate-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
     "metrics": "node src/analytics/collector.mjs",
     "learn": "node src/learning/learn.mjs",
     "trends": "node src/research/trends.mjs",
-    "report": "node src/reports/generate.mjs"
+    "report": "node src/reports/generate.mjs",
+    "doctor": "node src/ops/doctor.mjs",
+    "smoke": "node src/ops/smoke.mjs",
+    "preflight": "node src/ops/live-preflight.mjs",
+    "feedback": "node src/feedback/record.mjs"
   }
 }
