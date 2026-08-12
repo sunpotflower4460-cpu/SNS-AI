@@ -7,7 +7,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test --test-concurrency=1",
-    "coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-lines=50 --test-coverage-branches=50 --test-coverage-functions=40",
+    "coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-lines=80 --test-coverage-branches=54 --test-coverage-functions=75",
     "check": "node src/ops/check-all.mjs",
     "validate": "node src/validate-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
