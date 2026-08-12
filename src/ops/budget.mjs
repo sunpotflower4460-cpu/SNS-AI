@@ -1,8 +1,9 @@
 import { fileURLToPath } from 'node:url';
-import { appendJsonl, readJsonl } from '../lib/json-store.mjs';
+import { appendJsonl, readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 import { localDateKey } from '../lib/schedule.mjs';
 
 const FILE = fileURLToPath(new URL('../../data/usage.jsonl', import.meta.url));
+const STATE_FILE = fileURLToPath(new URL('../../data/usage-state.json', import.meta.url));
 const LIMIT_KEYS = {
   openai: 'openaiCallsPerDay',
   webSearch: 'webSearchCallsPerDay',
@@ -10,11 +11,26 @@ const LIMIT_KEYS = {
   image: 'imageGenerationsPerDay'
 };
 
-export async function usageToday(accountId, account, kind) {
-  const rows = await readJsonl(FILE);
+function dateFor(account) {
   const timeZone = account?.schedule?.timezone || account?.timezone || 'Asia/Tokyo';
-  const today = localDateKey(new Date(), timeZone);
-  return rows.filter((row) => row.account === accountId && row.kind === kind && row.localDate === today).length;
+  return localDateKey(new Date(), timeZone);
+}
+
+async function loadState() {
+  return await readJson(STATE_FILE, { accounts: {} }) || { accounts: {} };
+}
+
+function currentRow(state, accountId, account) {
+  const today = dateFor(account);
+  const previous = state.accounts?.[accountId];
+  if (!previous || previous.localDate !== today) return { localDate: today, counts: {} };
+  return { localDate: previous.localDate, counts: { ...(previous.counts || {}) } };
+}
+
+export async function usageToday(accountId, account, kind) {
+  const state = await loadState();
+  const row = currentRow(state, accountId, account);
+  return Number(row.counts?.[kind] || 0);
 }
 
 export async function assertUsageBudget(accountId, account, kind) {
@@ -36,12 +52,19 @@ export async function assertUsageBudget(accountId, account, kind) {
 }
 
 export async function recordUsage(accountId, account, kind, detail = {}) {
-  const timeZone = account?.schedule?.timezone || account?.timezone || 'Asia/Tokyo';
+  const state = await loadState();
+  state.accounts ||= {};
+  const rowState = currentRow(state, accountId, account);
+  rowState.counts[kind] = Number(rowState.counts[kind] || 0) + 1;
+  state.accounts[accountId] = rowState;
+  await writeJsonAtomic(STATE_FILE, state);
+
   const row = {
     at: new Date().toISOString(),
-    localDate: localDateKey(new Date(), timeZone),
+    localDate: rowState.localDate,
     account: accountId,
     kind,
+    countToday: rowState.counts[kind],
     ...detail
   };
   await appendJsonl(FILE, row);
