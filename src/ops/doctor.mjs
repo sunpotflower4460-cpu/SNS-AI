@@ -14,7 +14,7 @@ function xUsesMedia(account) {
 function credentialRequirements(account) {
   if (account.platform === 'x') {
     const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-    if (xUsesMedia(account)) required.push('oauth2AccessToken', 'oauth2RefreshToken');
+    if (xUsesMedia(account)) required.push('oauth2ClientId', 'oauth2RefreshToken');
     return required;
   }
   if (account.platform === 'instagram') return ['accessToken', 'igUserId'];
@@ -71,7 +71,7 @@ function mediaReadiness(account) {
   const warnings = [];
   if (account.platform === 'x') {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
-    if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access; oauth2RefreshToken is required as evidence of offline authorization.');
+    if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access. Refreshed OAuth2 tokens are encrypted into data/x-oauth2-state.json using X_OAUTH2_STATE_KEY.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
     return { blockers, warnings };
   }
@@ -102,6 +102,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   const configErrors = validateConfig(config);
   const openaiPresent = Boolean(process.env.OPENAI_API_KEY);
+  const xStateKeyPresent = String(process.env.X_OAUTH2_STATE_KEY || '').length >= 32;
   const rawCredentials = process.env.SOCIAL_CREDENTIALS_JSON || '';
   const credentials = parseCredentials(rawCredentials);
   const rows = [];
@@ -113,6 +114,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
     const liveRelevant = account.enabled === true && account.mode !== 'pause';
 
     if (liveRelevant && usesOpenAI(account) && !openaiPresent) blockers.push('OPENAI_API_KEY is missing.');
+    if (liveRelevant && xUsesMedia(account) && !xStateKeyPresent) blockers.push('X_OAUTH2_STATE_KEY is missing or shorter than 32 characters.');
     if (liveRelevant) {
       if (!rawCredentials) blockers.push('SOCIAL_CREDENTIALS_JSON is missing.');
       else if (credentials.error) blockers.push(`SOCIAL_CREDENTIALS_JSON is invalid JSON: ${credentials.error}`);
@@ -139,13 +141,14 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
     configErrors,
     environment: {
       openaiApiKeyPresent: openaiPresent,
+      xOAuth2StateKeyPresent: xStateKeyPresent,
       socialCredentialsPresent: Boolean(rawCredentials),
       socialCredentialsJsonValid: rawCredentials ? !credentials.error : null,
       mediaServiceTokenPresent: Boolean(process.env.MEDIA_SERVICE_TOKEN)
