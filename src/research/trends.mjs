@@ -22,11 +22,12 @@ export async function refreshTrends({ accountFilter, force = false } = {}) {
       const ranked = (result.items || []).map((item) => ({ ...item,
         opportunityScore: Math.round((Number(item.relevance || 0) * 0.45 + Number(item.novelty || 0) * 0.30 + (100 - Number(item.saturation || 0)) * 0.15 + (100 - Number(item.risk || 0)) * 0.10) * 10) / 10
       })).sort((a, b) => b.opportunityScore - a.opportunityScore);
-      const brief = { account: accountId, generatedAt: new Date().toISOString(), summary: result.summary || '', items: ranked };
+      const sources = (result.citations || []).slice(0, 30);
+      const brief = { account: accountId, generatedAt: new Date().toISOString(), summary: result.summary || '', items: ranked, sources };
       await writeJsonAtomic(pathFor(accountId), brief);
       await recordCircuitSuccess(accountId, 'research', account.resilience);
-      await appendAudit({ account: accountId, stage: 'trend-updated', count: ranked.length, top: ranked.slice(0, 3).map((x) => ({ topic: x.topic, opportunityScore: x.opportunityScore })) });
-      report.push({ account: accountId, status: 'updated', top: ranked.slice(0, 3) });
+      await appendAudit({ account: accountId, stage: 'trend-updated', count: ranked.length, sourceCount: sources.length, top: ranked.slice(0, 3).map((x) => ({ topic: x.topic, opportunityScore: x.opportunityScore })) });
+      report.push({ account: accountId, status: 'updated', top: ranked.slice(0, 3), sourceCount: sources.length });
     } catch (error) {
       if (!['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN'].includes(error.code)) await recordCircuitFailure(accountId, 'research', error, account.resilience);
       await appendAudit({ account: accountId, stage: 'trend-error', code: error.code || null, error: String(error.message || error).slice(0, 500) });
