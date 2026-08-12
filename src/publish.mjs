@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolveAccount } from './lib/config.mjs';
 import { appendHistory } from './lib/history.mjs';
 import { appendAudit } from './lib/audit.mjs';
+import { validateDraftText } from './lib/safety.mjs';
 import { markSlot } from './lib/state.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
 import { publishX } from './providers/x.mjs';
@@ -13,7 +14,9 @@ function providerPostId(result) { return result?.data?.id || result?.postId || r
 
 export async function publish(payload) {
   const account = await resolveAccount(payload.account);
-  const common = { text: payload.text || '', mediaUrl: payload.mediaUrl || undefined, mediaType: payload.mediaType || 'image', credential: account.credential, dryRun: Boolean(payload.dryRun) };
+  const text = String(payload.text || '').trim();
+  if (text) validateDraftText(account, text);
+  const common = { text, mediaUrl: payload.mediaUrl || undefined, mediaType: payload.mediaType || 'image', credential: account.credential, dryRun: Boolean(payload.dryRun) };
   if (!payload.dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
   await appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), sourceCount: (payload.sources || []).length });
 
@@ -27,7 +30,7 @@ export async function publish(payload) {
       const postId = providerPostId(result);
       await appendHistory({
         account: payload.account, platform: account.platform, status: 'published', source: payload.source || 'manual', slotId: payload.slotId || null,
-        text: payload.text || '', mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, providerPostId: postId, ai: payload.ai || null,
+        text, mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, providerPostId: postId, ai: payload.ai || null,
         features: payload.features || null, rationale: payload.rationale || null, predictedScore: payload.predictedScore ?? null, selectionMode: payload.selectionMode || null,
         experiment: payload.experiment || null, sources: (payload.sources || []).slice(0, 30)
       });
