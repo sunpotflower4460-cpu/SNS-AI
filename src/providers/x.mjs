@@ -3,6 +3,7 @@ import { fetchJson, downloadMedia } from '../lib/http.mjs';
 
 const CREATE_POST_URL = 'https://api.x.com/2/tweets';
 const MEDIA_UPLOAD_URL = 'https://api.x.com/2/media/upload';
+const MEDIA_METADATA_URL = 'https://api.x.com/2/media/metadata';
 const VERIFY_USER_URL = 'https://api.x.com/2/users/me?user.fields=id,name,username';
 
 const pct = (value) => encodeURIComponent(String(value))
@@ -39,7 +40,20 @@ function oauthHeader(method, url, credentials) {
     .join(', ')}`;
 }
 
-async function uploadImage(mediaUrl, credentials) {
+async function setAltText(mediaId, text, credentials) {
+  const altText = String(text || '').trim().slice(0, 1000);
+  if (!altText) return;
+  await fetchJson(MEDIA_METADATA_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: oauthHeader('POST', MEDIA_METADATA_URL, credentials),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ id: String(mediaId), metadata: { alt_text: { text: altText } } })
+  });
+}
+
+async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   const maxBytes = 5 * 1024 * 1024;
   const { bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes });
   if (!contentType.startsWith('image/')) {
@@ -60,6 +74,7 @@ async function uploadImage(mediaUrl, credentials) {
 
   const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
   if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
+  if (mediaAltText) await setAltText(mediaId, mediaAltText, credentials);
   return String(mediaId);
 }
 
@@ -72,14 +87,14 @@ export async function verifyXCredential(credential) {
   return { id: body.data.id, username: body.data.username || null, name: body.data.name || null };
 }
 
-export async function publishX({ text = '', mediaUrl, credential, dryRun = false }) {
+export async function publishX({ text = '', mediaUrl, mediaAltText = '', credential, dryRun = false }) {
   if (!text && !mediaUrl) throw new Error('X requires text or mediaUrl.');
-  if (dryRun) return { dryRun: true, platform: 'x', text, mediaUrl: mediaUrl || null };
+  if (dryRun) return { dryRun: true, platform: 'x', text, mediaUrl: mediaUrl || null, mediaAltText: mediaAltText || null };
 
   const payload = {};
   if (text) payload.text = text;
   if (mediaUrl) {
-    const mediaId = await uploadImage(mediaUrl, credential);
+    const mediaId = await uploadImage(mediaUrl, credential, mediaAltText);
     payload.media = { media_ids: [mediaId] };
   }
 
