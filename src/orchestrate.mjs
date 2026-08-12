@@ -44,7 +44,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
 
         const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId });
-        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft);
+        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun });
         ensureMediaForPlatform(account, media.url);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
         const experimentApplied = experimentAssignment
@@ -61,7 +61,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           mediaResolution: { decision: media.decision, source: media.source },
           ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length }
         };
-        await appendAudit({ account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(media.url), mediaSource: media.source, experiment, sourceCount: sources.length });
+        await appendAudit({ account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(media.url), mediaSource: media.source, experiment, sourceCount: sources.length, dryRun });
 
         if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
@@ -72,7 +72,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         report.push({ account: accountId, slot: slot.slotId, status: 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
         if (!['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN'].includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
-        await appendAudit({ account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null, error: String(error.message || error).slice(0, 500) });
+        await appendAudit({ account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null, error: String(error.message || error).slice(0, 500), dryRun });
         const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted' : error.code === 'CIRCUIT_OPEN' ? 'circuit-open' : 'failed'; report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }
