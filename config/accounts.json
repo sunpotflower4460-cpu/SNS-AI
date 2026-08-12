@@ -1,0 +1,17 @@
+{
+  "accounts": {
+    "example-x": {
+      "platform": "x",
+      "enabled": false,
+      "credentialKey": "example-x",
+      "displayName": "Example X account"
+    },
+    "example-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "credentialKey": "example-instagram",
+      "displayName": "Example Instagram account",
+      "apiVersion": "v23.0"
+    }
+  }
+}
