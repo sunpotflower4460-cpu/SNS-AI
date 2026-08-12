@@ -41,9 +41,10 @@ function mediaBlockers(account) {
   return [];
 }
 
-export async function buildReadinessReport() {
+export async function buildReadinessReport({ accountFilter } = {}) {
   const config = await loadConfig();
   const accounts = await loadAccounts();
+  if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   const configErrors = validateConfig(config);
   const openaiPresent = Boolean(process.env.OPENAI_API_KEY);
   const rawCredentials = process.env.SOCIAL_CREDENTIALS_JSON || '';
@@ -51,6 +52,7 @@ export async function buildReadinessReport() {
   const rows = [];
 
   for (const [id, account] of Object.entries(accounts)) {
+    if (accountFilter && id !== accountFilter) continue;
     const blockers = [];
     const warnings = [];
     const liveRelevant = account.enabled === true && account.mode !== 'pause';
@@ -89,6 +91,7 @@ export async function buildReadinessReport() {
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
     schemaVersion: 1,
+    accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
     configErrors,
@@ -140,11 +143,17 @@ export async function writeReadinessReport(report) {
   return jsonChanged || mdChanged;
 }
 
+function parseArgValue(argv, name) {
+  const index = argv.indexOf(name);
+  return index >= 0 ? argv[index + 1] : undefined;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const write = process.argv.includes('--write');
   const strict = process.argv.includes('--strict');
-  const report = await buildReadinessReport();
-  if (write) await writeReadinessReport(report);
+  const accountFilter = parseArgValue(process.argv, '--account');
+  const report = await buildReadinessReport({ accountFilter });
+  if (write && !accountFilter) await writeReadinessReport(report);
   console.log(JSON.stringify(report, null, 2));
   if (strict && !report.ready) process.exitCode = 1;
 }
