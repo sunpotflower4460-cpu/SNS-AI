@@ -25,18 +25,47 @@
       "matureCheckpointMinutes": 1440,
       "minSamplesPerPattern": 2,
       "fullConfidencePosts": 20,
-      "humanFeedbackWindow": 40
+      "humanFeedbackWindow": 40,
+      "adaptiveSchedule": true,
+      "adaptiveScheduleMinConfidence": 0.45,
+      "adaptiveScheduleKeepAtLeast": 1
     },
     "research": {
       "webSearch": false,
       "trendIntelligence": false,
       "trendRefreshHours": 6
     },
+    "resilience": {
+      "enabled": true,
+      "failureThreshold": 3,
+      "cooldownMinutes": 60
+    },
+    "budgets": {
+      "enabled": true,
+      "openaiCallsPerDay": 300,
+      "webSearchCallsPerDay": 60,
+      "mediaCallsPerDay": 60
+    },
+    "experiments": {
+      "enabled": true,
+      "dimensions": ["hook", "format", "cta", "mediaDecision"],
+      "minSamplesPerVariant": 3,
+      "maxDays": 14,
+      "minimumStrategySamples": 6
+    },
+    "maintenance": {
+      "historyRetentionDays": 365,
+      "metricsRetentionDays": 120,
+      "usageRetentionDays": 90,
+      "auditRetentionDays": 180,
+      "quarantineRetentionDays": 30
+    },
     "objectives": {
       "weights": {}
     },
     "media": {
-      "strategy": "none"
+      "strategy": "none",
+      "maxDownloadBytes": 26214400
     }
   },
   "accounts": {
