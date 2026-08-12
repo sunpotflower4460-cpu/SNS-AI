@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { consumeUsage } from '../ops/budget.mjs';
 import { ensurePublicRelease, findAsset, uploadReleaseAsset } from './release-host.mjs';
+import { correctedMediaPrompt, reviewVisualBytes } from './qa.mjs';
 
 const OPENAI_VIDEOS_URL = 'https://api.openai.com/v1/videos';
+const MEDIA_QA_VERSION = 'qa-v1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safe(value) { return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video'; }
@@ -42,11 +44,11 @@ async function findReusableVideo({ prompt, model, size, seconds }) {
 async function createVideo(accountId, account, prompt) {
   const model = account.media?.videoModel || 'sora-2';
   const size = account.media?.videoSize || '720x1280';
-  const seconds = Number(account.media?.videoSeconds ?? 8);
+  const seconds = String(Number(account.media?.videoSeconds ?? 8));
   const reusable = await findReusableVideo({ prompt, model, size, seconds });
   if (reusable) return reusable;
 
-  await consumeUsage(accountId, account, 'video', { model, size, seconds });
+  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds) });
   const body = { model, prompt, size, seconds };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
@@ -83,9 +85,9 @@ async function waitForVideo(video, account) {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   while (Date.now() < deadline) {
     if (current?.status === 'completed') return current;
-    if (current?.status === 'failed' || current?.status === 'cancelled') {
+    if (current?.status === 'failed') {
       const detail = current?.error?.message || current?.error || current?.status;
-      throw new Error(`OpenAI video generation ${current.status}: ${detail}`);
+      throw new Error(`OpenAI video generation failed: ${detail}`);
     }
     if (!current?.id) throw new Error('OpenAI video job returned no id.');
     await sleep(pollSeconds * 1000);
@@ -94,51 +96,70 @@ async function waitForVideo(video, account) {
   throw new Error(`OpenAI video generation did not complete within ${timeoutMinutes} minute(s).`);
 }
 
-async function downloadVideo(videoId, maxBytes) {
-  const response = await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}/content`, { headers: authHeaders() });
+async function downloadAsset(videoId, variant, maxBytes) {
+  const suffix = variant && variant !== 'video' ? `?variant=${encodeURIComponent(variant)}` : '';
+  const response = await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}/content${suffix}`, { headers: authHeaders() });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Could not download generated video (${response.status}): ${body.slice(0, 300)}`);
+    throw new Error(`Could not download generated video ${variant || 'video'} (${response.status}): ${body.slice(0, 300)}`);
   }
-  const contentType = (response.headers.get('content-type') || 'video/mp4').split(';')[0];
+  const contentType = (response.headers.get('content-type') || (variant === 'thumbnail' ? 'image/jpeg' : 'video/mp4')).split(';')[0];
   const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new Error(`Generated video exceeds hosting limit (${maxBytes} bytes).`);
-
-  if (!response.body?.getReader) {
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new Error(`Generated video exceeds hosting limit (${maxBytes} bytes).`);
-    return { bytes, contentType };
-  }
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => {});
-      throw new Error(`Generated video exceeds hosting limit (${maxBytes} bytes).`);
-    }
-    chunks.push(Buffer.from(value));
-  }
-  return { bytes: Buffer.concat(chunks), contentType };
+  if (declared > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  return { bytes, contentType };
 }
 
-export async function generateAndHostVideo(accountId, account, slotId, draft) {
-  const prompt = String(draft?.mediaPrompt || '').trim();
-  if (!prompt) throw new Error('AI selected video generation but supplied no mediaPrompt.');
+async function deleteVideoQuietly(videoId) {
+  if (!videoId) return;
+  try { await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}`, { method: 'DELETE', headers: authHeaders() }); } catch { /* best effort */ }
+}
+
+export async function generateAndHostVideoDetailed(accountId, account, slotId, draft) {
+  const originalPrompt = String(draft?.mediaPrompt || '').trim();
+  if (!originalPrompt) throw new Error('AI selected video generation but supplied no mediaPrompt.');
   const model = account.media?.videoModel || 'sora-2';
   const size = account.media?.videoSize || '720x1280';
   const seconds = Number(account.media?.videoSeconds ?? 8);
   const release = await ensurePublicRelease();
-  const name = `${safe(accountId)}-${digest(`${slotId}|${model}|${size}|${seconds}|${prompt}`)}.mp4`;
-  const cached = await findAsset(release, name);
-  if (cached) return cached;
-
-  const created = await createVideo(accountId, account, prompt);
-  const completed = await waitForVideo(created, account);
   const maxBytes = Number(account.media?.maxHostedVideoBytes ?? 250 * 1024 * 1024);
-  const { bytes, contentType } = await downloadVideo(completed.id, maxBytes);
-  return uploadReleaseAsset(release, name, bytes, contentType || 'video/mp4');
+  const maxThumbnailBytes = Number(account.media?.qa?.maxInputBytes ?? 15 * 1024 * 1024);
+  const maxRegenerations = Math.max(0, Number(account.media?.qa?.maxRegenerations ?? 1));
+  let prompt = originalPrompt;
+  let lastQa = null;
+
+  for (let attempt = 0; attempt <= maxRegenerations; attempt += 1) {
+    const name = `${safe(accountId)}-${digest(`${MEDIA_QA_VERSION}|${slotId}|${model}|${size}|${seconds}|${prompt}`)}.mp4`;
+    const cached = await findAsset(release, name);
+    if (cached) return { url: cached, qa: { pass: true, cached: true, score: null, issues: [] }, altText: '', attempt, prompt };
+
+    const created = await createVideo(accountId, account, prompt);
+    const completed = await waitForVideo(created, account);
+    const thumbnail = await downloadAsset(completed.id, 'thumbnail', maxThumbnailBytes);
+    const qa = await reviewVisualBytes(accountId, account, thumbnail.bytes, thumbnail.contentType, {
+      mediaType: 'reel-thumbnail', prompt: originalPrompt, postText: draft?.text || ''
+    });
+    if (qa.pass) {
+      const video = await downloadAsset(completed.id, 'video', maxBytes);
+      const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
+      return { url, qa, altText: qa.altText || '', attempt, prompt, videoId: completed.id };
+    }
+
+    lastQa = qa;
+    await deleteVideoQuietly(completed.id);
+    if (attempt < maxRegenerations) {
+      prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
+      continue;
+    }
+  }
+
+  const error = new Error(`Generated Reel failed pre-publish QA after ${maxRegenerations + 1} attempt(s).`);
+  error.code = 'MEDIA_QA_FAILED';
+  error.qa = lastQa;
+  throw error;
+}
+
+export async function generateAndHostVideo(accountId, account, slotId, draft) {
+  return (await generateAndHostVideoDetailed(accountId, account, slotId, draft)).url;
 }
