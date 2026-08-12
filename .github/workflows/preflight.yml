@@ -1,0 +1,39 @@
+name: SNS Live Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Optional account ID; leave blank for all enabled accounts
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static checks
+        run: |
+          npm test
+          npm run validate
+          npm run check
+          npm run smoke
+      - name: Secret shape check
+        run: npm run doctor -- --strict
+      - name: Verify external credentials without posting
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          node src/ops/live-preflight.mjs "${args[@]}"
