@@ -24,12 +24,12 @@ async function waitForContainer({ base, containerId, accessToken }) {
 export async function verifyInstagramCredential({ credential, apiVersion = 'v23.0' }) {
   if (!credential?.igUserId) throw new Error('Instagram credential is missing "igUserId".');
   const base = `https://graph.instagram.com/${apiVersion}`;
-  const body = await fetchJson(`${base}/${credential.igUserId}?fields=id,username,account_type`, {
+  const body = await fetchJson(`${base}/${credential.igUserId}?fields=id,username`, {
     method: 'GET',
     headers: authHeaders(credential.accessToken)
   });
   if (!body?.id) throw new Error('Instagram credential check returned no account id.');
-  return { id: body.id, username: body.username || null, accountType: body.account_type || null };
+  return { id: body.id, username: body.username || null };
 }
 
 export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image', credential, apiVersion = 'v23.0', dryRun = false }) {
