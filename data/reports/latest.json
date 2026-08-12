@@ -1,0 +1,91 @@
+{
+  "generatedAt": "2026-08-12T11:58:17.888Z",
+  "policies": {
+    "x": null,
+    "instagram": null
+  },
+  "accounts": {
+    "example-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10
+      },
+      "recentErrors": []
+    },
+    "example-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10
+      },
+      "recentErrors": []
+    }
+  }
+}
