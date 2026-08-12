@@ -16,7 +16,7 @@ on:
         required: false
         type: string
       media_type:
-        description: image or reel (Instagram); X v0.1 supports image media
+        description: image or reel
         required: false
         default: image
         type: choice
@@ -27,15 +27,24 @@ on:
         default: true
         type: boolean
   issues:
-    types: [opened]
+    types: [opened, labeled]
 
 permissions:
-  contents: read
+  contents: write
   issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[publish]')
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'opened' && startsWith(github.event.issue.title, '[publish]')) ||
+      (github.event.action == 'labeled' &&
+       startsWith(github.event.issue.title, '[approval]') &&
+       github.event.label.name == 'approved')
     runs-on: ubuntu-latest
     env:
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
@@ -43,6 +52,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -66,7 +77,7 @@ jobs:
             try {
               payload = JSON.parse(process.env.ISSUE_BODY || '');
             } catch {
-              throw new Error('For [publish] issues, the issue body must be valid JSON.');
+              throw new Error('SNS command issue body must be valid JSON.');
             }
           } else {
             payload = {
@@ -74,17 +85,43 @@ jobs:
               text: process.env.INPUT_TEXT || '',
               mediaUrl: process.env.INPUT_MEDIA_URL || undefined,
               mediaType: process.env.INPUT_MEDIA_TYPE || 'image',
-              dryRun: String(process.env.INPUT_DRY_RUN).toLowerCase() === 'true'
+              dryRun: String(process.env.INPUT_DRY_RUN).toLowerCase() === 'true',
+              source: 'manual'
             };
           }
           writeFileSync('payload.json', JSON.stringify(payload));
           NODE
 
       - name: Validate source
-        run: npm test
+        run: |
+          npm test
+          npm run validate
+          npm run check
 
       - name: Publish
         run: node src/publish.mjs --file payload.json
+
+      - name: Persist published history/state
+        if: success()
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/)" ]]; then
+            echo "No state changes."
+            exit 0
+          fi
+
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: record SNS publish"
+
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "History push attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 3))
+          done
+
+          exit 1
 
       - name: Close command issue on success
         if: success() && github.event_name == 'issues'
@@ -92,7 +129,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ Published successfully by GitHub Actions."
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ Published successfully by SNS-AI."
           gh issue close "$ISSUE_NUMBER" --repo "$REPO"
 
       - name: Comment on command issue on failure
