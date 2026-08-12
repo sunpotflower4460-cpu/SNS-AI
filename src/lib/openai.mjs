@@ -33,11 +33,28 @@ export async function openaiRequest(path, body, meta = {}) {
     const error = new Error(parsed?.error?.message || `OpenAI API failed with ${response.status}`); error.status = response.status; error.body = parsed; throw error;
   }
 }
+
 function outputText(response) {
   if (typeof response.output_text === 'string') return response.output_text;
   for (const item of response.output || []) if (item.type === 'message') for (const content of item.content || []) if (content.type === 'output_text' && typeof content.text === 'string') return content.text;
   return '';
 }
+
+function extractUrlCitations(response) {
+  const found = new Map();
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { for (const child of value) visit(child); return; }
+    const citation = value.type === 'url_citation' ? value : value.url_citation;
+    const url = citation?.url || (value.type === 'url_citation' ? value.url : null);
+    const title = citation?.title || (value.type === 'url_citation' ? value.title : null);
+    if (typeof url === 'string' && /^https:\/\//i.test(url)) found.set(url, { url, title: typeof title === 'string' ? title : null });
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(response?.output || []);
+  return [...found.values()].slice(0, 30);
+}
+
 function parseJsonText(text) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try { return JSON.parse(cleaned); } catch { const s = cleaned.indexOf('{'); const e = cleaned.lastIndexOf('}'); if (s >= 0 && e > s) return JSON.parse(cleaned.slice(s, e + 1)); throw new Error('AI response was not valid JSON.'); }
@@ -60,6 +77,12 @@ const CANDIDATE_SCHEMA = {
   }
 };
 
+async function requestAndParse(body, meta) {
+  const response = await openaiRequest('/responses', body, meta);
+  const parsed = parseJsonText(outputText(response));
+  return { ...parsed, citations: extractUrlCitations(response) };
+}
+
 async function responseJson({ model, system, user, webSearch = false, schema = CANDIDATE_SCHEMA, name = 'social_output', accountId, account, operation }) {
   const body = { model, store: false, input: [
     { role: 'system', content: [{ type: 'input_text', text: system }] },
@@ -67,11 +90,11 @@ async function responseJson({ model, system, user, webSearch = false, schema = C
   ], text: { format: { type: 'json_schema', name, schema, strict: true } } };
   if (webSearch) body.tools = [{ type: 'web_search', search_context_size: 'medium' }];
   const meta = { accountId, account, webSearch, operation: operation || name };
-  try { return parseJsonText(outputText(await openaiRequest('/responses', body, meta))); }
+  try { return await requestAndParse(body, meta); }
   catch (error) {
     if (Number(error.status) !== 400) throw error;
     delete body.text;
-    return parseJsonText(outputText(await openaiRequest('/responses', body, meta)));
+    return requestAndParse(body, meta);
   }
 }
 
@@ -138,7 +161,7 @@ export async function generatePost(accountId, account, history = [], context = {
       const winner = ranked[0]; await moderateText(winner.text, account, accountId);
       return { text: winner.text, mediaPrompt: String(winner.mediaPrompt || ''), rationale: String(winner.rationale || ''),
         features: winner.features || {}, predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
-        promptVersion: PROMPT_VERSION,
+        sources: generated.citations || [], promptVersion: PROMPT_VERSION,
         experimentApplied: Boolean(experiment && String(winner.features?.[experiment.dimension] || '') === String(experiment.variant)),
         model, attempt, candidatesConsidered: ranked.length };
     }
