@@ -25,6 +25,26 @@ function usesOpenAI(account) {
     || account.research?.trendIntelligence === true;
 }
 
+function credentialExpiry(entry) {
+  if (!entry?.expiresAt) return { blockers: [], warnings: [] };
+  const expires = Date.parse(entry.expiresAt);
+  if (!Number.isFinite(expires)) return { blockers: [], warnings: ['Credential expiresAt is present but not a valid date.'] };
+  const days = (expires - Date.now()) / 86_400_000;
+  if (days <= 0) return { blockers: ['Credential is expired according to expiresAt.'], warnings: [] };
+  if (days <= 14) return { blockers: [], warnings: [`Credential expires in about ${Math.ceil(days)} day(s). Rotate it soon.`] };
+  return { blockers: [], warnings: [] };
+}
+
+function budgetWarnings(account) {
+  if (account.budgets?.enabled === false) return ['Usage budgets are disabled for this account.'];
+  const warnings = [];
+  for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay']) {
+    const value = Number(account.budgets?.[key]);
+    if (!Number.isFinite(value) || value <= 0) warnings.push(`${key} has no effective positive cap.`);
+  }
+  return warnings;
+}
+
 function mediaBlockers(account) {
   if (account.platform !== 'instagram') return [];
   const media = account.media || {};
@@ -54,7 +74,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
   for (const [id, account] of Object.entries(accounts)) {
     if (accountFilter && id !== accountFilter) continue;
     const blockers = [];
-    const warnings = [];
+    const warnings = [...budgetWarnings(account)];
     const liveRelevant = account.enabled === true && account.mode !== 'pause';
 
     if (liveRelevant && usesOpenAI(account) && !openaiPresent) blockers.push('OPENAI_API_KEY is missing.');
@@ -69,6 +89,9 @@ export async function buildReadinessReport({ accountFilter } = {}) {
           for (const key of credentialRequirements(account.platform)) {
             if (!entry[key]) blockers.push(`Credential "${credentialKey}.${key}" is missing.`);
           }
+          const expiry = credentialExpiry(entry);
+          blockers.push(...expiry.blockers);
+          warnings.push(...expiry.warnings);
         }
       }
       blockers.push(...mediaBlockers(account));
@@ -90,7 +113,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     accountFilter: accountFilter || null,
     ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
     state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
@@ -111,16 +134,15 @@ function markdown(report) {
     '',
     `Overall: **${report.state}**`,
     '',
-    '| Account | Platform | Mode | Ready | Blockers |',
+    '| Account | Platform | Mode | Ready | Blockers / warnings |',
     '|---|---|---|---:|---|'
   ];
   for (const row of report.accounts) {
-    lines.push(`| ${row.account} | ${row.platform} | ${row.mode} | ${row.ready ? 'yes' : 'no'} | ${row.blockers.join('<br>') || '-'} |`);
+    const notes = [...row.blockers, ...row.warnings.map((x) => `warning: ${x}`)];
+    lines.push(`| ${row.account} | ${row.platform} | ${row.mode} | ${row.ready ? 'yes' : 'no'} | ${notes.join('<br>') || '-'} |`);
   }
-  if (report.configErrors.length) {
-    lines.push('', '## Config errors', ...report.configErrors.map((value) => `- ${value}`));
-  }
-  lines.push('', '> Secret values are never written to this report; only presence/shape is checked.', '');
+  if (report.configErrors.length) lines.push('', '## Config errors', ...report.configErrors.map((value) => `- ${value}`));
+  lines.push('', '> Secret values are never written to this report; only presence/shape/optional expiry metadata is checked.', '');
   return lines.join('\n');
 }
 
