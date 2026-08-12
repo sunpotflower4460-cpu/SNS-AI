@@ -33,3 +33,9 @@ jobs:
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |f| YAML.safe_load(File.read(f), aliases: true); puts "YAML OK: #{f}" }'
       - name: Key-safe configuration doctor
         run: npm run doctor
+      - name: Keyless operational runtime checks
+        run: |
+          npm run report
+          npm run weekly-report
+          npm run maintenance
+          npm run report
