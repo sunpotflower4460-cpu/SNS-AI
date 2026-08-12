@@ -25,8 +25,7 @@ export async function generateReport() {
     const scored = latestMetrics.map((s) => ({ providerPostId: s.providerPostId, checkpointMinutes: s.checkpointMinutes, ...scoreSnapshot(s, snapshots, account.objectives?.weights || {}) })).sort((a, b) => b.score - a.score);
     const strategy = await loadStrategy(accountId); const trends = await loadTrendBrief(accountId); const experiments = await loadExperimentState(accountId);
     const feedback = await recentHumanFeedback(accountId, 10);
-    const autopilotCircuit = await circuitStatus(accountId, 'autopilot', account.resilience);
-    const publishCircuit = await circuitStatus(accountId, 'publish', account.resilience);
+    const circuits = Object.fromEntries(await Promise.all(['autopilot', 'publish', 'analytics', 'research'].map(async (stage) => [stage, await circuitStatus(accountId, stage, account.resilience)])));
     const usage = {
       openai: await usageToday(accountId, account, 'openai'),
       webSearch: await usageToday(accountId, account, 'webSearch'),
@@ -38,11 +37,11 @@ export async function generateReport() {
       platform: account.platform, enabled: Boolean(account.enabled), mode: account.mode || 'pause', postCount: posts.length,
       lastPost: posts[0] || null, bestRecent: scored[0] || null,
       strategy: strategy ? { generatedAt: strategy.generatedAt, sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred, avoid: strategy.avoid } : null,
-      trends: trends ? { generatedAt: trends.generatedAt, summary: trends.summary, top: trends.items?.slice(0, 5) || [] } : null,
+      trends: trends ? { generatedAt: trends.generatedAt, summary: trends.summary, top: trends.items?.slice(0, 5) || [], sources: trends.sources || [] } : null,
       experiment: experiments.active || null,
       completedExperiments: (experiments.completed || []).slice(-3).reverse(),
       humanFeedback: feedback,
-      circuits: { autopilot: autopilotCircuit, publish: publishCircuit },
+      circuits,
       usageToday: usage,
       budgets: account.budgets || {},
       recentErrors: errors
@@ -55,9 +54,11 @@ export async function generateReport() {
     if (row.bestRecent) lines.push(`- Best recent performance score: ${row.bestRecent.score} (confidence ${row.bestRecent.confidence})`);
     if (row.strategy) { lines.push(`- Learning samples: ${row.strategy.sampleSize}, confidence ${row.strategy.confidence}`); if (row.strategy.preferred?.length) lines.push(`- Current winning signals: ${row.strategy.preferred.slice(0, 3).map((x) => `${x.dimension}=${x.value} (${x.lift >= 0 ? '+' : ''}${x.lift})`).join(', ')}`); }
     if (row.trends?.top?.length) lines.push(`- Current trend candidates: ${row.trends.top.slice(0, 3).map((x) => `${x.topic} (${x.opportunityScore ?? x.relevance})`).join(', ')}`);
+    if (row.trends?.sources?.length) lines.push(`- Trend sources recorded: ${row.trends.sources.length}`);
     if (row.experiment) lines.push(`- Active experiment: ${row.experiment.dimension} → ${row.experiment.variants.join(' vs ')}`);
     lines.push(`- Usage today: OpenAI ${row.usageToday.openai}, web search ${row.usageToday.webSearch}, media ${row.usageToday.media}`);
-    if (row.circuits.autopilot?.open || row.circuits.publish?.open) lines.push('- ⚠ Circuit breaker is currently open.');
+    const openCircuits = Object.entries(row.circuits).filter(([, value]) => value?.open).map(([stage]) => stage);
+    if (openCircuits.length) lines.push(`- ⚠ Open circuit(s): ${openCircuits.join(', ')}`);
     if (row.recentErrors.length) lines.push(`- Recent errors: ${row.recentErrors.map((x) => x.error || x.stage).join(' / ')}`);
     lines.push('');
   }
