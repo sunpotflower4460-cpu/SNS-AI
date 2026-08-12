@@ -30,7 +30,7 @@ export async function publish(payload) {
   try {
     let result;
     if (account.platform === 'x') result = await publishX(common);
-    else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v23.0' });
+    else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v25.0' });
     else throw new Error(`Unsupported platform: ${account.platform}`);
 
     if (!payload.dryRun) {
