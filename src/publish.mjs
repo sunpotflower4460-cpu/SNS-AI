@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolveAccount } from './lib/config.mjs';
+import { appendHistory } from './lib/history.mjs';
+import { markSlot } from './lib/state.mjs';
 import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
 
@@ -27,8 +29,20 @@ async function loadPayload(args) {
     text: args.text || '',
     mediaUrl: args['media-url'],
     mediaType: args['media-type'] || 'image',
-    dryRun: args['dry-run'] === true || args['dry-run'] === 'true'
+    dryRun: args['dry-run'] === true || args['dry-run'] === 'true',
+    source: args.source || 'manual',
+    slotId: args['slot-id']
   };
+}
+
+function providerPostId(result) {
+  return result?.data?.id
+    || result?.postId
+    || result?.id
+    || result?.mediaId
+    || result?.media_id
+    || result?.creationId
+    || null;
 }
 
 export async function publish(payload) {
@@ -41,11 +55,33 @@ export async function publish(payload) {
     dryRun: Boolean(payload.dryRun)
   };
 
-  if (account.platform === 'x') return publishX(common);
-  if (account.platform === 'instagram') {
-    return publishInstagram({ ...common, apiVersion: account.apiVersion || 'v23.0' });
+  let result;
+  if (account.platform === 'x') result = await publishX(common);
+  else if (account.platform === 'instagram') {
+    result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v23.0' });
+  } else {
+    throw new Error(`Unsupported platform: ${account.platform}`);
   }
-  throw new Error(`Unsupported platform: ${account.platform}`);
+
+  if (!payload.dryRun) {
+    await appendHistory({
+      account: payload.account,
+      platform: account.platform,
+      status: 'published',
+      source: payload.source || 'manual',
+      slotId: payload.slotId || null,
+      text: payload.text || '',
+      mediaUrl: payload.mediaUrl || null,
+      providerPostId: providerPostId(result),
+      ai: payload.ai || null
+    });
+
+    if (payload.slotId) {
+      await markSlot(payload.slotId, 'published', { account: payload.account });
+    }
+  }
+
+  return result;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
