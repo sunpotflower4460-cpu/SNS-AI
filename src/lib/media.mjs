@@ -3,6 +3,7 @@ import { generateAndHostImage } from '../media/openai-image.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
+const dryRunUrl = (decision) => `https://dry-run.invalid/${decision || 'media'}.png`;
 
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpoint = account.media?.endpoint;
@@ -17,15 +18,19 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const url = body.url || body.mediaUrl; if (!/^https:\/\//i.test(url || '')) throw new Error('Media endpoint must return { "url": "https://..." }.'); return url;
 }
 
-async function generated(accountId, account, slotId, draft) {
-  if (account.media?.endpoint) return { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'generate'), decision: 'generate', source: 'endpoint' };
+async function generated(accountId, account, slotId, draft, dryRun = false) {
+  if (account.media?.endpoint) return dryRun
+    ? { url: dryRunUrl('generate'), decision: 'generate', source: 'dry-run-endpoint' }
+    : { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'generate'), decision: 'generate', source: 'endpoint' };
   if (account.media?.internalImageGeneration !== false && (account.media?.type || 'image') === 'image') {
-    return { url: await generateAndHostImage(accountId, account, slotId, draft), decision: 'generate', source: 'openai-image' };
+    return dryRun
+      ? { url: dryRunUrl('generate'), decision: 'generate', source: 'dry-run-openai-image' }
+      : { url: await generateAndHostImage(accountId, account, slotId, draft), decision: 'generate', source: 'openai-image' };
   }
   return { url: null, decision: 'none', source: null };
 }
 
-export async function resolveMediaDetailed(accountId, account, slotId, draft) {
+export async function resolveMediaDetailed(accountId, account, slotId, draft, { dryRun = false } = {}) {
   const media = account.media || {}; const strategy = media.strategy || 'none';
   if (strategy === 'none') return { url: null, decision: 'none', source: null };
   if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy };
@@ -35,7 +40,9 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft) {
   }
   if (strategy === 'endpoint') {
     const decision = ['search', 'generate'].includes(draft?.features?.mediaDecision) ? draft.features.mediaDecision : 'generate';
-    return { url: await requestMediaEndpoint(accountId, account, slotId, draft, decision), decision, source: 'endpoint' };
+    return dryRun
+      ? { url: dryRunUrl(decision), decision, source: 'dry-run-endpoint' }
+      : { url: await requestMediaEndpoint(accountId, account, slotId, draft, decision), decision, source: 'endpoint' };
   }
   if (strategy === 'auto') {
     let decision = draft?.features?.mediaDecision || 'none';
@@ -44,21 +51,23 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft) {
     if (decision === 'library') {
       const url = poolUrl(media, slotId);
       if (url) return { url, decision: 'library', source: 'pool' };
-      return generated(accountId, account, slotId, draft);
+      return generated(accountId, account, slotId, draft, dryRun);
     }
     if (decision === 'search') {
-      if (media.endpoint) return { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'search'), decision: 'search', source: 'endpoint' };
+      if (media.endpoint) return dryRun
+        ? { url: dryRunUrl('search'), decision: 'search', source: 'dry-run-endpoint' }
+        : { url: await requestMediaEndpoint(accountId, account, slotId, draft, 'search'), decision: 'search', source: 'endpoint' };
       const fallback = poolUrl(media, slotId);
       if (fallback) return { url: fallback, decision: 'library', source: 'pool-fallback' };
-      return generated(accountId, account, slotId, draft);
+      return generated(accountId, account, slotId, draft, dryRun);
     }
-    if (decision === 'generate') return generated(accountId, account, slotId, draft);
+    if (decision === 'generate') return generated(accountId, account, slotId, draft, dryRun);
   }
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
 
-export async function resolveMedia(accountId, account, slotId, draft) {
-  return (await resolveMediaDetailed(accountId, account, slotId, draft)).url;
+export async function resolveMedia(accountId, account, slotId, draft, options = {}) {
+  return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url;
 }
 
 export function ensureMediaForPlatform(account, mediaUrl) {
