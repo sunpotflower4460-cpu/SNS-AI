@@ -1,0 +1,116 @@
+name: SNS Human Feedback
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Account ID
+        required: true
+        type: string
+      action:
+        description: prefer, avoid, correct, pin, or note
+        required: false
+        default: note
+        type: choice
+        options: [prefer, avoid, correct, pin, note]
+      note:
+        description: Human feedback to remember
+        required: true
+        type: string
+      dimension:
+        description: Optional dimension such as hook/topic/format/mediaDecision
+        required: false
+        type: string
+      value:
+        description: Optional dimension value
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  feedback:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[feedback]')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build feedback payload
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          INPUT_ACCOUNT: ${{ inputs.account }}
+          INPUT_ACTION: ${{ inputs.action }}
+          INPUT_NOTE: ${{ inputs.note }}
+          INPUT_DIMENSION: ${{ inputs.dimension }}
+          INPUT_VALUE: ${{ inputs.value }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          let payload;
+          if (process.env.EVENT_NAME === 'issues') {
+            try { payload = JSON.parse(process.env.ISSUE_BODY || ''); }
+            catch { throw new Error('For [feedback] issues, the issue body must be valid JSON.'); }
+            payload.source ||= 'github-issue';
+          } else {
+            payload = {
+              account: process.env.INPUT_ACCOUNT,
+              action: process.env.INPUT_ACTION || 'note',
+              note: process.env.INPUT_NOTE,
+              dimension: process.env.INPUT_DIMENSION || undefined,
+              value: process.env.INPUT_VALUE || undefined,
+              source: 'workflow-dispatch'
+            };
+          }
+          writeFileSync('feedback.json', JSON.stringify(payload));
+          NODE
+
+      - name: Validate and record
+        run: |
+          npm run validate
+          node src/feedback/record.mjs --file feedback.json
+
+      - name: Persist feedback
+        run: |
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/human-feedback.jsonl
+          git diff --cached --quiet && exit 0
+          git commit -m "data: record human SNS feedback"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Close feedback issue on success
+        if: success() && github.event_name == 'issues'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ Human feedback recorded. It will outrank learned strategy on future generations."
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
+
+      - name: Explain feedback failure
+        if: failure() && github.event_name == 'issues'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Feedback could not be recorded. Check that the body is valid JSON and the account ID exists."

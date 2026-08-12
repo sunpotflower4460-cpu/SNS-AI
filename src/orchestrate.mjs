@@ -8,6 +8,7 @@ import { resolveMedia, ensureMediaForPlatform } from './lib/media.mjs';
 import { createApprovalIssue } from './lib/github.mjs';
 import { loadStrategy } from './learning/store.mjs';
 import { loadTrendBrief } from './research/trends.mjs';
+import { recentHumanFeedback } from './feedback/store.mjs';
 import { publish } from './publish.mjs';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
@@ -26,13 +27,14 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const history = await recentHistory(accountId, Number(account.generation?.historyWindow ?? 30));
         const strategy = account.learning?.enabled === false ? null : await loadStrategy(accountId);
         const trends = account.research?.trendIntelligence === true ? await loadTrendBrief(accountId) : null;
-        const draft = await generatePost(accountId, account, history, { strategy, trends, slotId: slot.slotId });
+        const humanFeedback = await recentHumanFeedback(accountId, Number(account.learning?.humanFeedbackWindow ?? 40));
+        const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, slotId: slot.slotId });
         const mediaUrl = await resolveMedia(accountId, account, slot.slotId, draft); ensureMediaForPlatform(account, mediaUrl);
         const payload = {
           account: accountId, text: draft.text, mediaUrl: mediaUrl || undefined, mediaType: account.media?.type || 'image', dryRun,
           source: account.mode === 'approval' ? 'approval' : 'auto', slotId: slot.slotId,
           features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode,
-          ai: { model: draft.model, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered }
+          ai: { model: draft.model, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length }
         };
         if (dryRun) { report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {

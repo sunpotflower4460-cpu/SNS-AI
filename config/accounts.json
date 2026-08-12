@@ -24,7 +24,8 @@
       "exploreRate": 0.2,
       "matureCheckpointMinutes": 1440,
       "minSamplesPerPattern": 2,
-      "fullConfidencePosts": 20
+      "fullConfidencePosts": 20,
+      "humanFeedbackWindow": 40
     },
     "research": {
       "webSearch": false,
