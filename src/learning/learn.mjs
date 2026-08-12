@@ -1,9 +1,11 @@
 import { loadAccounts } from '../lib/config.mjs';
 import { readHistory } from '../lib/history.mjs';
+import { appendAudit } from '../lib/audit.mjs';
 import { readMetricSnapshots, latestSnapshots } from '../analytics/store.mjs';
 import { scoreSnapshot } from '../analytics/scorer.mjs';
 import { FEATURE_DIMENSIONS, historyFeatures } from './features.mjs';
 import { saveStrategy } from './store.mjs';
+import { ensureExperiment, evaluateExperiment } from '../experiments/engine.mjs';
 
 function mean(values) { return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0; }
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
@@ -52,7 +54,16 @@ export async function learnAll({ accountFilter } = {}) {
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue; if (account.learning?.enabled === false) continue;
     const strategy = buildStrategy({ accountId, account, history, snapshots }); await saveStrategy(accountId, strategy);
-    report.push({ account: accountId, sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3) });
+    const experimentResult = account.experiments?.enabled === false ? { status: 'disabled' } : await evaluateExperiment(accountId, account, history, snapshots);
+    const activeExperiment = account.experiments?.enabled === false ? null : await ensureExperiment(accountId, account, strategy);
+    await appendAudit({
+      account: accountId, stage: 'strategy-updated', sampleSize: strategy.sampleSize, confidence: strategy.confidence,
+      preferred: strategy.preferred.slice(0, 5), experimentEvaluation: experimentResult.status, activeExperiment: activeExperiment?.id || null
+    });
+    report.push({
+      account: accountId, sampleSize: strategy.sampleSize, confidence: strategy.confidence, preferred: strategy.preferred.slice(0, 3),
+      experiment: { evaluation: experimentResult.status, active: activeExperiment || null }
+    });
   }
   return report;
 }
