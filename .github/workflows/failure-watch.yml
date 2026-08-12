@@ -7,6 +7,7 @@ on:
       - SNS Metrics Collector
       - SNS Trend Intelligence
       - SNS Daily Learning
+      - SNS Policy Watch
       - Publish social post
       - SNS Health Report
       - SNS Human Feedback
