@@ -50,6 +50,11 @@ function mediaMetadataPayload(mediaId, text) {
   return { id: String(mediaId), metadata: { alt_text: { text: String(text || '').trim().slice(0, 1000) } } };
 }
 
+function videoInitializePayload(bytes, contentType) {
+  const normalizedType = !contentType || contentType === 'application/octet-stream' ? 'video/mp4' : contentType;
+  return { media_category: 'tweet_video', media_type: normalizedType, shared: false, total_bytes: bytes.byteLength };
+}
+
 async function setAltText(mediaId, text, credentials) {
   const payload = mediaMetadataPayload(mediaId, text);
   if (!payload.metadata.alt_text.text) return;
@@ -83,7 +88,7 @@ async function initializeVideo(bytes, contentType, credentials) {
   const body = await fetchJson(MEDIA_INIT_URL, {
     method: 'POST',
     headers: { Authorization: bearerHeader(credentials), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ media_category: 'tweet_video', media_type: contentType || 'video/mp4', shared: false, total_bytes: bytes.byteLength })
+    body: JSON.stringify(videoInitializePayload(bytes, contentType))
   });
   const id = body?.data?.id;
   if (!id) throw new Error('X video initialize returned no media id.');
@@ -121,9 +126,11 @@ async function waitVideoProcessing(mediaId, initial, credentials) {
 
 async function uploadVideo(mediaUrl, credentials) {
   const maxBytes = 512 * 1024 * 1024;
-  const { bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes });
-  if (!String(contentType || '').startsWith('video/')) throw new Error(`X video publisher expected video media; got ${contentType}.`);
-  const mediaId = await initializeVideo(bytes, contentType || 'video/mp4', credentials);
+  const downloaded = await downloadMedia(mediaUrl, { maxBytes });
+  const bytes = Buffer.from(downloaded.bytes);
+  const contentType = downloaded.contentType || 'video/mp4';
+  if (!contentType.startsWith('video/') && contentType !== 'application/octet-stream') throw new Error(`X video publisher expected video media; got ${contentType}.`);
+  const mediaId = await initializeVideo(bytes, contentType, credentials);
   await appendVideo(mediaId, bytes, credentials);
   const finalizeUrl = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/finalize`;
   const finalized = await fetchJson(finalizeUrl, { method: 'POST', headers: { Authorization: bearerHeader(credentials) } });
@@ -132,9 +139,7 @@ async function uploadVideo(mediaUrl, credentials) {
 }
 
 export async function verifyXCredential(credential) {
-  const body = await fetchJson(VERIFY_USER_URL, {
-    method: 'GET', headers: { Authorization: oauthHeader('GET', VERIFY_USER_URL, credential) }
-  });
+  const body = await fetchJson(VERIFY_USER_URL, { method: 'GET', headers: { Authorization: oauthHeader('GET', VERIFY_USER_URL, credential) } });
   if (!body?.data?.id) throw new Error('X credential check returned no authenticated user.');
   return { id: body.data.id, username: body.data.username || null, name: body.data.name || null };
 }
@@ -167,4 +172,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
 }
 
-export const __test = { pct, mediaMetadataPayload };
+export const __test = { pct, mediaMetadataPayload, videoInitializePayload };
