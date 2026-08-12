@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { effectiveScheduleTimes } from '../src/lib/schedule.mjs';
 import { validateDraftText } from '../src/lib/safety.mjs';
+import { resolveMediaDetailed } from '../src/lib/media.mjs';
 import { assignmentForSlot } from '../src/experiments/engine.mjs';
 import { scanSecrets } from '../src/ops/secret-scan.mjs';
 import { validateConfig } from '../src/validate-config.mjs';
@@ -50,6 +51,9 @@ test('enabled Instagram auto account can rely on built-in image generation', () 
   const config = {
     defaults: {
       timezone: 'Asia/Tokyo',
+      generation: { historyWindow: 30, duplicateThreshold: 0.72, maxAttempts: 3, candidateCount: 5, maxOutputTokens: 3000 },
+      learning: { strategyWindowDays: 60, matureCheckpointMinutes: 1440, fullConfidencePosts: 20 },
+      resilience: { failureThreshold: 3, cooldownMinutes: 60 },
       budgets: { enabled: true, openaiCallsPerDay: 10, webSearchCallsPerDay: 2, mediaCallsPerDay: 2, imageGenerationsPerDay: 2 },
       experiments: { minSamplesPerVariant: 3, maxDays: 14, minimumStrategySamples: 6 },
       maintenance: { historyRetentionDays: 365, metricsRetentionDays: 120, usageRetentionDays: 90, auditRetentionDays: 180, quarantineRetentionDays: 30, generatedMediaRetentionDays: 90 },
@@ -64,6 +68,24 @@ test('enabled Instagram auto account can rely on built-in image generation', () 
     }
   };
   assert.deepEqual(validateConfig(config), []);
+});
+
+test('dry-run media generation never calls external endpoint or OpenAI image API', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network should not be called during media dry-run'); };
+  try {
+    const endpointAccount = { platform: 'instagram', media: { strategy: 'auto', type: 'image', endpoint: 'https://media.example/generate' } };
+    const endpointResult = await resolveMediaDetailed('ig', endpointAccount, 'slot-1', { mediaPrompt: 'diagram', features: { mediaDecision: 'generate' } }, { dryRun: true });
+    assert.equal(endpointResult.source, 'dry-run-endpoint');
+    assert.match(endpointResult.url, /^https:\/\/dry-run\.invalid\//);
+
+    const internalAccount = { platform: 'instagram', media: { strategy: 'auto', type: 'image', internalImageGeneration: true, defaultInstagramDecision: 'generate' } };
+    const internalResult = await resolveMediaDetailed('ig', internalAccount, 'slot-2', { mediaPrompt: 'illustration', features: { mediaDecision: 'generate' } }, { dryRun: true });
+    assert.equal(internalResult.source, 'dry-run-openai-image');
+    assert.match(internalResult.url, /^https:\/\/dry-run\.invalid\//);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test('repository source contains no obvious literal secrets', async () => {
