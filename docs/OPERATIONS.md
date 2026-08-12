@@ -27,6 +27,20 @@ npm run doctor
 - `OPENAI_API_KEY`
 - `SOCIAL_CREDENTIALS_JSON`
 
+Xの通常テキスト/画像投稿はOAuth1 user credentialsを使います。X動画を使うアカウントだけ、同じcredential entryへ`oauth2AccessToken`（OAuth 2.0 user access token）を追加してください。
+
+```json
+{
+  "my-x": {
+    "consumerKey": "...",
+    "consumerSecret": "...",
+    "accessToken": "...",
+    "accessTokenSecret": "...",
+    "oauth2AccessToken": "... X動画利用時のみ ..."
+  }
+}
+```
+
 外部media endpoint使用時のみ:
 
 - `MEDIA_SERVICE_TOKEN`
@@ -46,7 +60,8 @@ Actions → **SNS Live Preflight**。
 実投稿や有料media生成を行わず次を確認します。
 
 - 必要な場合のOpenAI API認証
-- X `/2/users/me`
+- X OAuth1 `/2/users/me`
+- X動画アカウントではOAuth2 `/2/users/me`も確認し、OAuth1と同じXユーザーか照合
 - Instagram対象アカウント読取
 - 内蔵画像/Reel hostingを使う場合、GitHub repositoryがpublicか
 
@@ -76,23 +91,25 @@ GitHub Release: sns-ai-media
 X / Instagram
 ```
 
-### Reel
+### Reel / Video
 
 ```text
 OpenAI Video API
   ↓ completed
-thumbnail取得
-  ↓
+spritesheet取得
+  ↓ (取得不可ならthumbnail)
 Moderation + Visual QA
   ↓ pass only
 MP4取得
   ↓
 GitHub Release: sns-ai-media
-  ↓
-Instagram Reel
+  ├→ Instagram Reel
+  └→ X chunked upload
 ```
 
-QA不合格時は、QAが明示した問題だけを元promptへ追記して、設定された`maxRegenerations`内で再生成します。不合格素材はReleaseへuploadしません。
+X動画はv2 media uploadの`initialize → append → finalize → status`を使い、processing完了後の`media_id`をPostへ添付します。
+
+QA不合格時は、QAが明示した問題だけを元promptへ追記して、設定された`maxRegenerations`内で再生成します。不合格素材はReleaseへuploadしません。QA合格後はOpenAI側のcompleted video jobをbest-effortで削除します。
 
 公開GitHub repository向けです。Privateへ変更する場合は`media.endpoint`などで外部public CDNを用意してください。
 
@@ -102,7 +119,7 @@ QA不合格時は、QAが明示した問題だけを元promptへ追記して、�
 
 画像QAから生成した客観的alt textを、Xではmedia upload後のmetadataへ登録してから投稿します。alt textは投稿履歴にも保存します。
 
-Instagramは未確認のAPI parameterを推測して送らず、生成alt textを履歴/監査情報として保持します。
+X動画のQA説明文とInstagramの生成alt textは、未確認のAPI parameterを推測して送らず、履歴/監査情報として保持します。
 
 ## 6. Readiness / Current Report
 
@@ -285,7 +302,7 @@ GitHub上の実記録から次を確認できます。
 - media QA
 - recent errors
 - human feedback
-- 投稿・画像を選んだ理由
+- 投稿・画像/動画を選んだ理由
 
 ## 20. 障害時の確認順
 
@@ -296,7 +313,7 @@ GitHub上の実記録から次を確認できます。
 5. Anomaly Brake / Circuit state
 6. daily usage budget
 7. Live Preflight
-8. platform permission / token expiry
+8. platform permission / token expiry / X OAuth2 video token
 9. media hosting / external endpoint
 
 Secretsの実値をIssueやログへ貼らないでください。
