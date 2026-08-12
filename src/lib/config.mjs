@@ -28,6 +28,10 @@ export async function loadAccounts() {
       analytics: mergeSection(config.defaults, account, 'analytics'),
       learning: mergeSection(config.defaults, account, 'learning'),
       research: mergeSection(config.defaults, account, 'research'),
+      resilience: mergeSection(config.defaults, account, 'resilience'),
+      budgets: mergeSection(config.defaults, account, 'budgets'),
+      experiments: mergeSection(config.defaults, account, 'experiments'),
+      maintenance: mergeSection(config.defaults, account, 'maintenance'),
       objectives: mergeSection(config.defaults, account, 'objectives'),
       media: mergeSection(config.defaults, account, 'media'),
       schedule: account.schedule
