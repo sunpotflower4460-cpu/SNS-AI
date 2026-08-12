@@ -1,57 +1,63 @@
 # SNS-AI
 
-GitHub Actions を実行エンジンにした、**複数アカウント対応の X / Instagram 自律運用基盤**です。
+GitHub Actionsを実行エンジンにした、**複数アカウント対応のX / Instagram自律運用基盤**です。
 
 アカウントごとに人格・目的・読者・禁止事項を分離し、
-**情報収集 → 複数案生成 → 広がり予測 → 画像判断/生成 → 投稿 → 反応計測 → 学習 → A/B実験 → 改善 → 報告 → 障害復旧/保守**まで循環させます。
+**情報収集 → 複数案生成 → 選定 → 画像/動画生成 → 公開前QA → 投稿 → 反応計測 → 安全監視 → 学習 → A/B実験 → 改善 → 報告 → 保守**まで循環させます。
 
-## 自動化されている範囲
+## 主な自動化
 
-- X / Instagram の複数アカウント管理
+- X / Instagramの複数アカウント管理
 - `auto` / `approval` / `manual` / `pause`
-- OpenAI Responses API による複数投稿候補生成
-- アカウントごとの Web Search / Trend Intelligence
-- Web検索の参照URL・タイトルを投稿/トレンド履歴へ保存
+- OpenAI Responses APIによる複数投稿候補生成
+- アカウント別Web Search / Trend Intelligence
+- Web参照URL・タイトル・判断理由の保存
 - 過去投稿との近似重複チェック
-- 文字数、NGフレーズ、必須表記、リンク/ドメイン、ハッシュタグ、投稿頻度のガード
-- 投稿候補を「広がり予測 + 過去実績」でランキング
-- Explore / Exploit で勝ち筋に固定され過ぎない探索
-- X / Instagram 投稿後メトリクスの定期保存
-- 各アカウント自身の平常値と比較した相対評価
-- topic / angle / hook / emotion / format / CTA / media / time の学習
-- 学習結果の次回生成への自動フィードバック
-- 人間フィードバックを自動学習より上位の長期記憶として保持
-- 通常投稿枠を使った自動A/B実験と勝者判定
-- 人間が許可した候補時刻の範囲内だけで投稿時間を自動最適化
+- 文字数、NG表現、必須表記、リンク/ドメイン、ハッシュタグ、投稿頻度のガード
+- spread予測 + 過去実績 + Explore/Exploitによる候補選定
+- 人間フィードバックを数字学習より上位の長期記憶として保持
+- 通常投稿枠を使うA/B実験と勝者判定
+- 人間が許可した候補時刻内だけで投稿時間を自動最適化
 - AIによる `none / library / search / generate` のメディア判断
-- OpenAI Image API による静止画の内蔵生成
-- 公開GitHub Release assetへ生成画像を保存し、Instagram/Xへ公開URLとして渡す
-- 外部 media endpoint / CDN / 動画生成サービスへの差し替え
-- API障害時のCircuit Breaker（自動休止→冷却後自動復帰）
-- OpenAI / Web Search / 外部Media / Image Generation の日次利用上限
-- 投稿・判断・障害の監査ログ
-- Readiness Doctor / Live Preflight / CI / Secret Scan
-- Workflow障害のIssue化と復旧時の自動Close
-- 古い承認Issueの自動失効
-- JSONL重複除去・破損行隔離・古い生データの月次集計化
-- 古い生成画像Release assetの自動削除
-- ChatGPTから読みやすいCurrent Reportの継続更新
+- OpenAI Image APIによる静止画生成
+- OpenAI Video APIによる短尺Reel動画生成
+- 生成画像 / Reel thumbnailのModeration + 視覚QA
+- QA不合格時の限定修正・自動再生成
+- QA合格素材だけをGitHub Releaseへ公開hosting
+- QAからalt textを生成し、X画像へmedia metadataとして登録
+- X / Instagram公式API投稿
+- 投稿後1h / 6h / 24h / 72h / 7dメトリクス収集
+- アカウント自身のbaselineと比較した相対評価
+- 極端な成熟反応異常を検知する一時AUTOブレーキ
+- ブレーキcooldown後の自動再開
+- rolling windowでの戦術学習
+- Circuit BreakerによるAPI障害の自動休止 / 復帰
+- OpenAI / Web Search / 外部media / image / videoの日次hard cap
+- Current Report / Weekly Report
+- Readiness Doctor / Live Preflight / Secret Scan / CI
+- Workflow障害Issue作成・復旧時Close
+- stale approvalの自動失効
+- JSONL dedupe / retention / archive / quarantine
+- 古い生成media Release assetの自動削除
+- X / Instagram公式policyの定期監視
 
 ## 運転モード
 
-- `auto` — 定刻に生成し、そのまま公式APIで投稿
-- `approval` — 投稿案をGitHub Issueへ作り、`approved` ラベル後に投稿
+- `auto` — 定刻に生成し、検証を通過した内容を公式APIで投稿
+- `approval` — 投稿案をGitHub Issueへ作り、承認後に投稿
 - `manual` — Actions / `[publish]` Issue / ChatGPT経由の明示投稿
 - `pause` — 停止
 
-Issue経由の `[publish]` / `[feedback]` は、リポジトリ所有者またはRepository Variable `SNS_COMMAND_ADMINS` に登録したGitHubユーザーだけ実行できます。
+Issue経由の`[publish]` / `[feedback]`は、リポジトリ所有者またはRepository Variable `SNS_COMMAND_ADMINS` に登録したユーザーだけが実行できます。
 
-## フィードバックループ
+## 自律ループ
 
 ```text
 Trend / Web Research
         ↓
 Candidate Generator
+        ↓
+Safety / Duplicate / Compliance
         ↓
 Spread + Learned Strategy Ranking
         ↓
@@ -59,11 +65,18 @@ Controlled Experiment / Explore
         ↓
 Media Director
         ↓
+Image / Reel Generation
+        ↓
+Moderation + Visual QA
+   NG ──┴──→ bounded regeneration
+        ↓ OK
+Public Release Hosting
+        ↓
 X / Instagram Publish
         ↓
-Metrics: 1h / 6h / 24h / 72h / 7d
+Metrics Collection
         ↓
-Relative Performance Scoring
+Relative Performance + Anomaly Brake
         ↓
 Feature Learning + A/B Evaluation
         ↓
@@ -71,56 +84,11 @@ Account Strategy
         └──────────────→ 次回生成
 ```
 
-人格・理念・明示的な運用指示・人間フィードバックは、数字からの自動学習より上位です。AIが自動で変更するのは戦術レイヤーだけです。
+人格・理念・明示的な指示・人間フィードバック・法令/規約hard ruleは、数字による最適化より常に上位です。
 
-## 自動A/B実験
+## メディア生成
 
-十分な投稿データが集まると、通常の投稿枠を使って次のような要素を交互に試します。
-
-- `hook`
-- `format`
-- `cta`
-- `mediaDecision`
-
-投稿数を実験のためだけに増やしません。各variantに最低サンプル数が集まるまで結論を出さず、結果は `data/experiments/<account>.json` に保存します。
-
-## 投稿時間の自動改善
-
-投稿時間を自動最適化したい場合は、**人間が許可した候補時刻だけ**を指定します。
-
-```json
-"schedule": {
-  "times": ["08:00", "20:00"],
-  "adaptiveCandidateTimes": ["08:00", "12:00", "18:00", "20:00"]
-}
-```
-
-学習confidenceが十分になった後も、この候補外の時刻へAIが勝手に移動することはありません。`adaptiveCandidateTimes` がなければ固定スケジュールのままです。
-
-## トレンド調査と出典
-
-```json
-"research": {
-  "webSearch": true,
-  "trendIntelligence": true,
-  "trendRefreshHours": 6
-}
-```
-
-Trend Intelligenceは関連性・新規性・飽和度・リスクで候補を評価します。Web Searchを使った場合、取得できたURL citationを `data/trends/<account>.json` や投稿履歴へ保存するため、後から「何を根拠にした？」を追跡できます。
-
-## メディア
-
-`media.strategy = "auto"` では、AIが投稿ごとに選びます。
-
-- `none` — テキストのみ
-- `library` — 登録済み素材
-- `search` — 管理された外部media endpointで検索
-- `generate` — 新規生成
-
-### 内蔵画像生成
-
-静止画なら外部media serviceを用意しなくても、OpenAI Image APIを利用できます。
+### 静止画
 
 ```json
 "media": {
@@ -133,41 +101,100 @@ Trend Intelligenceは関連性・新規性・飽和度・リスクで候補を�
 }
 ```
 
-流れ:
-
-```text
-投稿案
- ↓
-AIが generate を選択
- ↓
-OpenAI Image API
- ↓
-GitHub Release: sns-ai-media
- ↓
-公開HTTPS URL
- ↓
-X / Instagram
-```
-
-生成画像はGit履歴へ入れずRelease assetに保存します。週次Maintenanceが古いassetを自動削除します。
-
-**内蔵GitHub hostingは公開リポジトリ向けです。** リポジトリをPrivateにする場合は `media.endpoint` でS3 / Cloudinary等の公開メディア置き場を接続してください。Reel/動画は外部media endpointまたは登録済み動画URLが必要です。
-
-## 外部media endpoint
+### Reel
 
 ```json
 "media": {
-  "strategy": "auto",
-  "type": "image",
-  "endpoint": "https://your-service.example/generate"
+  "strategy": "generate",
+  "type": "reel",
+  "internalVideoGeneration": true,
+  "videoModel": "sora-2",
+  "videoSize": "720x1280",
+  "videoSeconds": 8
 }
 ```
 
-SNS-AIは `mode: search | generate`、投稿本文、media prompt、feature等をPOSTし、endpointから `{ "url": "https://..." }` を受け取ります。
+標準的な短尺Reel生成は外部video serviceを必須としません。外部`media.endpoint`は独自生成・素材検索・private repository用CDNなどの任意拡張です。
 
-## 安全・規約向け設定
+### 公開前メディアQA
 
-アカウントごとに次を設定できます。
+```json
+"media": {
+  "qa": {
+    "enabled": true,
+    "model": "gpt-5",
+    "detail": "high",
+    "minScore": 75,
+    "maxRegenerations": 1,
+    "maxInputBytes": 15728640
+  }
+}
+```
+
+生成画像は画像本体、Reelは生成jobのthumbnailを確認します。主な検査対象は次です。
+
+- 破損・壊れた描画
+- 明確な人体/物体崩れ
+- 意図しない文字化け
+- 不要なwatermark / logo
+- 重大なcrop / composition不良
+- 投稿意図との明確な不一致
+- Moderation上の問題
+
+主観的な好みだけではrejectしません。NG素材はReleaseへ公開せず、QAが示した問題だけを修正して設定回数内で再生成します。
+
+## X alt text
+
+生成静止画のQA時に客観的なalt textを作成し、Xでは画像upload後にmedia metadataへ登録してから投稿します。Instagramについては、公開APIで確実に扱える値だけを送る方針のため、生成alt textは履歴・監査用に保持します。
+
+## 反応異常ブレーキ
+
+通常の「少し伸びなかった投稿」では止まりません。十分なbaseline・confidence・露出を持つ成熟投稿だけを対象に、極端な性能崩壊や低スコアと異常なconversation spikeが重なった場合に、新しい自動生成/投稿を一時停止します。
+
+```json
+"safety": {
+  "anomalyBrake": {
+    "enabled": true,
+    "matureCheckpointMinutes": 1440,
+    "minBaselinePosts": 5,
+    "minConfidence": 0.55,
+    "minExposure": 500,
+    "severeScoreThreshold": 12,
+    "lowScoreThreshold": 25,
+    "consecutiveLowPosts": 2,
+    "conversationSpikeMultiplier": 5,
+    "minimumConversationRate": 0.02,
+    "cooldownHours": 12
+  }
+}
+```
+
+ブレーキは過去投稿を削除しません。cooldown後は自動で閉じ、次のslotから再開可能になります。
+
+## 投稿時間の自動改善
+
+```json
+"schedule": {
+  "times": ["08:00", "20:00"],
+  "adaptiveCandidateTimes": ["08:00", "12:00", "18:00", "20:00"]
+}
+```
+
+AIは`adaptiveCandidateTimes`の外へ勝手に投稿時刻を移動しません。候補がなければ固定scheduleのままです。
+
+## トレンド調査と出典
+
+```json
+"research": {
+  "webSearch": true,
+  "trendIntelligence": true,
+  "trendRefreshHours": 6
+}
+```
+
+検索を使った投稿・Trend Briefには取得できたURL citationを保存し、後から「何を根拠にしたか」を追跡できます。
+
+## 安全・規約設定
 
 ```json
 "safety": {
@@ -183,11 +210,9 @@ SNS-AIは `mode: search | generate`、投稿本文、media prompt、feature等�
 }
 ```
 
-このチェックはAI生成だけでなく、manual / Issue経由の投稿にも適用されます。
+manual / Issue経由の投稿にも同じhard guardを適用します。
 
-## 障害時の自動復旧
-
-`resilience` は投稿・Autopilot・Analytics・Researchを別々に監視します。
+## API障害の自動復旧
 
 ```json
 "resilience": {
@@ -197,9 +222,9 @@ SNS-AIは `mode: search | generate`、投稿本文、media prompt、feature等�
 }
 ```
 
-連続失敗が閾値に達するとCircuitを開き、一定時間その経路を自動休止します。冷却後は次の定期runから自動再試行します。Workflow自体の失敗は `[health] ... failure` Issueへ集約し、後続run成功時に自動Closeします。
+Autopilot / Publish / Analytics / Researchを別々のCircuitとして監視します。連続失敗時に一時休止し、cooldown後に自動再試行します。
 
-## 利用量上限
+## 利用量hard cap
 
 ```json
 "budgets": {
@@ -207,11 +232,12 @@ SNS-AIは `mode: search | generate`、投稿本文、media prompt、feature等�
   "openaiCallsPerDay": 300,
   "webSearchCallsPerDay": 60,
   "mediaCallsPerDay": 60,
-  "imageGenerationsPerDay": 10
+  "imageGenerationsPerDay": 10,
+  "videoGenerationsPerDay": 4
 }
 ```
 
-モデル料金が変わっても機能するよう、金額ではなくAPI呼び出し回数でhard capを掛けます。現在の使用数は `data/reports/latest.json` / `.md` に表示されます。
+金額ではなくAPI呼び出し回数で上限を掛けるため、料金改定があっても安全装置として機能します。
 
 ## 必要なSecrets
 
@@ -236,88 +262,76 @@ Repository → Settings → Secrets and variables → Actions
 }
 ```
 
-`expiresAt` は任意ですが、入れるとDoctorが期限切れ/14日以内を自動検知します。
+`expiresAt`は任意ですが、入れるとDoctorが期限切れ/期限接近を警告します。
 
 ### `OPENAI_API_KEY`
 
-AUTO / approval / Web Search / Trend Intelligence / 内蔵画像生成で使用します。
+投稿生成、Web Search、Trend Intelligence、Moderation、media QA、内蔵画像/動画生成で使用します。
 
 ### `MEDIA_SERVICE_TOKEN`（任意）
 
-外部 `media.endpoint` がBearer Tokenを要求する場合のみ。
+外部`media.endpoint`がBearer Tokenを要求する場合のみ使います。
 
 ## 任意のRepository Variables
 
 - `OPENAI_MODEL` — 投稿生成モデルの上書き
-- `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可GitHubユーザー。カンマ区切り
-- `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数。未設定時7日
+- `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可ユーザー、カンマ区切り
+- `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数
 
 ## GitHub Actions
 
 - **SNS Autopilot** — 10分ごと
 - **SNS Metrics Collector** — 毎時
 - **SNS Trend Intelligence** — 6時間ごと
-- **SNS Daily Learning** — 毎日、戦略更新 + A/B評価/次実験開始
-- **Publish social post** — manual / ChatGPT Issue / approval
-- **SNS Human Feedback** — 人間の修正を長期記憶化
-- **SNS Health Report** — Readinessレポート
-- **SNS Live Preflight** — 投稿せず認証/外部前提を確認
-- **SNS Failure Watch** — Workflow障害Issueの作成/復旧Close
-- **SNS Maintenance** — 週次のデータ圧縮・古いapproval/生成画像整理
-- **SNS-AI CI** — test / config / 全source構文 / smoke / secret scan / 全workflow YAML検証
+- **SNS Daily Learning** — 毎日
+- **Publish social post** — manual / Issue / approval
+- **SNS Human Feedback** — 明示フィードバック保存
+- **SNS Health Report** — readiness / operating report
+- **SNS Live Preflight** — 実投稿・有料media生成をせず認証と外部前提を確認
+- **SNS Failure Watch** — Workflow障害Issue
+- **SNS Maintenance** — retention / archive / stale approval / generated media cleanup
+- **SNS Policy Watch** — X / Instagram公式情報の定期確認
+- **SNS-AI CI** — test / config / syntax / smoke / secret scan / workflow YAML
 
-状態を書き換えるworkflowは `concurrency: sns-ai-write` で直列化します。
+状態を書き換えるworkflowは`concurrency: sns-ai-write`で直列化します。
 
-## 記憶・記録
+## 主な記録
 
-- `data/history.jsonl` — 投稿、生成理由、feature、予測、experiment、参照source
+- `data/history.jsonl` — 投稿、理由、feature、AI情報、media QA、alt text、source
 - `data/metrics.jsonl` — 投稿後メトリクス
 - `data/strategies/<account>.json` — 学習済み戦略
 - `data/experiments/<account>.json` — A/B実験
-- `data/trends/<account>.json` — トレンド + 参照source
+- `data/trends/<account>.json` — Trend Brief + source
 - `data/human-feedback.jsonl` — 人間フィードバック
-- `data/usage.jsonl` — API利用量
-- `data/audit.jsonl` — 判断/実行/障害の監査ログ
+- `data/usage.jsonl` / `data/usage-state.json` — API利用量
+- `data/audit.jsonl` — 判断・実行・障害監査
 - `data/runtime-health.json` — Circuit状態
-- `data/archive/monthly-summary.json` — 古い生データの集計
-- `data/quarantine/invalid-jsonl.jsonl` — 破損データ隔離
-- `data/reports/latest.json` / `.md` — 現在状態
+- `data/brakes.json` — 反応異常ブレーキ状態
+- `data/reports/latest.json` / `.md` — Current Report
 - `data/reports/readiness.json` / `.md` — 起動準備状態
 
-## ChatGPTから聞けること
+## セットアップ
 
-GitHub連携がある状態なら、例えば次をリポジトリの実記録から確認できます。
+1. X / Meta側で必要な投稿・Insights権限を取得
+2. GitHub Secretsへ`SOCIAL_CREDENTIALS_JSON`と`OPENAI_API_KEY`を登録
+3. `config/accounts.json`へ実アカウントを追加
+4. 最初は`pause`または`approval`
+5. **SNS Live Preflight**で認証・public hosting前提を確認
+6. **SNS Autopilot**を`force=true / dry_run=true`で確認
+7. 最初の実投稿を確認
+8. 問題なければ`auto`
 
-- 「今の運用状況は？」
-- 「最近何を学習した？」
-- 「一番伸びた投稿は？」
-- 「今のトレンド候補と出典は？」
-- 「なぜこの投稿を選んだ？」
-- 「A/B実験は何を試してる？」
-- 「API利用量は？」
-- 「Circuitが開いてる処理は？」
-- 「最近どんなエラーが出た？」
+詳細な運用手順は`docs/OPERATIONS.md`、AIが変更してよい範囲/いけない範囲は`docs/AUTONOMY.md`を参照してください。
 
-## 人間フィードバック
+## 外部境界
 
-`[feedback]` IssueまたはSNS Human Feedback workflowから、`prefer / avoid / correct / pin / note` を保存できます。これは数字からの自動学習より上位で次回生成に反映されます。
+リポジトリ側で安全に自動化できる標準処理は可能な限り内蔵しています。残る主な外部境界は次です。
 
-## データ保守
+- X / Meta / OpenAIのAPIキー・OAuth token発行
+- developer app審査・権限承認
+- 実アカウントのidentity / goal / audience /禁止事項という最上位方針
+- 法律・契約・規約解釈が曖昧なケースの最終判断
+- private repositoryで公開media URLが必要な場合の外部CDN
+- API提供者側のmodel access・障害・料金・サービス停止
 
-週次Maintenanceでは、設定した保存期間を超えた `history / metrics / usage / audit` の生データを月次summaryへ圧縮します。重複行は除去、壊れたJSONLはquarantineへ隔離します。人間フィードバックは自動削除対象にしていません。
-
-## セットアップ順
-
-1. X / Metaで投稿 + Insights用認証を取得
-2. `SOCIAL_CREDENTIALS_JSON` を設定
-3. `OPENAI_API_KEY` を設定
-4. `config/accounts.json` に実アカウントと運用方針を追加
-5. 静止画は内蔵画像生成または `media.endpoint` を選択
-6. 最初は `manual` または `approval`
-7. **SNS Live Preflight** を実行（投稿なし）
-8. Autopilot `force=true / dry_run=true`
-9. 1件の実投稿テスト
-10. Metrics Collectorの取得確認
-11. 問題なければ `auto`
-
-詳細な運用手順は `docs/OPERATIONS.md` を参照してください。
+SNS-AIは外部境界そのものを勝手に回避せず、Doctor / Preflight / Policy Watch / Health Issueで状態を見える化します。
