@@ -5,7 +5,7 @@ import { scoreSnapshot } from '../analytics/scorer.mjs';
 
 const FILE = fileURLToPath(new URL('../../data/brakes.json', import.meta.url));
 
-function settings(account) {
+export function brakeSettings(account = {}) {
   const cfg = account.safety?.anomalyBrake || {};
   return {
     enabled: cfg.enabled !== false,
@@ -22,13 +22,8 @@ function settings(account) {
   };
 }
 
-async function loadState() {
-  return await readJson(FILE, { accounts: {} }) || { accounts: {} };
-}
-
-async function saveState(state) {
-  await writeJsonAtomic(FILE, state);
-}
+async function loadState() { return await readJson(FILE, { accounts: {} }) || { accounts: {} }; }
+async function saveState(state) { await writeJsonAtomic(FILE, state); }
 
 export async function brakeStatus(accountId) {
   const state = await loadState();
@@ -45,7 +40,7 @@ export async function brakeStatus(accountId) {
 }
 
 export async function assertAutonomyBrakeClear(accountId, account) {
-  const cfg = settings(account);
+  const cfg = brakeSettings(account);
   if (!cfg.enabled) return { open: false, disabled: true };
   const status = await brakeStatus(accountId);
   if (!status.open) return status;
@@ -57,7 +52,7 @@ export async function assertAutonomyBrakeClear(accountId, account) {
 }
 
 function eligibleRows(accountId, account, snapshots) {
-  const cfg = settings(account);
+  const cfg = brakeSettings(account);
   return latestSnapshots(snapshots)
     .filter((row) => row.account === accountId && Number(row.checkpointMinutes) >= cfg.matureCheckpointMinutes)
     .map((row) => ({ row, scored: scoreSnapshot(row, snapshots, account.objectives?.weights || {}) }))
@@ -67,12 +62,8 @@ function eligibleRows(accountId, account, snapshots) {
     .sort((a, b) => Date.parse(a.row.publishedAt || a.row.collectedAt || 0) - Date.parse(b.row.publishedAt || b.row.collectedAt || 0));
 }
 
-export async function evaluateAnomalyBrake(accountId, account, snapshots) {
-  const cfg = settings(account);
-  if (!cfg.enabled) return { opened: false, disabled: true };
-  const rows = eligibleRows(accountId, account, snapshots);
-  if (!rows.length) return { opened: false, reason: 'insufficient_baseline' };
-
+export function anomalyTrigger(rows, cfg) {
+  if (!rows?.length) return { opened: false, reason: 'insufficient_baseline' };
   const latest = rows.at(-1);
   const recent = rows.slice(-Math.max(1, cfg.consecutiveLowPosts));
   const consecutiveCollapse = recent.length >= cfg.consecutiveLowPosts
@@ -89,29 +80,39 @@ export async function evaluateAnomalyBrake(accountId, account, snapshots) {
     latestScore: latest.scored.score,
     confidence: latest.scored.confidence
   };
+  const reason = severeCollapse ? 'severe_performance_collapse'
+    : conversationSpike ? 'low_score_with_conversation_spike'
+      : 'consecutive_low_performance';
+  return {
+    opened: true,
+    reason,
+    evidence: {
+      providerPostId: latest.row.providerPostId,
+      score: latest.scored.score,
+      confidence: latest.scored.confidence,
+      exposure: latest.scored.vector.exposure,
+      conversationRate: currentConversation,
+      baselineConversationRate: baselineConversation,
+      recentScores: recent.map(({ scored }) => scored.score)
+    }
+  };
+}
+
+export async function evaluateAnomalyBrake(accountId, account, snapshots) {
+  const cfg = brakeSettings(account);
+  if (!cfg.enabled) return { opened: false, disabled: true };
+  const rows = eligibleRows(accountId, account, snapshots);
+  const decision = anomalyTrigger(rows, cfg);
+  if (!decision.opened) return decision;
 
   const state = await loadState();
   state.accounts ||= {};
   const existing = state.accounts[accountId];
-  if (existing?.open && (!existing.openUntil || Date.now() < Date.parse(existing.openUntil))) {
-    return { opened: false, alreadyOpen: true, ...existing };
-  }
+  if (existing?.open && (!existing.openUntil || Date.now() < Date.parse(existing.openUntil))) return { opened: false, alreadyOpen: true, ...existing };
 
-  const reason = severeCollapse ? 'severe_performance_collapse'
-    : conversationSpike ? 'low_score_with_conversation_spike'
-      : 'consecutive_low_performance';
   const openedAt = new Date().toISOString();
   const openUntil = new Date(Date.now() + Math.max(1, cfg.cooldownHours) * 3600000).toISOString();
-  const evidence = {
-    providerPostId: latest.row.providerPostId,
-    score: latest.scored.score,
-    confidence: latest.scored.confidence,
-    exposure: latest.scored.vector.exposure,
-    conversationRate: currentConversation,
-    baselineConversationRate: baselineConversation,
-    recentScores: recent.map(({ scored }) => scored.score)
-  };
-  const row = { open: true, openedAt, openUntil, reason, evidence };
+  const row = { open: true, openedAt, openUntil, reason: decision.reason, evidence: decision.evidence };
   state.accounts[accountId] = row;
   await saveState(state);
   return { opened: true, ...row };
