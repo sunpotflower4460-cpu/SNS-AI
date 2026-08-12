@@ -14,6 +14,7 @@
     "learn": "node src/learning/learn.mjs",
     "trends": "node src/research/trends.mjs",
     "report": "node src/reports/generate.mjs",
+    "weekly-report": "node src/reports/weekly.mjs",
     "doctor": "node src/ops/doctor.mjs",
     "smoke": "node src/ops/smoke.mjs",
     "preflight": "node src/ops/live-preflight.mjs",
