@@ -13,3 +13,10 @@ test('X media metadata payload carries image alt text and enforces 1000-characte
   assert.equal(payload.metadata.alt_text.text.length, 1000);
   assert.equal(payload.metadata.alt_text.text, 'a'.repeat(1000));
 });
+
+test('X video initialize payload normalizes release octet-stream to MP4', () => {
+  const bytes = Buffer.alloc(1234);
+  assert.deepEqual(__test.videoInitializePayload(bytes, 'application/octet-stream'), {
+    media_category: 'tweet_video', media_type: 'video/mp4', shared: false, total_bytes: 1234
+  });
+});
