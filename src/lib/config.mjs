@@ -2,13 +2,37 @@ import { readFile } from 'node:fs/promises';
 
 const ACCOUNTS_FILE = new URL('../../config/accounts.json', import.meta.url);
 
-export async function loadAccounts() {
+export async function loadConfig() {
   const raw = await readFile(ACCOUNTS_FILE, 'utf8');
   const parsed = JSON.parse(raw);
   if (!parsed?.accounts || typeof parsed.accounts !== 'object') {
     throw new Error('config/accounts.json must contain an "accounts" object.');
   }
-  return parsed.accounts;
+  return {
+    defaults: parsed.defaults || {},
+    accounts: parsed.accounts
+  };
+}
+
+export async function loadAccounts() {
+  const config = await loadConfig();
+  const output = {};
+  for (const [id, account] of Object.entries(config.accounts)) {
+    output[id] = {
+      timezone: config.defaults.timezone || 'Asia/Tokyo',
+      mode: config.defaults.mode || 'pause',
+      safety: { ...(config.defaults.safety || {}), ...(account.safety || {}) },
+      generation: { ...(config.defaults.generation || {}), ...(account.generation || {}) },
+      ...account,
+      schedule: account.schedule
+        ? {
+            timezone: account.schedule.timezone || config.defaults.timezone || 'Asia/Tokyo',
+            ...account.schedule
+          }
+        : account.schedule
+    };
+  }
+  return output;
 }
 
 export function loadCredentials() {
