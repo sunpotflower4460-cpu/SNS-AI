@@ -66,14 +66,15 @@ async function researchPlatform(platform, previous) {
   const config = PLATFORMS[platform];
   const schema = {
     type: 'object', additionalProperties: false,
-    required: ['summary', 'rules', 'actionItems', 'requiresHumanReview'],
+    required: ['summary', 'rules', 'actionItems', 'requiresHumanReview', 'sourceUrls'],
     properties: {
       summary: { type: 'string' },
       rules: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: false, required: ['id', 'rule', 'impact'], properties: {
         id: { type: 'string' }, rule: { type: 'string' }, impact: { type: 'string' }
       } } },
       actionItems: { type: 'array', maxItems: 10, items: { type: 'string' } },
-      requiresHumanReview: { type: 'boolean' }
+      requiresHumanReview: { type: 'boolean' },
+      sourceUrls: { type: 'array', maxItems: 20, items: { type: 'string' } }
     }
   };
   const body = {
@@ -82,7 +83,7 @@ async function researchPlatform(platform, previous) {
     max_output_tokens: 2500,
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
     input: [
-      { role: 'system', content: [{ type: 'input_text', text: `Check current official ${platform} platform/developer policy information. Use ONLY official sources on these domains: ${config.domains.join(', ')}. Focus on ${config.focus}. Do not infer a policy change from third-party commentary. If evidence is unclear, set requiresHumanReview=true and say what is unclear.` }] },
+      { role: 'system', content: [{ type: 'input_text', text: `Check current official ${platform} platform/developer policy information. Use ONLY official sources on these domains: ${config.domains.join(', ')}. Focus on ${config.focus}. Put the exact official URLs you relied on in sourceUrls. Do not infer a policy change from third-party commentary. If evidence is unclear, set requiresHumanReview=true and say what is unclear.` }] },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ previous: previous ? { checkedAt: previous.checkedAt, summary: previous.summary, rules: previous.rules, actionItems: previous.actionItems } : null }) }] }
     ],
     text: { format: { type: 'json_schema', name: 'platform_policy_watch', schema, strict: true } }
@@ -90,10 +91,13 @@ async function researchPlatform(platform, previous) {
   const response = await openaiRequest('/responses', body, { retries: 2 });
   await recordUsage('_system', { timezone: 'UTC' }, 'openai', { operation: `policy-watch:${platform}` });
   const parsed = parseJson(outputText(response));
-  const sources = citations(response).filter((source) => allowedSource(source.url, config.domains)).slice(0, 30);
+  const merged = new Map();
+  for (const source of citations(response)) if (allowedSource(source.url, config.domains)) merged.set(source.url, source);
+  for (const url of parsed.sourceUrls || []) if (allowedSource(url, config.domains)) merged.set(url, merged.get(url) || { url, title: null });
+  const sources = [...merged.values()].slice(0, 30);
   if (!sources.length) {
     parsed.requiresHumanReview = true;
-    parsed.actionItems = [...new Set([...(parsed.actionItems || []), 'No official-domain URL citation was captured; verify policy manually before changing automation.'])];
+    parsed.actionItems = [...new Set([...(parsed.actionItems || []), 'No validated official-domain source URL was captured; verify policy manually before changing automation.'])];
   }
   const digest = stableDigest(parsed);
   return {
