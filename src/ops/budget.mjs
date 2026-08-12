@@ -8,7 +8,8 @@ const LIMIT_KEYS = {
   openai: 'openaiCallsPerDay',
   webSearch: 'webSearchCallsPerDay',
   media: 'mediaCallsPerDay',
-  image: 'imageGenerationsPerDay'
+  image: 'imageGenerationsPerDay',
+  video: 'videoGenerationsPerDay'
 };
 
 function dateFor(account) {
