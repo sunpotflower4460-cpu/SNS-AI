@@ -80,6 +80,30 @@ test('config validation honors inherited autonomous mode and permits an explicit
   assert.ok(negative.some((error) => error.includes('budgets.openaiCallsPerDay')));
 });
 
+test('rate-limit knobs fall back to their safe defaults instead of failing open on NaN, and stay fail-closed on a negative daily cap', () => {
+  const account = { schedule: { timezone: 'UTC' } };
+  const history = [{ account: 'acct', status: 'published', at: new Date('2026-08-13T00:58:00Z').toISOString() }];
+  const now = new Date('2026-08-13T01:00:00Z');
+
+  // NaN maxPostsPerDay must not silently disable the daily cap ("n >= NaN" is always false).
+  const nanCap = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: NaN, minMinutesBetweenPosts: 0 } },
+    Array.from({ length: 999 }, () => ({ account: 'acct', status: 'published', at: now.toISOString() })), now);
+  assert.equal(nanCap.ok, false, 'a garbage maxPostsPerDay must fall back to the default cap, not become unlimited');
+
+  // NaN minMinutesBetweenPosts must not silently disable the cooldown ("elapsed < NaN" is always false).
+  const nanCooldown = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: 999, minMinutesBetweenPosts: NaN } }, history, now);
+  assert.equal(nanCooldown.ok, false, 'a garbage minMinutesBetweenPosts must fall back to the default cooldown, not become zero');
+
+  // Negative minMinutesBetweenPosts must not silently disable the cooldown ("elapsed < -5" is always false).
+  const negativeCooldown = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: 999, minMinutesBetweenPosts: -5 } }, history, now);
+  assert.equal(negativeCooldown.ok, false, 'a negative minMinutesBetweenPosts must fall back to the default cooldown, not disable it');
+
+  // A negative maxPostsPerDay already fails closed on its own ("0 posts so far >= -5" is always true) -
+  // confirm the NaN-guard above did not accidentally weaken that into "use the default cap instead".
+  const negativeCap = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: -5, minMinutesBetweenPosts: 0 } }, [], now);
+  assert.equal(negativeCap.ok, false, 'a negative maxPostsPerDay must still block every post, not fall back to the default cap');
+});
+
 test('concurrent slot writes preserve every independently handled slot', async () => {
   const saved = await snapshot([STATE_FILE]);
   try {

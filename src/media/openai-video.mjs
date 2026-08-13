@@ -9,6 +9,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safe(value) { return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video'; }
 function digest(value) { return createHash('sha256').update(String(value)).digest('hex').slice(0, 20); }
+// A generated asset exceeding the configured byte limit is a config-tuning issue, not a provider
+// outage: it must not count toward the resilience circuit breaker (which would pause the WHOLE
+// account, including plain text posts, after a few oversize hits) any more than a media QA failure
+// does - see MEDIA_QA_FAILED/MEDIA_QA_INPUT_TOO_LARGE in src/media/qa.mjs and the nonCircuitCodes list
+// in src/orchestrate.mjs.
+function oversizeError(variant, maxBytes) {
+  const error = new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  error.code = 'MEDIA_HOSTING_TOO_LARGE';
+  return error;
+}
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Built-in video generation requires OPENAI_API_KEY.'); return key; }
 function authHeaders(extra = {}) { return { Authorization: `Bearer ${apiKey()}`, ...extra }; }
 
@@ -116,9 +126,9 @@ async function downloadAsset(videoId, variant, maxBytes) {
   const fallbackType = variant && variant !== 'video' ? 'image/jpeg' : 'video/mp4';
   const contentType = (response.headers.get('content-type') || fallbackType).split(';')[0];
   const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  if (declared > maxBytes) throw oversizeError(variant, maxBytes);
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  if (bytes.byteLength > maxBytes) throw oversizeError(variant, maxBytes);
   return { bytes, contentType };
 }
 
@@ -161,10 +171,16 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
     });
     qa.previewVariant = preview.variant;
     if (qa.pass) {
-      const video = await downloadAsset(completed.id, 'video', maxBytes);
-      const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
-      await deleteVideoQuietly(completed.id);
-      return { url, qa, altText: qa.altText || '', attempt, prompt };
+      // QA already passed (paid API cost already sunk) - if the full-resolution download turns out
+      // oversized, or the upload itself fails, this still must not leak the generated video on the
+      // OpenAI account indefinitely, same as the QA-failure branch below.
+      try {
+        const video = await downloadAsset(completed.id, 'video', maxBytes);
+        const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
+        return { url, qa, altText: qa.altText || '', attempt, prompt };
+      } finally {
+        await deleteVideoQuietly(completed.id);
+      }
     }
 
     lastQa = qa;

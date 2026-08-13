@@ -12,8 +12,11 @@ export async function openaiRequest(path, body, meta = {}) {
   const retries = Number(meta.retries ?? 2);
   for (let attempt = 0; ; attempt += 1) {
     if (meta.accountId && meta.account) {
-      await consumeUsage(meta.accountId, meta.account, 'openai', { operation: meta.operation || path, attempt: attempt + 1 });
-      if (meta.webSearch) await consumeUsage(meta.accountId, meta.account, 'webSearch', { operation: meta.operation || path, attempt: attempt + 1 });
+      // Dry-run previews still call the real API for a faithful preview, but are billed against a
+      // separate per-day counter so repeated previews can never exhaust the account's live posting budget.
+      const budgetAccountId = meta.dryRun ? `${meta.accountId}::dry-run-preview` : meta.accountId;
+      await consumeUsage(budgetAccountId, meta.account, 'openai', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
+      if (meta.webSearch) await consumeUsage(budgetAccountId, meta.account, 'webSearch', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
     }
     let response;
     try {
@@ -83,13 +86,13 @@ async function requestAndParse(body, meta) {
   return { ...parsed, citations: extractUrlCitations(response) };
 }
 
-async function responseJson({ model, system, user, webSearch = false, schema = CANDIDATE_SCHEMA, name = 'social_output', accountId, account, operation }) {
+async function responseJson({ model, system, user, webSearch = false, schema = CANDIDATE_SCHEMA, name = 'social_output', accountId, account, operation, dryRun = false }) {
   const body = { model, store: false, max_output_tokens: Number(account?.generation?.maxOutputTokens ?? 3000), input: [
     { role: 'system', content: [{ type: 'input_text', text: system }] },
     { role: 'user', content: [{ type: 'input_text', text: user }] }
   ], text: { format: { type: 'json_schema', name, schema, strict: true } } };
   if (webSearch) body.tools = [{ type: 'web_search', search_context_size: 'medium' }];
-  const meta = { accountId, account, webSearch, operation: operation || name };
+  const meta = { accountId, account, webSearch, operation: operation || name, dryRun };
   try { return await requestAndParse(body, meta); }
   catch (error) {
     if (Number(error.status) !== 400) throw error;
@@ -142,11 +145,12 @@ export async function generatePost(accountId, account, history = [], context = {
   const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = Number(account.generation?.duplicateThreshold ?? 0.72);
   const model = account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5'; const explore = shouldExplore(context.slotId || new Date().toISOString(), account.learning?.exploreRate ?? context.strategy?.exploreRate ?? 0.2);
   const experiment = context.experimentAssignment || null;
+  const dryRun = Boolean(context.dryRun);
   let feedback = '';
   let lastFallback = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const prompt = generationPrompt(accountId, account, history, context, feedback);
-    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch: Boolean(account.research?.webSearch), accountId, account, operation: 'post-generation' });
+    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch: Boolean(account.research?.webSearch), accountId, account, operation: 'post-generation', dryRun });
     const valid = [];
     for (const candidate of generated.candidates || []) {
       try {
@@ -160,7 +164,7 @@ export async function generatePost(accountId, account, history = [], context = {
     const pool = experiment && experimentMatched.length ? experimentMatched : (!experiment || attempt === attempts ? valid : []);
     const ranked = rankCandidates(pool, context.strategy, { explore });
     if (ranked.length) {
-      const winner = ranked[0]; await moderateText(winner.text, account, accountId);
+      const winner = ranked[0]; if (!dryRun) await moderateText(winner.text, account, accountId);
       return { text: winner.text, mediaPrompt: String(winner.mediaPrompt || ''), rationale: String(winner.rationale || ''),
         features: winner.features || {}, predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
         sources: generated.citations || [], promptVersion: PROMPT_VERSION,

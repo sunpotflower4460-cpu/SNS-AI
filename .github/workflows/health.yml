@@ -35,6 +35,11 @@ jobs:
       - name: Generate readiness report
         id: health_run
         run: npm run doctor -- --write
+      - name: Report stuck durable publish claims
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: npm run stale-claims
       - name: Persist readiness only when it changed
         if: always() && steps.health_run.outcome != 'skipped'
         run: |

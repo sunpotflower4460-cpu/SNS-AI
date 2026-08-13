@@ -79,7 +79,13 @@ export async function generateAndHostImageDetailed(accountId, account, slotId, d
       }
     } else {
       const bytes = await generateImage(accountId, account, prompt);
-      if (bytes.byteLength > maxBytes) throw new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
+      if (bytes.byteLength > maxBytes) {
+        // A config-tuning issue (hosting limit too tight for this model/size/quality), not a provider
+        // outage - must not count toward the resilience circuit breaker, same as a media QA failure.
+        const error = new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
+        error.code = 'MEDIA_HOSTING_TOO_LARGE';
+        throw error;
+      }
       const qa = await reviewVisualBytes(accountId, account, bytes, 'image/png', { mediaType: 'image', prompt: originalPrompt, postText: draft?.text || '' });
       if (qa.pass) {
         const url = await uploadReleaseAsset(release, name, bytes, 'image/png');

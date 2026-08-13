@@ -24,11 +24,25 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue; if (!account.enabled) continue; if (!['auto', 'approval'].includes(account.mode)) continue;
-    const strategy = account.learning?.enabled === false ? null : await loadStrategy(accountId);
-    const experimentState = account.experiments?.enabled === false ? null : await loadExperimentState(accountId);
-    const slots = force
-      ? [{ slotId: `${accountId}:manual:${now.toISOString().slice(0, 16)}`, accountId, time: 'manual', timeZone: account.schedule?.timezone || 'Asia/Tokyo', localDate: now.toISOString().slice(0, 10) }]
-      : findDueSlots(accountId, account, now, strategy);
+
+    let strategy;
+    let experimentState;
+    let slots;
+    try {
+      strategy = account.learning?.enabled === false ? null : await loadStrategy(accountId);
+      experimentState = account.experiments?.enabled === false ? null : await loadExperimentState(accountId);
+      slots = force
+        ? [{ slotId: `${accountId}:manual:${now.toISOString().slice(0, 16)}`, accountId, time: 'manual', timeZone: account.schedule?.timezone || 'Asia/Tokyo', localDate: now.toISOString().slice(0, 10) }]
+        : findDueSlots(accountId, account, now, strategy);
+    } catch (error) {
+      // A single misconfigured account (e.g. an invalid schedule.timezone that npm run validate
+      // should have caught, but wasn't run) must not abort every other account's run - this loop is
+      // meant to isolate failures per account/slot everywhere else, so this preparation step needs the
+      // same isolation instead of throwing out of the whole function.
+      report.push({ account: accountId, status: 'account-error', error: error.message });
+      await appendAudit({ account: accountId, stage: 'autopilot-account-error', error: String(error.message || error).slice(0, 500) }).catch(() => {});
+      continue;
+    }
 
     for (const slot of slots) {
       try {
@@ -64,7 +78,18 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       try { await assertCircuitClosed(accountId, 'autopilot', account.resilience); }
       catch (error) { report.push({ account: accountId, slot: slot.slotId, status: 'circuit-open', reason: error.message, openUntil: error.openUntil || null }); continue; }
 
-      const currentHistory = await readHistory(); const rate = checkRateLimits(accountId, account, currentHistory, now);
+      let rate;
+      try {
+        const currentHistory = await readHistory();
+        rate = checkRateLimits(accountId, account, currentHistory, now);
+      } catch (error) {
+        // Same isolation concern as the per-account setup step above: a bad schedule.timezone can
+        // throw from deep inside checkRateLimits -> postsToday -> localDateKey -> Intl.DateTimeFormat,
+        // and must not take down every other account/slot in this run.
+        report.push({ account: accountId, slot: slot.slotId, status: 'state-error', error: error.message });
+        await appendAudit({ account: accountId, stage: 'autopilot-rate-limit-error', slotId: slot.slotId, error: String(error.message || error).slice(0, 500) }).catch(() => {});
+        continue;
+      }
       if (!rate.ok) { report.push({ account: accountId, slot: slot.slotId, status: 'rate-limited', reason: rate.reason }); continue; }
 
       const experimentAssignment = assignmentForSlot(experimentState?.active, slot.slotId);
@@ -74,7 +99,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const humanFeedback = await recentHumanFeedback(accountId, Number(account.learning?.humanFeedbackWindow ?? 40));
         await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
 
-        const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId });
+        const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun });
         const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun });
         ensureMediaForPlatform(account, media.url);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
@@ -108,7 +133,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
         report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'SLOT_ALREADY_CLAIMED'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED'];
         if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
@@ -117,7 +142,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted'
           : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
             : error.code === 'SLOT_ALREADY_CLAIMED' ? 'already-handled'
-              : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
+              : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' || error.code === 'MEDIA_HOSTING_TOO_LARGE' ? 'media-qa-failed'
                 : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
         report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }

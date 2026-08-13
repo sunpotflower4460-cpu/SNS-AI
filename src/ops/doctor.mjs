@@ -23,8 +23,12 @@ function credentialRequirements(account) {
 
 function parseCredentials(raw) {
   if (!raw) return { parsed: null, error: null };
+  // Do not surface the native JSON.parse error message: it embeds a literal excerpt of the input,
+  // and this input is SOCIAL_CREDENTIALS_JSON - real credential material. This report is written to
+  // data/reports/ and committed by the health workflow, so any secret excerpt in it becomes permanent
+  // git history outside GitHub's secret-masking (which only redacts exact known secret values).
   try { return { parsed: JSON.parse(raw), error: null }; }
-  catch (error) { return { parsed: null, error: error.message }; }
+  catch { return { parsed: null, error: 'invalid JSON' }; }
 }
 
 function usesBuiltInMedia(account) {
