@@ -50,6 +50,8 @@ export function postsToday(entries, accountId, timeZone, now = new Date()) {
   const today = localDateKey(now, timeZone);
   return (entries || []).filter((entry) => {
     if (entry.account !== accountId || entry.status !== 'published' || !entry.at) return false;
-    return localDateKey(new Date(entry.at), timeZone) === today;
+    const at = new Date(entry.at);
+    if (Number.isNaN(at.getTime())) return false;
+    return localDateKey(at, timeZone) === today;
   });
 }

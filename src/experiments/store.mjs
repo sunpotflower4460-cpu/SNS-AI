@@ -5,11 +5,20 @@ function safe(accountId) { return String(accountId).replace(/[^a-zA-Z0-9._-]/g, 
 function pathFor(accountId) { return fileURLToPath(new URL(`../../data/experiments/${safe(accountId)}.json`, import.meta.url)); }
 
 export async function loadExperimentState(accountId) {
-  return await readJson(pathFor(accountId), { account: accountId, active: null, completed: [] }) || { account: accountId, active: null, completed: [] };
+  const defaults = { account: accountId, active: null, completed: [], completedCount: 0 };
+  const loaded = await readJson(pathFor(accountId), defaults) || defaults;
+  const completed = loaded.completed || [];
+  return {
+    ...defaults,
+    ...loaded,
+    completedCount: Number.isFinite(loaded.completedCount) ? loaded.completedCount : completed.length
+  };
 }
 
 export async function saveExperimentState(accountId, state) {
-  const next = { account: accountId, active: state?.active || null, completed: (state?.completed || []).slice(-50) };
+  const completed = state?.completed || [];
+  const completedCount = Number.isFinite(state?.completedCount) ? state.completedCount : completed.length;
+  const next = { account: accountId, active: state?.active || null, completed: completed.slice(-50), completedCount };
   await writeJsonAtomic(pathFor(accountId), next);
   return next;
 }

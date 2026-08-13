@@ -30,7 +30,13 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       : findDueSlots(accountId, account, now, strategy);
 
     for (const slot of slots) {
-      if (!force && await slotHandled(slot.slotId)) { report.push({ account: accountId, slot: slot.slotId, status: 'already-handled' }); continue; }
+      try {
+        if (!force && await slotHandled(slot.slotId)) { report.push({ account: accountId, slot: slot.slotId, status: 'already-handled' }); continue; }
+      } catch (error) {
+        report.push({ account: accountId, slot: slot.slotId, status: 'state-error', error: error.message });
+        await appendAudit({ account: accountId, stage: 'autopilot-state-error', slotId: slot.slotId, error: String(error.message || error).slice(0, 500) });
+        continue;
+      }
       try { await assertAutonomyBrakeClear(accountId, account); }
       catch (error) {
         report.push({ account: accountId, slot: slot.slotId, status: 'safety-brake', reason: error.reason || error.message, openUntil: error.openUntil || null });

@@ -7,7 +7,10 @@ export function learnedCandidateScore(candidate, strategy) {
   for (const dim of DIMS) {
     const value = candidate.features?.[dim] ?? candidate[dim];
     const stat = value ? strategy.featureStats?.[dim]?.[String(value)] : null;
-    if (stat && Number(stat.n) > 0) values.push(Number(stat.averageScore || 50) * Number(stat.confidence ?? 1));
+    if (stat && Number(stat.n) > 0) {
+      const confidence = clamp(Number(stat.confidence ?? 1), 0, 1);
+      values.push(50 + (Number(stat.averageScore ?? 50) - 50) * confidence);
+    }
   }
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 50;
 }

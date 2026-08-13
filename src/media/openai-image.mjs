@@ -63,8 +63,11 @@ export async function generateAndHostImageDetailed(accountId, account, slotId, d
   let prompt = originalPrompt;
   let lastQa = null;
 
+  const model = account.media?.imageModel || 'gpt-image-1';
+  const size = account.media?.imageSize || '1024x1024';
+  const quality = account.media?.imageQuality || 'medium';
   for (let attempt = 0; attempt <= maxRegenerations; attempt += 1) {
-    const name = `${safe(accountId)}-${digest(`${MEDIA_QA_VERSION}|${slotId}|${prompt}`)}.png`;
+    const name = `${safe(accountId)}-${digest(`${MEDIA_QA_VERSION}|${slotId}|${model}|${size}|${quality}|${prompt}`)}.png`;
     const cached = await findAsset(release, name);
     if (cached) {
       const qa = await reviewVisualUrl(accountId, account, cached, { mediaType: 'image', prompt: originalPrompt, postText: draft?.text || '' });
