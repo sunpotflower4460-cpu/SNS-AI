@@ -59,22 +59,28 @@ function markedApprovalPayload(payload, accountId, slotId) {
   return { ...payload, _snsAi: approvalMarker(accountId, slotId) };
 }
 
-function isTrustedApprovalIssue(issue, accountId, slotId) {
-  if (!issue || issue.pull_request || issue.title !== approvalTitle(accountId, slotId)) return false;
-  const author = String(issue.user?.login || '');
-  if (author !== 'github-actions[bot]') return false;
+export function trustedApprovalPayload(issue) {
+  if (!issue || issue.pull_request || String(issue.user?.login || '') !== 'github-actions[bot]') return null;
   try {
     const payload = JSON.parse(issue.body || '{}');
+    const accountId = payload?.account;
+    const slotId = payload?.slotId;
     const marker = payload?._snsAi;
-    return marker?.kind === 'sns-ai-approval'
-      && Number(marker?.version) === 1
-      && String(marker?.account) === String(accountId)
-      && String(marker?.slotId) === String(slotId)
-      && String(payload?.account) === String(accountId)
-      && String(payload?.slotId) === String(slotId);
+    if (!accountId || !slotId) return null;
+    if (issue.title !== approvalTitle(accountId, slotId)) return null;
+    if (marker?.kind !== 'sns-ai-approval' || Number(marker?.version) !== 1) return null;
+    if (String(marker?.account) !== String(accountId) || String(marker?.slotId) !== String(slotId)) return null;
+    return payload;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isTrustedApprovalIssue(issue, accountId, slotId) {
+  const payload = trustedApprovalPayload(issue);
+  return Boolean(payload
+    && String(payload.account) === String(accountId)
+    && String(payload.slotId) === String(slotId));
 }
 
 export async function findApprovalIssue(accountId, slotId) {
@@ -107,4 +113,4 @@ export async function createApprovalIssue(accountId, slotId, payload, { skipLook
   });
 }
 
-export const __test = { approvalTitle, approvalMarker, markedApprovalPayload, isTrustedApprovalIssue };
+export const __test = { approvalTitle, approvalMarker, markedApprovalPayload, isTrustedApprovalIssue, trustedApprovalPayload };
