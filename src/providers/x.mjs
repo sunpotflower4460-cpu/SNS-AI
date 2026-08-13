@@ -160,18 +160,27 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   const payload = {};
   if (text) payload.text = text;
   if (mediaUrl) {
-    const mediaId = mediaType === 'reel'
-      ? await uploadVideo(mediaUrl, credential)
-      : await uploadImage(mediaUrl, credential, mediaAltText);
-    payload.media = { media_ids: [mediaId] };
+    try {
+      const mediaId = mediaType === 'reel'
+        ? await uploadVideo(mediaUrl, credential)
+        : await uploadImage(mediaUrl, credential, mediaAltText);
+      payload.media = { media_ids: [mediaId] };
+    } catch (error) {
+      error.publishStage ||= 'media';
+      throw error;
+    }
   }
 
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
-  const body = mediaUrl
-    ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
-    : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
-
-  return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
+  try {
+    const body = mediaUrl
+      ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
+      : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
+    return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
+  } catch (error) {
+    error.publishStage ||= 'create-post';
+    throw error;
+  }
 }
 
 export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload };
