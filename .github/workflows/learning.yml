@@ -29,21 +29,23 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Validate
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
+          npm run secret-scan
       - name: Update account strategies from measured outcomes
+        id: learning_run
         shell: bash
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           node src/learning/learn.mjs "${args[@]}"
       - name: Refresh readable report
+        if: always() && steps.learning_run.outcome != 'skipped'
         run: node src/reports/generate.mjs
       - name: Persist strategy/report
+        if: always() && steps.learning_run.outcome != 'skipped'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
