@@ -112,7 +112,7 @@ export async function cleanupGeneratedAssets({ retentionDays = 90 } = {}) {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${githubToken()}`, 'X-GitHub-Api-Version': '2022-11-28' }
     });
     if (!response.ok && response.status !== 404) throw new Error(`Could not delete old generated media asset ${asset.id}: HTTP ${response.status}`);
-    deleted += 1;
+    if (response.ok) deleted += 1;
   }
   return { skipped: false, scanned: assets.length, deleted };
 }
