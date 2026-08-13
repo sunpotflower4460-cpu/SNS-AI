@@ -87,11 +87,28 @@ async function repositoryHostingCheck(required) {
   }
 }
 
+async function durableStateBranchCheck() {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  const branch = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
+  if (!token || !repo) return { checked: true, ok: false, branch, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { checked: true, ok: false, branch, error: body?.message || `Durable state branch check failed with ${response.status}` };
+    return { checked: true, ok: body?.name === branch, branch, error: body?.name === branch ? null : 'GitHub returned a different durable state branch.' };
+  } catch (error) {
+    return { checked: true, ok: false, branch, error: error.message };
+  }
+}
+
 export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false } };
+  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
@@ -110,6 +127,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
 
   const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
+  const durableState = await durableStateBranchCheck();
 
   for (const [id, account] of selected) {
     try {
@@ -135,7 +153,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
       const ownModels = requiredModels(account);
       const ownModelFailures = modelChecks.filter((check) => ownModels.includes(check.model) && !check.ok);
       const mediaReady = !kind || mediaHosting.ok;
-      const accountReady = mediaReady && ownModelFailures.length === 0;
+      const accountReady = durableState.ok && mediaReady && ownModelFailures.length === 0;
       rows.push({
         account: id,
         platform: resolved.platform,
@@ -159,12 +177,13 @@ export async function runLivePreflight({ accountFilter } = {}) {
   }
 
   const modelFailure = modelChecks.some((check) => !check.ok);
-  const ok = !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
+  const ok = durableState.ok && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError && !modelFailure : null, error: openaiError, models: modelChecks },
     mediaHosting,
+    durableState,
     accounts: rows
   };
 }
