@@ -247,7 +247,7 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
           return jsonResponse({ results: [{ flagged: false, categories: {} }] });
         }
         if (target === 'https://api.openai.com/v1/models/gpt-5') return jsonResponse({ id: 'gpt-5', owned_by: 'openai' });
-        if (target === 'https://api.openai.com/v1/models/gpt-image-1') return jsonResponse({ id: 'gpt-image-1', owned_by: 'openai' });
+        if (target === 'https://api.openai.com/v1/models/gpt-image-2') return jsonResponse({ id: 'gpt-image-2', owned_by: 'openai' });
         if (target === 'https://api.github.com/repos/sunpotflower4460-cpu/SNS-AI') {
           assert.equal(options.headers.Authorization, 'Bearer github-test-token');
           return jsonResponse({ private: privateRepo });
