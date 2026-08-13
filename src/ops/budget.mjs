@@ -39,7 +39,7 @@ export async function assertUsageBudget(accountId, account, kind) {
   const limitKey = LIMIT_KEYS[kind];
   if (!limitKey) return { allowed: true };
   const limit = Number(account?.budgets?.[limitKey]);
-  if (!Number.isFinite(limit) || limit <= 0) return { allowed: true, unlimited: true };
+  if (!Number.isFinite(limit)) return { allowed: true, unlimited: true };
   const used = await usageToday(accountId, account, kind);
   if (used >= limit) {
     const error = new Error(`Daily ${kind} budget exhausted for ${accountId}: ${used}/${limit}.`);

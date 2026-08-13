@@ -16,7 +16,7 @@ export function metricVector(snapshot) {
   const clicks = Number(m.urlClicks || 0);
   const follows = Number(m.follows || 0);
   const completion = Number(m.videoViews || 0) > 0 ? Number(m.playback100 || 0) / Number(m.videoViews || 1) : 0;
-  const skipQuality = m.reelSkipRate ? 1 - clamp(Number(m.reelSkipRate), 0, 1) : 0;
+  const skipQuality = m.reelSkipRate != null ? 1 - clamp(Number(m.reelSkipRate), 0, 1) : 0;
   return {
     exposure, shareRate: safeRate(share, exposure), saveRate: safeRate(saves, exposure),
     conversationRate: safeRate(conversation, exposure), profileRate: safeRate(profile, exposure),

@@ -34,7 +34,8 @@ async function compactFile(path, retentionForRow, dateKey, type, archive) {
     if (seen.has(fingerprint)) { duplicates += 1; continue; }
     seen.add(fingerprint);
     const timestamp = Date.parse(row?.[dateKey] || '');
-    const retentionDays = Math.max(1, Number(retentionForRow(row)) || 180);
+    const rawRetention = Number(retentionForRow(row));
+    const retentionDays = Math.max(1, Number.isFinite(rawRetention) ? rawRetention : 180);
     const cutoff = Date.now() - retentionDays * 86_400_000;
     if (Number.isFinite(timestamp) && timestamp < cutoff) {
       removed += 1;

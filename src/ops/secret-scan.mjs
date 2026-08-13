@@ -3,11 +3,12 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const ROOTS = ['src', 'config', '.github', 'docs', 'README.md', 'package.json'];
+const ROOTS = ['src', 'test', 'config', 'data', '.github', 'docs', 'README.md', 'package.json'];
 const SKIP = new Set(['node_modules', '.git']);
 const PATTERNS = [
   ['OpenAI-style API key', /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g],
   ['GitHub token', /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g],
+  ['GitHub fine-grained token', /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g],
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
   ['Private key block', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
   ['Bearer token literal', /Bearer\s+[A-Za-z0-9._~+\/-]{30,}/g]
