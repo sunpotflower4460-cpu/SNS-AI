@@ -126,16 +126,20 @@ async function readRemote(slotId) {
     memory.set(slotId, claim);
     return claim;
   } catch (error) {
-    if (error.status === 404) return null;
+    if (error.status === 404) {
+      shaMemory.delete(slotId);
+      memory.delete(slotId);
+      return null;
+    }
     throw error;
   }
 }
 
-async function writeRemote(slotId, claim) {
+async function writeRemote(slotId, claim, { refreshShaIfMissing = true } = {}) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
   let sha = shaMemory.get(slotId) || null;
-  if (!sha) {
+  if (!sha && refreshShaIfMissing) {
     await readRemote(slotId);
     sha = shaMemory.get(slotId) || null;
   }
@@ -233,7 +237,7 @@ export async function beginPublishClaim(slotId, detail = {}) {
     const check = assertClaimCanBegin(slotId, existing);
     if (check.replay) return { claimed: false, replay: true, claim: existing };
     try {
-      const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail));
+      const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail), { refreshShaIfMissing: false });
       return { claimed: true, replay: false, claim };
     } catch (error) {
       return reconcileBeginConflict(slotId, error);
