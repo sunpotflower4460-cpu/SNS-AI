@@ -61,7 +61,8 @@ export async function publish(payload) {
     }
   }
 
-  await appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length });
+  const preWarnings = [];
+  await bestEffort('publish-attempt-audit', () => appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length }), preWarnings);
 
   let result;
   try {
@@ -69,6 +70,7 @@ export async function publish(payload) {
     else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v25.0' });
     else throw new Error(`Unsupported platform: ${account.platform}`);
   } catch (error) {
+    const failureWarnings = [];
     if (!payload.dryRun && payload.slotId) {
       const claimStatus = definitiveProviderFailure(error) ? 'failed' : 'publish_unknown';
       await bestEffort('durable-claim-failure-state', () => finishPublishClaim(payload.slotId, claimStatus, {
@@ -78,17 +80,20 @@ export async function publish(payload) {
         errorStatus: Number.isFinite(Number(error.status)) ? Number(error.status) : null,
         publishStage: error.publishStage || null,
         lastError: String(error.message || error).slice(0, 500)
-      }), []);
+      }), failureWarnings);
     }
-    if (!payload.dryRun && error.code !== 'CIRCUIT_OPEN') await recordCircuitFailure(payload.account, 'publish', error, account.resilience);
-    await appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500) });
+    if (!payload.dryRun && error.code !== 'CIRCUIT_OPEN') {
+      await bestEffort('publish-circuit-failure', () => recordCircuitFailure(payload.account, 'publish', error, account.resilience), failureWarnings);
+    }
+    await bestEffort('publish-error-audit', () => appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500) }), failureWarnings);
+    if (failureWarnings.length) error.bookkeepingWarnings = failureWarnings;
     throw error;
   }
 
-  if (payload.dryRun) return result;
+  if (payload.dryRun) return preWarnings.length ? { ...result, bookkeepingWarnings: preWarnings } : result;
 
   const postId = providerPostId(result);
-  const warnings = [];
+  const warnings = [...preWarnings];
   if (payload.slotId) {
     await bestEffort('durable-claim-published', () => finishPublishClaim(payload.slotId, 'published', {
       account: payload.account,
@@ -126,7 +131,7 @@ export async function publish(payload) {
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
   try { const payload = await loadPayload(parseArgs(process.argv.slice(2))); const result = await publish(payload); console.log(JSON.stringify({ ok: true, account: payload.account, result }, null, 2)); }
-  catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, detail: error.body }, null, 2)); process.exitCode = 1; }
+  catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, detail: error.body, bookkeepingWarnings: error.bookkeepingWarnings || [] }, null, 2)); process.exitCode = 1; }
 }
 
 export const __test = { providerPostId, definitiveProviderFailure };
