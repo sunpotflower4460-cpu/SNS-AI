@@ -45,8 +45,12 @@ export async function loadAccounts() {
 export function loadCredentials() {
   const raw = process.env.SOCIAL_CREDENTIALS_JSON;
   if (!raw) throw new Error('Missing SOCIAL_CREDENTIALS_JSON. Add it as a GitHub Actions repository secret.');
+  // Never interpolate the JSON.parse error message here: V8 embeds a literal excerpt of the input
+  // around the parse failure, and this input is real credential material. That excerpt would then
+  // flow into audit logs, CLI/Action output, and committed reports - all of which bypass GitHub's
+  // secret masking (which only redacts exact known secret values, not arbitrary substrings).
   try { return JSON.parse(raw); }
-  catch (error) { throw new Error(`SOCIAL_CREDENTIALS_JSON is not valid JSON: ${error.message}`); }
+  catch { throw new Error('SOCIAL_CREDENTIALS_JSON is not valid JSON.'); }
 }
 
 export async function resolveAccount(accountId, { allowDisabled = false } = {}) {

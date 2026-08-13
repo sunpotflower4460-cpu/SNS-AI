@@ -167,7 +167,7 @@ export async function publish(payload) {
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
   try { const payload = await loadPayload(parseArgs(process.argv.slice(2))); const result = await publish(payload); console.log(JSON.stringify({ ok: true, account: payload.account, result }, null, 2)); }
-  catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, detail: error.body, bookkeepingWarnings: error.bookkeepingWarnings || [] }, null, 2)); process.exitCode = 1; }
+  catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, bookkeepingWarnings: error.bookkeepingWarnings || [] }, null, 2)); process.exitCode = 1; }
 }
 
 export const __test = { providerPostId, definitiveProviderFailure, boolValue, validateProviderPayload };

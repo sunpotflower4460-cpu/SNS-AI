@@ -3,9 +3,23 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAccounts, loadConfig } from '../lib/config.mjs';
 import { validateConfig } from '../validate-config.mjs';
+import { VIDEOS_API_DEPRECATION_DATE } from '../media/openai-video.mjs';
 
 const REPORT_JSON = fileURLToPath(new URL('../../data/reports/readiness.json', import.meta.url));
 const REPORT_MD = fileURLToPath(new URL('../../data/reports/readiness.md', import.meta.url));
+
+function videosApiDaysLeft(now = Date.now()) {
+  return Math.ceil((Date.parse(VIDEOS_API_DEPRECATION_DATE) - now) / 86_400_000);
+}
+// Once the confirmed shutdown date has passed, every real generation attempt is guaranteed to fail
+// closed with PROVIDER_DEPRECATED (see media/openai-video.mjs) - readiness must reflect that as a
+// blocker, not just a warning, so `ready`/exit code don't stay green for an account that can no longer
+// actually publish a Reel.
+function videosApiDeprecationMessage(now = Date.now()) {
+  const daysLeft = videosApiDaysLeft(now);
+  if (daysLeft <= 0) return `OpenAI's Videos API (sora-2/sora-2-pro) was shut down on ${VIDEOS_API_DEPRECATION_DATE}. Built-in Reel generation for this account will fail closed until it is reconfigured to a different media strategy.`;
+  return `OpenAI's Videos API (sora-2/sora-2-pro) is scheduled for shutdown on ${VIDEOS_API_DEPRECATION_DATE} (about ${daysLeft} day(s) from now), with no replacement model listed as of this check. Built-in Reel generation for this account will stop working on that date - plan a migration to media.strategy: endpoint or another video source before then.`;
+}
 
 function xUsesMedia(account) {
   return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
@@ -23,8 +37,12 @@ function credentialRequirements(account) {
 
 function parseCredentials(raw) {
   if (!raw) return { parsed: null, error: null };
+  // Do not surface the native JSON.parse error message: it embeds a literal excerpt of the input,
+  // and this input is SOCIAL_CREDENTIALS_JSON - real credential material. This report is written to
+  // data/reports/ and committed by the health workflow, so any secret excerpt in it becomes permanent
+  // git history outside GitHub's secret-masking (which only redacts exact known secret values).
   try { return { parsed: JSON.parse(raw), error: null }; }
-  catch (error) { return { parsed: null, error: error.message }; }
+  catch { return { parsed: null, error: 'invalid JSON' }; }
 }
 
 function usesBuiltInMedia(account) {
@@ -34,6 +52,15 @@ function usesBuiltInMedia(account) {
   const type = media.type || 'image';
   if (type === 'reel') return media.internalVideoGeneration !== false;
   return type === 'image' && media.internalImageGeneration !== false;
+}
+
+// 'generate' always invokes built-in video generation for a Reel regardless of whether a media
+// library is also configured (src/lib/media.mjs's `generated()` never consults media.urls), and
+// 'auto' can reach it too whenever the AI-chosen mediaDecision is 'generate', or 'library' with an
+// empty pool - so this must NOT be gated on "no library configured" the way the existing
+// library/endpoint/built-in fallback warning below it is.
+export function usesBuiltInVideoGeneration(account) {
+  return (account.media?.type || 'image') === 'reel' && usesBuiltInMedia(account);
 }
 
 function usesOpenAI(account) {
@@ -63,7 +90,7 @@ function budgetWarnings(account) {
   return warnings;
 }
 
-function mediaReadiness(account) {
+function mediaReadiness(account, { now = Date.now() } = {}) {
   const media = account.media || {};
   const strategy = media.strategy || 'none';
   const mediaType = media.type || 'image';
@@ -73,6 +100,10 @@ function mediaReadiness(account) {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
     if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access. Refreshed OAuth2 tokens are encrypted into data/x-oauth2-state.json using X_OAUTH2_STATE_KEY.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
+    // pool/fixed/external/endpoint strategies resolve existing media URLs and never call the Videos
+    // API (see src/lib/media.mjs) - only 'auto'/'generate' without an HTTPS endpoint can actually
+    // reach built-in video generation, matching usesBuiltInMedia()'s own predicate.
+    if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft(now) <= 0 ? blockers : warnings).push(videosApiDeprecationMessage(now));
     return { blockers, warnings };
   }
   if (account.platform !== 'instagram') return { blockers, warnings };
@@ -91,12 +122,15 @@ function mediaReadiness(account) {
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
   }
+  // Unlike the fallback warning above, this must NOT be gated on "no library configured": 'generate'
+  // always uses built-in video generation regardless of a configured library, and 'auto' can too.
+  if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft(now) <= 0 ? blockers : warnings).push(videosApiDeprecationMessage(now));
   warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };
 }
 
-export async function buildReadinessReport({ accountFilter } = {}) {
+export async function buildReadinessReport({ accountFilter, now = Date.now() } = {}) {
   const config = await loadConfig();
   const accounts = await loadAccounts();
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
@@ -129,7 +163,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
           warnings.push(...expiry.warnings);
         }
       }
-      const media = mediaReadiness(account);
+      const media = mediaReadiness(account, { now });
       blockers.push(...media.blockers);
       warnings.push(...media.warnings);
     } else if (!account.enabled || account.mode === 'pause') {
@@ -195,3 +229,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(JSON.stringify(report, null, 2));
   if (strict && !report.ready) process.exitCode = 1;
 }
+
+export const __test = { videosApiDaysLeft, videosApiDeprecationMessage };

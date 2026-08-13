@@ -33,6 +33,8 @@ export async function getSlot(slotId) {
   return state.slots?.[slotId] || null;
 }
 
+const HANDLED_STATUSES = new Set(['published', 'approval_pending', 'skipped', 'publishing', 'publish_unknown']);
+
 export async function markSlot(slotId, status, detail = {}) {
   return serializeMutation(async () => {
     const state = await loadState();
@@ -48,8 +50,35 @@ export async function markSlot(slotId, status, detail = {}) {
   });
 }
 
+// Unlike markSlot (unconditional last-write-wins - fine for genuine completed actions, since a second
+// such write only ever happens after the durable-claim CAS already prevented a duplicate real side
+// effect), this refuses to overwrite a slot that has ALREADY reached a handled/terminal status. Needed
+// for callers marking a slot 'skipped' after a deterministic failure: the caller's own earlier
+// slotHandled() check is not atomic with this write, so a concurrent runner could have published the
+// slot (or created its approval issue) in between - that newer, real outcome must never be clobbered by
+// a stale 'skipped' write. serializeMutation makes the read-check-write atomic relative to any other
+// IN-PROCESS caller of markSlot/markSlotIfUnhandled; it does not add cross-process locking beyond what
+// every other state.json writer here already relies on (the shared `sns-ai-write` Actions concurrency
+// group serializing real scheduled/CI runs).
+export async function markSlotIfUnhandled(slotId, status, detail = {}) {
+  return serializeMutation(async () => {
+    const state = await loadState();
+    state.slots ||= {};
+    const current = state.slots[slotId];
+    if (current && HANDLED_STATUSES.has(current.status)) return { applied: false, current };
+    const next = {
+      status,
+      at: new Date().toISOString(),
+      ...detail
+    };
+    state.slots[slotId] = next;
+    await saveState(state);
+    return { applied: true, current: next };
+  });
+}
+
 export async function slotHandled(slotId) {
   const slot = await getSlot(slotId);
-  if (slot && ['published', 'approval_pending', 'skipped', 'publishing', 'publish_unknown'].includes(slot.status)) return true;
+  if (slot && HANDLED_STATUSES.has(slot.status)) return true;
   return durableClaimHandled(slotId);
 }

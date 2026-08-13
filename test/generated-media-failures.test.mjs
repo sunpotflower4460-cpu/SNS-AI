@@ -1,16 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { generateAndHostImageDetailed } from '../src/media/openai-image.mjs';
-import { generateAndHostVideoDetailed } from '../src/media/openai-video.mjs';
+import { generateAndHostVideoDetailed, assertVideosApiStillAvailable, VIDEOS_API_DEPRECATION_DATE } from '../src/media/openai-video.mjs';
 import { cleanupGeneratedAssets, ensurePublicRelease } from '../src/media/release-host.mjs';
 
 const USAGE_FILES = [
   fileURLToPath(new URL('../data/usage-state.json', import.meta.url)),
   fileURLToPath(new URL('../data/usage.jsonl', import.meta.url))
 ];
+
+// Every video test in this file that is NOT specifically testing the deprecation guard itself must
+// pin `now` well before VIDEOS_API_DEPRECATION_DATE - otherwise, once the real wall clock crosses that
+// date, these tests (which exercise retry/QA/hosting/cleanup behavior, nothing to do with the
+// deprecation guard) would all start failing at the guard instead of testing what they're named for.
+const PRE_DEPRECATION_NOW = { now: new Date('2026-01-01T00:00:00Z') };
 
 function jsonResponse(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {
@@ -48,6 +55,140 @@ function releaseLookup(target) {
   if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
   return null;
 }
+// Mirrors the private safe()/digest() naming in src/media/openai-video.mjs exactly, so a test can
+// pre-populate a release asset that generateAndHostVideoDetailed will actually recognize as a cache hit.
+function cachedVideoAssetName(accountId, slotId, model, size, seconds, prompt) {
+  const digest = createHash('sha256').update(`qa-v2-spritesheet|${slotId}|${model}|${size}|${seconds}|${prompt}`).digest('hex').slice(0, 20);
+  const safeAccountId = String(accountId || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video';
+  return `${safeAccountId}-${digest}.mp4`;
+}
+
+test('the OpenAI Videos API deprecation guard fails closed on/after the confirmed shutdown date, not before', () => {
+  // OpenAI's official deprecations page confirms the entire Videos API (every sora-2/sora-2-pro model
+  // alias) is shut down on this date with no replacement model listed. Verified against a primary
+  // source, not just secondary reporting - see the commit message / audit notes for the citation.
+  assert.doesNotThrow(() => assertVideosApiStillAvailable(new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) - 1)));
+  assert.throws(
+    () => assertVideosApiStillAvailable(new Date(VIDEOS_API_DEPRECATION_DATE)),
+    (error) => error.code === 'PROVIDER_DEPRECATED' && /shut down/.test(error.message)
+  );
+  assert.throws(
+    () => assertVideosApiStillAvailable(new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000)),
+    (error) => error.code === 'PROVIDER_DEPRECATED'
+  );
+});
+
+test('video generation fails closed before any OpenAI Videos API call once the deprecation date has passed, but still serves an already-cached video', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  try {
+    // The deprecation guard is enforced only AFTER the release-cache lookup (see
+    // src/media/openai-video.mjs) - ensurePublicRelease()/findAsset() are GitHub calls, not OpenAI
+    // Videos API calls, so they must still be allowed to run even past the shutdown date. Any request
+    // to api.openai.com/v1/videos, however, must never happen.
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target.startsWith('https://api.openai.com/v1/videos')) throw new Error(`No OpenAI Videos API call should have been made: ${target}`);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-deprecated', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-deprecated', { mediaPrompt: 'a scene' }, { now: new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000) }),
+      (error) => error.code === 'PROVIDER_DEPRECATED'
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('a cache hit for an already-approved video is still served after the OpenAI Videos API shutdown date, with zero Videos API calls', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  try {
+    const accountId = 'video-cached-after-deprecation';
+    const slotId = 'slot-video-cached';
+    const model = 'sora-2';
+    const size = '720x1280';
+    const seconds = 8;
+    const prompt = 'a previously approved cached scene';
+    const name = cachedVideoAssetName(accountId, slotId, model, size, seconds, prompt);
+
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') {
+        return jsonResponse({ id: 7, assets: [{ name, browser_download_url: 'https://downloads.example/cached.mp4' }] });
+      }
+      if (target.startsWith('https://api.openai.com/v1/videos')) throw new Error(`No OpenAI Videos API call should have been made: ${target}`);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const result = await generateAndHostVideoDetailed(accountId, {
+      media: { videoModel: model, videoSize: size, videoSeconds: seconds, qa: { enabled: false, maxRegenerations: 0 } },
+      budgets: { enabled: false }
+    }, slotId, { mediaPrompt: prompt }, { now: new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000) });
+
+    assert.equal(result.url, 'https://downloads.example/cached.mp4');
+    assert.equal(result.qa.cached, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('a QA-processing failure (not a definitive QA rejection) still deletes the OpenAI-side video job exactly once', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let deletes = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        return jsonResponse({ id: 'video-qa-crash', status: 'completed' });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-crash/content?variant=spritesheet') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      // Moderation runs before the vision QA call and fails outright here - a transient QA-pipeline
+      // error, not a definitive "QA reviewed the video and rejected it" outcome. It must still clean up
+      // the OpenAI-side job exactly like a QA rejection or an oversize download already does.
+      if (target === 'https://api.openai.com/v1/moderations') {
+        return jsonResponse({ error: { message: 'moderation pipeline crashed' } }, 400);
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-crash' && options.method === 'DELETE') {
+        deletes += 1;
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-qa-crash', {
+        media: {
+          videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
+          qa: { enabled: true, maxInputBytes: 1024, maxRegenerations: 0, minScore: 75 }
+        },
+        budgets: { enabled: false }
+      }, 'slot-video-qa-crash', { mediaPrompt: 'a scene that will crash QA' }, PRE_DEPRECATION_NOW),
+      /moderation pipeline crashed/
+    );
+    assert.equal(deletes, 1, 'a QA-processing exception (not a QA rejection) must still delete the OpenAI-side video job exactly once');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
 
 test('image generation retries throttling, regenerates after QA failure, and uploads only the corrected result', async () => {
   const previousFetch = globalThis.fetch;
@@ -128,6 +269,118 @@ test('image generation retries throttling, regenerates after QA failure, and upl
   }
 });
 
+test('image generation never retries a network exception or a 5xx response, only an explicit 429', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let imageCalls = 0;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/images/generations') {
+        imageCalls += 1;
+        // A network-level failure gives no proof the first call was not already accepted
+        // server-side; retrying it would risk a second, silently paid generation.
+        throw new TypeError('fetch failed: socket hang up');
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostImageDetailed('image-network-exception', {
+        media: { qa: { enabled: false, maxRegenerations: 0 } }, budgets: { enabled: false }
+      }, 'slot-image-network', { mediaPrompt: 'a diagram' }),
+      /socket hang up/
+    );
+    assert.equal(imageCalls, 1, 'a network exception on the generation POST must never be retried');
+    const usage = (await readFile(USAGE_FILES[1], 'utf8')).trim().split('\n').filter(Boolean);
+    assert.equal(usage.length, 1, 'exactly one real attempt was made, so exactly one usage row must be recorded');
+
+    imageCalls = 0;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/images/generations') {
+        imageCalls += 1;
+        // A 5xx can occur after the request was already accepted for processing, unlike a 429
+        // rate-limit rejection - it must be treated as ambiguous too, not retried.
+        return jsonResponse({ error: { message: 'internal error' } }, 500);
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    await assert.rejects(
+      generateAndHostImageDetailed('image-5xx', {
+        media: { qa: { enabled: false, maxRegenerations: 0 } }, budgets: { enabled: false }
+      }, 'slot-image-5xx', { mediaPrompt: 'a diagram' })
+    );
+    assert.equal(imageCalls, 1, 'a 5xx response on the generation POST must never be retried');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
+test('video generation never retries a network exception or a 5xx response, only an explicit 429', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let videoCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        videoCalls += 1;
+        throw new TypeError('fetch failed: socket hang up');
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-network-exception', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-network', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW),
+      /socket hang up/
+    );
+    assert.equal(videoCalls, 1, 'a network exception on the video-create POST must never be retried');
+    const usage = (await readFile(USAGE_FILES[1], 'utf8')).trim().split('\n').filter(Boolean);
+    assert.equal(usage.length, 1, 'exactly one real attempt was made, so exactly one usage row must be recorded');
+
+    videoCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        videoCalls += 1;
+        return jsonResponse({ error: { message: 'internal error' } }, 500);
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-5xx', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-5xx', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW)
+    );
+    assert.equal(videoCalls, 1, 'a 5xx response on the video-create POST must never be retried');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
 test('image generation fails closed before hosting when generated bytes exceed the configured limit', async () => {
   const previousFetch = globalThis.fetch;
   const env = mediaEnv();
@@ -145,13 +398,14 @@ test('image generation fails closed before hosting when generated bytes exceed t
       if (target.startsWith('https://uploads.github.com/')) { uploads += 1; return jsonResponse({}); }
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
-    await assert.rejects(
-      generateAndHostImageDetailed('image-oversize', {
-        media: { maxHostedImageBytes: 5, qa: { enabled: false, maxRegenerations: 0 } },
-        budgets: { enabled: false }
-      }, 'slot-image-oversize', { mediaPrompt: 'large image' }),
-      /Generated image exceeds hosting limit/
-    );
+    const rejection = await generateAndHostImageDetailed('image-oversize', {
+      media: { maxHostedImageBytes: 5, qa: { enabled: false, maxRegenerations: 0 } },
+      budgets: { enabled: false }
+    }, 'slot-image-oversize', { mediaPrompt: 'large image' }).then(() => null, (error) => error);
+    assert.match(rejection.message, /Generated image exceeds hosting limit/);
+    // Same reasoning as the video case: a hosting-limit rejection is a config-tuning issue, not a
+    // provider outage, and must not count toward the resilience circuit breaker.
+    assert.equal(rejection.code, 'MEDIA_HOSTING_TOO_LARGE');
     assert.equal(uploads, 0);
   } finally {
     globalThis.fetch = previousFetch;
@@ -208,7 +462,7 @@ test('video generation reuses a recent completed job and falls back from sprites
         qa: { enabled: false, maxInputBytes: 1024, maxRegenerations: 0 }
       },
       budgets: { enabled: false }
-    }, 'slot-video-reuse', { mediaPrompt: 'reuse me', text: 'caption' });
+    }, 'slot-video-reuse', { mediaPrompt: 'reuse me', text: 'caption' }, PRE_DEPRECATION_NOW);
 
     assert.equal(result.url, 'https://downloads.example/reused.mp4');
     assert.equal(result.qa.previewVariant, 'thumbnail');
@@ -248,7 +502,7 @@ test('video creation retries a throttled create call and then fails fast when th
           qa: { enabled: false, maxRegenerations: 0 }
         },
         budgets: { enabled: false }
-      }, 'slot-video-failed', { mediaPrompt: 'fail render' }),
+      }, 'slot-video-failed', { mediaPrompt: 'fail render' }, PRE_DEPRECATION_NOW),
       /OpenAI video generation failed: render failed/
     );
     assert.equal(postCalls, 2);
@@ -266,6 +520,7 @@ test('video hosting rejects an oversized MP4 after a valid QA preview', async ()
   try {
     for (const path of USAGE_FILES) await rm(path, { force: true });
     let uploads = 0;
+    let deletes = 0;
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
       const release = releaseLookup(target);
@@ -278,22 +533,73 @@ test('video hosting rejects an oversized MP4 after a valid QA preview', async ()
       if (target === 'https://api.openai.com/v1/videos/video-large/content') {
         return new Response(new Uint8Array([1, 2]), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '5000' } });
       }
+      if (target === 'https://api.openai.com/v1/videos/video-large' && options.method === 'DELETE') { deletes += 1; return new Response(null, { status: 204 }); }
       if (target.startsWith('https://uploads.github.com/')) { uploads += 1; return jsonResponse({}); }
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
 
-    await assert.rejects(
-      generateAndHostVideoDetailed('video-large', {
-        media: {
-          videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
-          maxHostedVideoBytes: 10,
-          qa: { enabled: false, maxInputBytes: 1024, maxRegenerations: 0 }
-        },
-        budgets: { enabled: false }
-      }, 'slot-video-large', { mediaPrompt: 'large video' }),
-      /Generated video exceeds limit/
-    );
+    const rejection = await generateAndHostVideoDetailed('video-large', {
+      media: {
+        videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
+        maxHostedVideoBytes: 10,
+        qa: { enabled: false, maxInputBytes: 1024, maxRegenerations: 0 }
+      },
+      budgets: { enabled: false }
+    }, 'slot-video-large', { mediaPrompt: 'large video' }, PRE_DEPRECATION_NOW).then(() => null, (error) => error);
+
+    assert.match(rejection.message, /Generated video exceeds limit/);
+    // A hosting-limit rejection is a config-tuning issue, not a provider outage: it must carry a
+    // distinct code so orchestrate.mjs excludes it from the resilience circuit breaker (the same way
+    // MEDIA_QA_FAILED already is), instead of pausing the whole account's autopilot after a few hits.
+    assert.equal(rejection.code, 'MEDIA_HOSTING_TOO_LARGE');
     assert.equal(uploads, 0);
+    // QA already passed (real generation + moderation cost already sunk) before the oversize download
+    // failed - the generated video must still be deleted from the OpenAI account, not leaked.
+    assert.equal(deletes, 1, 'an oversized video that already passed QA must still be cleaned up on the OpenAI side');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
+test('an oversized QA preview (spritesheet/thumbnail) is coded as a QA input failure, not a hosting-limit failure', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let deletes = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') return jsonResponse({ id: 'video-qa-oversize', status: 'completed' });
+      // Both the spritesheet AND thumbnail previews exceed media.qa.maxInputBytes below - the failure
+      // must be coded as a QA input problem (fix: raise qa.maxInputBytes), not a hosting problem
+      // (raising maxHostedVideoBytes would do nothing here, since the final MP4 is never even reached).
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize/content?variant=spritesheet') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize/content?variant=thumbnail') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize' && options.method === 'DELETE') { deletes += 1; return new Response(null, { status: 204 }); }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const rejection = await generateAndHostVideoDetailed('video-qa-oversize', {
+      media: {
+        videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
+        maxHostedVideoBytes: 10 * 1024 * 1024,
+        qa: { enabled: true, maxInputBytes: 10, maxRegenerations: 0 }
+      },
+      budgets: { enabled: false }
+    }, 'slot-video-qa-oversize', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW).then(() => null, (error) => error);
+
+    assert.equal(rejection.code, 'MEDIA_QA_INPUT_TOO_LARGE', 'must point the operator at qa.maxInputBytes, not the unrelated hosting limit');
+    assert.equal(deletes, 1, 'the OpenAI-side job must still be cleaned up even on a QA-input oversize rejection');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

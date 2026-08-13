@@ -23,6 +23,7 @@
     "feedback": "node src/feedback/record.mjs",
     "secret-scan": "node src/ops/secret-scan.mjs",
     "maintenance": "node src/ops/maintenance.mjs",
-    "expire-approvals": "node src/ops/stale-approvals.mjs"
+    "expire-approvals": "node src/ops/stale-approvals.mjs",
+    "stale-claims": "node src/ops/stale-claims.mjs"
   }
 }

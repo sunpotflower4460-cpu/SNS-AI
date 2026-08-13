@@ -21,6 +21,11 @@ export function validateConfig(config) {
   const videoSeconds = new Set([4, 8, 12]);
   const qaDetails = new Set(['low', 'high', 'auto']);
   for (const [id, account] of Object.entries(config.accounts || {})) {
+    // "::dry-run-preview" is a reserved suffix openai.mjs appends to accountId to isolate dry-run
+    // preview usage from an account's live budget counter (see src/lib/openai.mjs). Account IDs are
+    // free-form strings used directly as budget-state object keys, so a real account literally named
+    // with this suffix would collide with another account's preview counter and defeat that isolation.
+    if (id.includes('::dry-run-preview')) errors.push(`${id}: account id must not contain the reserved "::dry-run-preview" suffix`);
     const mode = account.mode ?? config.defaults?.mode ?? 'pause';
     if (!platforms.has(account.platform)) errors.push(`${id}: invalid platform "${account.platform}"`);
     if (!modes.has(mode)) errors.push(`${id}: invalid mode "${mode}"`);

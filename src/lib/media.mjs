@@ -20,7 +20,7 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   return { url, altText: String(body.altText || '').slice(0, 1000), qa: body.qa || null };
 }
 
-async function generated(accountId, account, slotId, draft, dryRun = false) {
+async function generated(accountId, account, slotId, draft, dryRun = false, now = new Date()) {
   const mediaType = account.media?.type || 'image';
   if (account.media?.endpoint) return dryRun
     ? { url: dryRunUrl('generate', mediaType), decision: 'generate', source: 'dry-run-endpoint', altText: '', qa: null }
@@ -29,7 +29,7 @@ async function generated(accountId, account, slotId, draft, dryRun = false) {
   if (mediaType === 'reel' && account.media?.internalVideoGeneration !== false) {
     return dryRun
       ? { url: dryRunUrl('generate', 'reel'), decision: 'generate', source: 'dry-run-openai-video', altText: '', qa: null }
-      : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft)), decision: 'generate', source: 'openai-video' };
+      : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft, { now })), decision: 'generate', source: 'openai-video' };
   }
 
   if (mediaType === 'image' && account.media?.internalImageGeneration !== false) {
@@ -40,7 +40,7 @@ async function generated(accountId, account, slotId, draft, dryRun = false) {
   return { url: null, decision: 'none', source: null, altText: '', qa: null };
 }
 
-export async function resolveMediaDetailed(accountId, account, slotId, draft, { dryRun = false } = {}) {
+export async function resolveMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date() } = {}) {
   const media = account.media || {}; const strategy = media.strategy || 'none'; const mediaType = media.type || 'image';
   if (strategy === 'none') return { url: null, decision: 'none', source: null, altText: '', qa: null };
   if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy, altText: String(media.altText || '').slice(0, 1000), qa: null };
@@ -54,7 +54,7 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, { 
       ? { url: dryRunUrl(decision, mediaType), decision, source: 'dry-run-endpoint', altText: '', qa: null }
       : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, decision)), decision, source: 'endpoint' };
   }
-  if (strategy === 'generate') return generated(accountId, account, slotId, draft, dryRun);
+  if (strategy === 'generate') return generated(accountId, account, slotId, draft, dryRun, now);
   if (strategy === 'auto') {
     let decision = draft?.features?.mediaDecision || 'none';
     if (account.platform === 'instagram' && decision === 'none') decision = media.defaultInstagramDecision || 'generate';
@@ -62,7 +62,7 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, { 
     if (decision === 'library') {
       const url = poolUrl(media, slotId);
       if (url) return { url, decision: 'library', source: 'pool', altText: '', qa: null };
-      return generated(accountId, account, slotId, draft, dryRun);
+      return generated(accountId, account, slotId, draft, dryRun, now);
     }
     if (decision === 'search') {
       if (media.endpoint) return dryRun
@@ -70,9 +70,9 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, { 
         : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, 'search')), decision: 'search', source: 'endpoint' };
       const fallback = poolUrl(media, slotId);
       if (fallback) return { url: fallback, decision: 'library', source: 'pool-fallback', altText: '', qa: null };
-      return generated(accountId, account, slotId, draft, dryRun);
+      return generated(accountId, account, slotId, draft, dryRun, now);
     }
-    if (decision === 'generate') return generated(accountId, account, slotId, draft, dryRun);
+    if (decision === 'generate') return generated(accountId, account, slotId, draft, dryRun, now);
   }
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }

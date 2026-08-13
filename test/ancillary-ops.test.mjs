@@ -4,12 +4,20 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildReadinessReport, writeReadinessReport } from '../src/ops/doctor.mjs';
+import { buildReadinessReport, writeReadinessReport, __test as doctorTest } from '../src/ops/doctor.mjs';
+import { VIDEOS_API_DEPRECATION_DATE } from '../src/media/openai-video.mjs';
 import { runMaintenance } from '../src/ops/maintenance.mjs';
 import { generateReport } from '../src/reports/generate.mjs';
 import { generateWeeklyReport } from '../src/reports/weekly.mjs';
 import { recordFeedback } from '../src/feedback/record.mjs';
 import { recentHumanFeedback } from '../src/feedback/store.mjs';
+
+// Every readiness assertion below that checks for the pre-shutdown WARNING wording (as opposed to
+// specifically testing the warning->blocker escalation itself) must pin `now` before
+// VIDEOS_API_DEPRECATION_DATE - otherwise, once the real wall clock crosses that date, buildReadinessReport
+// would correctly move the message from `warnings` to `blockers` (see the escalation test below) and these
+// unrelated readiness-shape assertions would start failing at the wrong layer.
+const PRE_DEPRECATION_NOW = Date.parse(VIDEOS_API_DEPRECATION_DATE) - 86_400_000;
 
 const CONFIG = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
 const FILES = [
@@ -81,6 +89,113 @@ test('readiness doctor blocks missing secrets, becomes ready with complete crede
   } finally { restoreEnv(env); }
 });
 
+test('readiness doctor warns about the confirmed OpenAI Videos API shutdown for accounts relying on built-in Reel generation', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: PRE_DEPRECATION_NOW });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.match(warnings, /Videos API.*2026-09-24/s, 'an account depending on built-in Reel generation must be warned about the confirmed sora-2 shutdown date');
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('readiness doctor does not falsely warn X Reel accounts that only ever resolve hosted media (never call the Videos API)', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-x'] = {
+        ...config.accounts['example-x'], enabled: true, mode: 'auto',
+        // 'pool' always resolves an existing library URL (src/lib/media.mjs) and never calls the
+        // built-in video generator, unlike 'auto'/'generate'.
+        media: { strategy: 'pool', type: 'reel', urls: ['https://cdn.example/a.mp4'], internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.X_OAUTH2_STATE_KEY = 'k'.repeat(48);
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
+        'example-x': { consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as', oauth2ClientId: 'client', oauth2RefreshToken: 'refresh' }
+      });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-x' });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.doesNotMatch(warnings, /Videos API/, 'a pool-strategy Reel account never invokes the Videos API and must not be warned about its shutdown');
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('readiness doctor warns an Instagram Reel account about the Videos API shutdown even when a media library is also configured', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        // strategy: 'generate' always invokes built-in video generation regardless of media.urls
+        // (src/lib/media.mjs's generated() never consults the library for 'generate') - a configured
+        // library must not suppress this warning.
+        media: { strategy: 'generate', type: 'reel', urls: ['https://cdn.example/a.mp4'], internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: PRE_DEPRECATION_NOW });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.match(warnings, /Videos API.*2026-09-24/s, 'a configured library must not suppress the Videos API shutdown warning for strategy: generate');
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('the Videos API deprecation message escalates from a warning to an actionable blocker once the shutdown date passes', () => {
+  const beforeDate = new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) - 86_400_000).getTime();
+  const onDate = Date.parse(VIDEOS_API_DEPRECATION_DATE);
+  const afterDate = Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000;
+
+  assert.ok(doctorTest.videosApiDaysLeft(beforeDate) > 0, 'a day before the shutdown date must report positive days remaining');
+  assert.ok(doctorTest.videosApiDaysLeft(onDate) <= 0, 'on the shutdown date itself, days remaining must be zero or negative');
+  assert.ok(doctorTest.videosApiDaysLeft(afterDate) < 0, 'after the shutdown date, days remaining must be negative');
+
+  // buildReadinessReport/mediaReadiness route this message to `blockers` (not `warnings`) exactly when
+  // videosApiDaysLeft() <= 0 - readiness must not stay green for an account that can no longer publish.
+  assert.match(doctorTest.videosApiDeprecationMessage(beforeDate), /scheduled for shutdown/);
+  assert.match(doctorTest.videosApiDeprecationMessage(onDate), /was shut down/);
+  assert.match(doctorTest.videosApiDeprecationMessage(afterDate), /was shut down/);
+});
+
+test('buildReadinessReport itself (not just the low-level message helpers) moves the Videos API notice from warnings to blockers once now passes the shutdown date', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const afterShutdown = Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000;
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: afterShutdown });
+      const row = report.accounts[0];
+      assert.match(row.blockers.join(' '), /Videos API.*was shut down/, 'past the shutdown date, the notice must be an actionable blocker, not just a warning');
+      assert.doesNotMatch(row.warnings.join(' '), /Videos API/, 'the notice must not also linger in warnings once it has escalated to a blocker');
+      assert.equal(row.ready, false, 'an account that can no longer publish must not be reported as ready');
+    });
+  } finally { restoreEnv(env); }
+});
+
 test('maintenance compacts duplicates, archives expired rows, and quarantines malformed JSONL', async () => {
   const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
@@ -108,6 +223,39 @@ test('maintenance compacts duplicates, archives expired rows, and quarantines ma
       assert.match(quarantine, /broken-json/);
       const archive = JSON.parse(await readFile(pathOf('../data/archive/monthly-summary.json'), 'utf8'));
       assert.equal(Object.values(archive.buckets).some((x) => x.type === 'history' && x.count === 1), true);
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('maintenance applies the real account\'s configured retention to its dry-run-preview usage rows too, not the global default', async () => {
+  const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
+  delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      // A deliberately short, account-specific retention (unlike the ~180 day global default) makes the
+      // two possible behaviors observably different: if the preview row incorrectly falls back to the
+      // global default, it survives this run; if it correctly inherits example-x's own retention, it
+      // gets archived just like the real account's own row does.
+      config.accounts['example-x'] = { ...config.accounts['example-x'], maintenance: { usageRetentionDays: 1 } };
+      await writeJson(CONFIG, config);
+
+      const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+      await writeJsonl(pathOf('../data/usage.jsonl'), [
+        { at: tenDaysAgo, account: 'example-x', kind: 'openai' },
+        { at: tenDaysAgo, account: 'example-x::dry-run-preview', kind: 'openai' }
+      ]);
+
+      const result = await runMaintenance();
+      const row = result.results.find((x) => x.type === 'usage');
+      assert.equal(row.before, 2);
+      assert.equal(row.after, 0, 'both the real account row and its dry-run-preview counterpart must be archived under the account\'s 1-day retention, not silently kept under the ~180 day default');
+      assert.equal(row.removed, 2);
+
+      const archive = JSON.parse(await readFile(pathOf('../data/archive/monthly-summary.json'), 'utf8'));
+      const buckets = Object.values(archive.buckets).filter((x) => x.type === 'usage');
+      assert.equal(buckets.some((x) => x.account === 'example-x'), true);
+      assert.equal(buckets.some((x) => x.account === 'example-x::dry-run-preview'), true, 'the preview bucket must stay a distinct archive entry, only the retention policy is shared');
     });
   } finally { restoreEnv(env); }
 });

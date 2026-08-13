@@ -9,8 +9,40 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function safe(value) { return String(value || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video'; }
 function digest(value) { return createHash('sha256').update(String(value)).digest('hex').slice(0, 20); }
+// A generated asset exceeding the configured byte limit is a config-tuning issue, not a provider
+// outage: it must not count toward the resilience circuit breaker (which would pause the WHOLE
+// account, including plain text posts, after a few oversize hits) any more than a media QA failure
+// does - see MEDIA_QA_FAILED/MEDIA_QA_INPUT_TOO_LARGE in src/media/qa.mjs and the nonCircuitCodes list
+// in src/orchestrate.mjs. The CODE itself is which knob an operator needs to tune, though, and those are
+// two genuinely different knobs: an oversized QA preview (spritesheet/thumbnail) means
+// media.qa.maxInputBytes is too small, while an oversized final MP4 means maxHostedVideoBytes is too
+// small - raising the wrong one would not fix the failure.
+function oversizeError(variant, maxBytes, code = 'MEDIA_HOSTING_TOO_LARGE') {
+  const error = new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  error.code = code;
+  return error;
+}
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Built-in video generation requires OPENAI_API_KEY.'); return key; }
 function authHeaders(extra = {}) { return { Authorization: `Bearer ${apiKey()}`, ...extra }; }
+
+// OpenAI's official deprecations page lists the entire Videos API - every sora-2/sora-2-pro model
+// alias included - as shut down on this date, with no replacement model listed as of the date this was
+// verified. After that date this backend must fail loudly and immediately with an actionable message,
+// not attempt a real request and surface OpenAI's own confusing 404/410 instead, and not repeatedly
+// trip the resilience circuit breaker for an outage that will never self-heal by retrying.
+export const VIDEOS_API_DEPRECATION_DATE = '2026-09-24T00:00:00Z';
+
+export function assertVideosApiStillAvailable(now = new Date()) {
+  if (now.getTime() >= Date.parse(VIDEOS_API_DEPRECATION_DATE)) {
+    const error = new Error(
+      `OpenAI's Videos API (including sora-2/sora-2-pro) was shut down on ${VIDEOS_API_DEPRECATION_DATE}. `
+      + 'Built-in Reel/video generation is unavailable until this account is reconfigured to a supported '
+      + 'video backend (e.g. media.strategy: endpoint, or a future replacement model once one exists).'
+    );
+    error.code = 'PROVIDER_DEPRECATED';
+    throw error;
+  }
+}
 
 function createVideoForm({ model, prompt, size, seconds }) {
   const form = new FormData();
@@ -55,9 +87,18 @@ async function createVideo(accountId, account, prompt) {
   const size = account.media?.videoSize || '720x1280';
   const seconds = String(Number(account.media?.videoSeconds ?? 8));
   const reusable = await findReusableVideo({ prompt, model, size, seconds });
-  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: Boolean(reusable) });
-  if (reusable) return reusable;
+  if (reusable) {
+    await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: true });
+    return reusable;
+  }
 
+  // Charged once per logical call, not per HTTP attempt: the only retry left below is an explicit 429,
+  // which by definition means the request was rejected before any job was created, so a retry of it is
+  // not a second real paid generation. (Network exceptions and 5xx responses - the cases that really
+  // could mean "maybe a job was already created" - are never retried at all, see below.) Charging
+  // per-attempt here would incorrectly block the one safe retry when the account has exactly one unit
+  // of budget left.
+  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: false });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
@@ -67,13 +108,17 @@ async function createVideo(accountId, account, prompt) {
         body: createVideoForm({ model, prompt, size, seconds })
       });
     } catch (error) {
-      if (attempt === 1) throw error;
-      await sleep(1500);
-      continue;
+      // A network-level failure gives no proof the request wasn't already accepted server-side.
+      // Retrying could silently create a second (orphaned, still-billed) video job for a request
+      // that actually succeeded - fail closed instead, matching every SNS provider mutation here.
+      throw error;
     }
     const parsed = await response.json().catch(() => ({}));
     if (response.ok) return parsed;
-    if ((response.status === 429 || response.status >= 500) && attempt === 0) {
+    // Only a 429 is safe to retry: an explicit rate-limit rejection is guaranteed to have been
+    // rejected before any job was created. A 5xx is not - it can occur after the job was already
+    // accepted, so it is treated the same as a network exception: fail closed, no retry.
+    if (response.status === 429 && attempt === 0) {
       const retryAfter = Number(response.headers.get('retry-after') || 0);
       await sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 2000);
       continue;
@@ -104,7 +149,7 @@ async function waitForVideo(video, account) {
   throw new Error(`OpenAI video generation did not complete within ${timeoutMinutes} minute(s).`);
 }
 
-async function downloadAsset(videoId, variant, maxBytes) {
+async function downloadAsset(videoId, variant, maxBytes, oversizeCode = 'MEDIA_HOSTING_TOO_LARGE') {
   const suffix = variant && variant !== 'video' ? `?variant=${encodeURIComponent(variant)}` : '';
   const response = await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}/content${suffix}`, { headers: authHeaders() });
   if (!response.ok) {
@@ -116,17 +161,19 @@ async function downloadAsset(videoId, variant, maxBytes) {
   const fallbackType = variant && variant !== 'video' ? 'image/jpeg' : 'video/mp4';
   const contentType = (response.headers.get('content-type') || fallbackType).split(';')[0];
   const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  if (declared > maxBytes) throw oversizeError(variant, maxBytes, oversizeCode);
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength > maxBytes) throw new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
+  if (bytes.byteLength > maxBytes) throw oversizeError(variant, maxBytes, oversizeCode);
   return { bytes, contentType };
 }
 
 async function downloadQaPreview(videoId, maxBytes) {
+  // maxBytes here is media.qa.maxInputBytes, not the hosting limit - an oversized preview must be coded
+  // as a QA input failure so an operator is pointed at the right config knob (see oversizeError above).
   try {
-    return { ...(await downloadAsset(videoId, 'spritesheet', maxBytes)), variant: 'spritesheet' };
+    return { ...(await downloadAsset(videoId, 'spritesheet', maxBytes, 'MEDIA_QA_INPUT_TOO_LARGE')), variant: 'spritesheet' };
   } catch {
-    return { ...(await downloadAsset(videoId, 'thumbnail', maxBytes)), variant: 'thumbnail' };
+    return { ...(await downloadAsset(videoId, 'thumbnail', maxBytes, 'MEDIA_QA_INPUT_TOO_LARGE')), variant: 'thumbnail' };
   }
 }
 
@@ -135,7 +182,7 @@ async function deleteVideoQuietly(videoId) {
   try { await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}`, { method: 'DELETE', headers: authHeaders() }); } catch { /* best effort */ }
 }
 
-export async function generateAndHostVideoDetailed(accountId, account, slotId, draft) {
+export async function generateAndHostVideoDetailed(accountId, account, slotId, draft, { now = new Date() } = {}) {
   const originalPrompt = String(draft?.mediaPrompt || '').trim();
   if (!originalPrompt) throw new Error('AI selected video generation but supplied no mediaPrompt.');
   const model = account.media?.videoModel || 'sora-2';
@@ -153,25 +200,33 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
     const cached = await findAsset(release, name);
     if (cached) return { url: cached, qa: { pass: true, cached: true, score: null, issues: [], previewVariant: 'cached-passed' }, altText: '', attempt, prompt };
 
+    // Only enforced once a cache miss means we're actually about to call the Videos API - a
+    // previously-generated, QA-approved video already sitting in the public release cache (see the
+    // findAsset check above) must still be served after the shutdown date, since reusing it makes no
+    // API call at all.
+    assertVideosApiStillAvailable(now);
     const created = await createVideo(accountId, account, prompt);
-    const completed = await waitForVideo(created, account);
-    const preview = await downloadQaPreview(completed.id, maxPreviewBytes);
-    const qa = await reviewVisualBytes(accountId, account, preview.bytes, preview.contentType, {
-      mediaType: `reel-${preview.variant}`, prompt: originalPrompt, postText: draft?.text || ''
-    });
-    qa.previewVariant = preview.variant;
-    if (qa.pass) {
-      const video = await downloadAsset(completed.id, 'video', maxBytes);
-      const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
-      await deleteVideoQuietly(completed.id);
-      return { url, qa, altText: qa.altText || '', attempt, prompt };
-    }
+    try {
+      // Everything from here through the QA/hosting decision must clean up the OpenAI-side video job
+      // on ANY failure - a thrown error from waitForVideo, the QA preview download, or the QA review
+      // call itself must not leak it, any more than a definitive QA fail or a post-QA oversize
+      // rejection does.
+      const completed = await waitForVideo(created, account);
+      const preview = await downloadQaPreview(completed.id, maxPreviewBytes);
+      const qa = await reviewVisualBytes(accountId, account, preview.bytes, preview.contentType, {
+        mediaType: `reel-${preview.variant}`, prompt: originalPrompt, postText: draft?.text || ''
+      });
+      qa.previewVariant = preview.variant;
+      if (qa.pass) {
+        const video = await downloadAsset(completed.id, 'video', maxBytes);
+        const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
+        return { url, qa, altText: qa.altText || '', attempt, prompt };
+      }
 
-    lastQa = qa;
-    await deleteVideoQuietly(completed.id);
-    if (attempt < maxRegenerations) {
-      prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
-      continue;
+      lastQa = qa;
+      if (attempt < maxRegenerations) prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
+    } finally {
+      await deleteVideoQuietly(created?.id);
     }
   }
 

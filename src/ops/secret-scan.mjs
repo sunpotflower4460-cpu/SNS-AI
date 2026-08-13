@@ -10,6 +10,7 @@ const PATTERNS = [
   ['GitHub token', /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g],
   ['GitHub fine-grained token', /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g],
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
+  ['Meta/Instagram access token', /\bEAA[A-Za-z0-9]{20,}\b/g],
   ['Private key block', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
   ['Bearer token literal', /Bearer\s+[A-Za-z0-9._~+\/-]{30,}/g]
 ];

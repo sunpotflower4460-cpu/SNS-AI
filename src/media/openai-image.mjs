@@ -13,7 +13,6 @@ function digest(value) { return createHash('sha256').update(String(value)).diges
 async function generateImage(accountId, account, prompt) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('Built-in image generation requires OPENAI_API_KEY.');
-  await consumeUsage(accountId, account, 'image', { model: account.media?.imageModel || 'gpt-image-2' });
   const body = {
     model: account.media?.imageModel || 'gpt-image-2',
     prompt,
@@ -22,6 +21,12 @@ async function generateImage(accountId, account, prompt) {
     output_format: 'png',
     n: 1
   };
+  // Charged once per logical call, not per HTTP attempt: the only retry left below is an explicit 429,
+  // which by definition means the request was rejected before any generation started, so a retry of it
+  // is not a second real paid generation. (Network exceptions and 5xx responses - the cases that really
+  // could mean "maybe it already ran" - are never retried at all, see below.) Charging per-attempt here
+  // would incorrectly block the one safe retry when the account has exactly one unit of budget left.
+  await consumeUsage(accountId, account, 'image', { model: body.model });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
@@ -31,9 +36,11 @@ async function generateImage(accountId, account, prompt) {
         body: JSON.stringify(body)
       });
     } catch (error) {
-      if (attempt === 1) throw error;
-      await sleep(1000);
-      continue;
+      // A network-level failure gives no proof the request wasn't already accepted/processed
+      // server-side. Retrying here could silently trigger a second paid generation for a call that
+      // actually succeeded - fail closed instead of retrying, matching how every SNS provider
+      // mutation in this codebase treats an ambiguous network exception.
+      throw error;
     }
     const parsed = await response.json().catch(() => ({}));
     if (response.ok) {
@@ -41,7 +48,10 @@ async function generateImage(accountId, account, prompt) {
       if (!encoded) throw new Error('OpenAI image generation returned no base64 image.');
       return Buffer.from(encoded, 'base64');
     }
-    if ((response.status === 429 || response.status >= 500) && attempt === 0) {
+    // Only a 429 is safe to retry: an explicit rate-limit rejection is guaranteed to have been
+    // rejected before any generation started. A 5xx is not - it can occur after the request was
+    // already accepted, so it is treated the same as a network exception: fail closed, no retry.
+    if (response.status === 429 && attempt === 0) {
       const retryAfter = Number(response.headers.get('retry-after') || 0);
       await sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 1500);
       continue;
@@ -79,7 +89,13 @@ export async function generateAndHostImageDetailed(accountId, account, slotId, d
       }
     } else {
       const bytes = await generateImage(accountId, account, prompt);
-      if (bytes.byteLength > maxBytes) throw new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
+      if (bytes.byteLength > maxBytes) {
+        // A config-tuning issue (hosting limit too tight for this model/size/quality), not a provider
+        // outage - must not count toward the resilience circuit breaker, same as a media QA failure.
+        const error = new Error(`Generated image exceeds hosting limit (${maxBytes} bytes).`);
+        error.code = 'MEDIA_HOSTING_TOO_LARGE';
+        throw error;
+      }
       const qa = await reviewVisualBytes(accountId, account, bytes, 'image/png', { mediaType: 'image', prompt: originalPrompt, postText: draft?.text || '' });
       if (qa.pass) {
         const url = await uploadReleaseAsset(release, name, bytes, 'image/png');
