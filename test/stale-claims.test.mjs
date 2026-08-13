@@ -217,44 +217,67 @@ test('findStuckClaims fetches claim blobs with bounded concurrency, not one at a
   }
 });
 
-test('a malformed or oversized STALE_CLAIMS_BLOB_CONCURRENCY falls back to a safe default instead of silently skipping every claim', async () => {
+test('a malformed or oversized STALE_CLAIMS_BLOB_CONCURRENCY falls back to a safe default instead of silently skipping every claim, and actually bounds concurrency (not just correctness with a single blob)', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY', 'STALE_CLAIMS_BLOB_CONCURRENCY');
   process.env.GITHUB_TOKEN = 'test-token';
   delete process.env.GH_TOKEN;
   process.env.GITHUB_REPOSITORY = 'owner/repo';
-  const stuckClaim = { slotId: 'acct-a:2026-08-01:08:00', account: 'acct-a', platform: 'x', status: 'publishing', createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' };
+  const BLOB_COUNT = 20;
+  const stuckClaimFor = (i) => ({ slotId: `acct-a:2026-08-01:08:${String(i).padStart(2, '0')}`, account: 'acct-a', platform: 'x', status: 'publishing', createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' });
+  // A single-blob mock cannot distinguish "concurrency correctly bounded" from "concurrency silently
+  // unbounded" - with only one item, any positive worker count processes it identically. Multiple blobs
+  // with an artificial per-request delay are needed to actually observe how many requests run at once.
+  let inFlight = 0;
+  let maxInFlight = 0;
   const fetchFor = async (url) => {
     const target = String(url);
     if (target === 'https://api.github.com/repos/owner/repo/branches/sns-ai-state') return branchResponse('tree-sha');
     if (target === 'https://api.github.com/repos/owner/repo/git/trees/tree-sha?recursive=1') {
-      return jsonResponse({ truncated: false, tree: [{ path: 'data/durable-claims/claim-0.json', type: 'blob', sha: 'blob-0' }] });
+      return jsonResponse({
+        truncated: false,
+        tree: Array.from({ length: BLOB_COUNT }, (_, i) => ({ path: `data/durable-claims/claim-${i}.json`, type: 'blob', sha: `blob-${i}` }))
+      });
     }
-    if (target === 'https://api.github.com/repos/owner/repo/git/blobs/blob-0') return jsonResponse({ content: encodeClaim(stuckClaim) });
+    const blobMatch = target.match(/\/git\/blobs\/blob-(\d+)$/);
+    if (blobMatch) {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      return jsonResponse({ content: encodeClaim(stuckClaimFor(Number(blobMatch[1]))) });
+    }
     throw new Error(`Unexpected mocked URL: ${target}`);
   };
   try {
     globalThis.fetch = fetchFor;
     // Number('abc') is NaN, and Math.max(1, NaN) is ALSO NaN (NaN poisons the comparison) - this used
-    // to flow straight into Array.from({length: NaN}), which silently creates ZERO workers. The blob
-    // would never be fetched and the report would come back "stuck: []" even though a genuinely stuck
-    // claim exists in the tree - a silent no-op is worse than a crash here, since it masks a real
+    // to flow straight into Array.from({length: NaN}), which silently creates ZERO workers. Every blob
+    // would go unevaluated and the report would come back "stuck: []" even though genuinely stuck
+    // claims exist in the tree - a silent no-op is worse than a crash here, since it masks a real
     // problem as "all clear".
     process.env.STALE_CLAIMS_BLOB_CONCURRENCY = 'abc';
+    maxInFlight = 0;
     const malformed = await findStuckClaims({ maxAgeHours: 3 });
-    assert.equal(malformed.stuck.length, 1, 'a malformed concurrency setting must still fall back to a safe default and evaluate every blob');
-    assert.equal(malformed.stuck[0].slotId, stuckClaim.slotId);
+    assert.equal(malformed.stuck.length, BLOB_COUNT, 'a malformed concurrency setting must still fall back to a safe default and evaluate every blob');
+    assert.ok(maxInFlight > 1 && maxInFlight <= 8, `expected the default concurrency (bounded, not serial), saw max concurrency ${maxInFlight}`);
 
     process.env.STALE_CLAIMS_BLOB_CONCURRENCY = '0';
+    maxInFlight = 0;
     const zero = await findStuckClaims({ maxAgeHours: 3 });
-    assert.equal(zero.stuck.length, 1, 'a zero concurrency setting must also fall back to the default, not spawn zero workers');
+    assert.equal(zero.stuck.length, BLOB_COUNT, 'a zero concurrency setting must also fall back to the default, not spawn zero workers');
+    assert.ok(maxInFlight > 1 && maxInFlight <= 8, `expected the default concurrency, saw max concurrency ${maxInFlight}`);
 
     // An oversized value must be capped, not taken at face value - otherwise a mistyped env var (e.g. an
     // extra zero) could fire one concurrent request per accumulated claim and defeat the whole point of
-    // bounding the fetch loop.
+    // bounding the fetch loop. Asserting maxInFlight > 8 here (not just <= 16) proves the cap actually
+    // raised concurrency above the plain default - a test that only checked "<= 16" would also pass if
+    // this input were silently clamped down to the same default as the malformed/zero cases above.
     process.env.STALE_CLAIMS_BLOB_CONCURRENCY = '100000';
+    maxInFlight = 0;
     const oversized = await findStuckClaims({ maxAgeHours: 3 });
-    assert.equal(oversized.stuck.length, 1, 'an oversized concurrency setting must still evaluate every blob (capped internally, not rejected)');
+    assert.equal(oversized.stuck.length, BLOB_COUNT, 'an oversized concurrency setting must still evaluate every blob (capped internally, not rejected)');
+    assert.ok(maxInFlight > 8 && maxInFlight <= 16, `expected concurrency raised above the default and capped at 16, saw max concurrency ${maxInFlight}`);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

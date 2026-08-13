@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { runAutopilot } from '../src/orchestrate.mjs';
+import { getSlot, markSlot, markSlotIfUnhandled } from '../src/lib/state.mjs';
 
 // Regression coverage for: once the confirmed OpenAI Videos API shutdown date passes, an account whose
 // Reel strategy unconditionally reaches built-in video generation (media.strategy: 'generate') hits a
@@ -55,6 +56,23 @@ async function restoreFiles(saved) {
     if (bytes === null) await rm(path, { force: true }); else await writeFile(path, bytes);
   }
 }
+const DURABLE_SNAPSHOT_DIR = fileURLToPath(new URL('../data/.durable-claims-test-snapshot/', import.meta.url));
+// Unlike DATA_FILES (individually snapshotted/restored above), the whole durable-claims directory was
+// previously just rm -rf'd at test start/end with no backup - destroying any pre-existing claim files
+// (e.g. real local development artifacts, or leftovers from a differently-ordered test run) with no way
+// to recover them.
+async function snapshotAndClearDurableClaims() {
+  await rm(DURABLE_SNAPSHOT_DIR, { recursive: true, force: true });
+  try { await cp(DURABLE_DIR, DURABLE_SNAPSHOT_DIR, { recursive: true }); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await rm(DURABLE_DIR, { recursive: true, force: true });
+}
+async function restoreDurableClaims() {
+  await rm(DURABLE_DIR, { recursive: true, force: true });
+  try { await cp(DURABLE_SNAPSHOT_DIR, DURABLE_DIR, { recursive: true }); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await rm(DURABLE_SNAPSHOT_DIR, { recursive: true, force: true });
+}
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -103,7 +121,7 @@ test('a live PROVIDER_DEPRECATED failure marks the slot skipped, so the next pol
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     for (const path of DATA_FILES) await rm(path, { force: true });
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await snapshotAndClearDurableClaims();
     await installAccount('generate');
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
@@ -137,7 +155,7 @@ test('a live PROVIDER_DEPRECATED failure marks the slot skipped, so the next pol
     globalThis.fetch = previousFetch;
     restoreEnv(env);
     await restoreFiles(files);
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await restoreDurableClaims();
   }
 });
 
@@ -147,7 +165,7 @@ test('an oversized QA preview (a deterministic config problem, not a content-qua
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     for (const path of DATA_FILES) await rm(path, { force: true });
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await snapshotAndClearDurableClaims();
     const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
     config.accounts['deprecated-media-ig'] = {
       ...account('generate'),
@@ -194,7 +212,7 @@ test('an oversized QA preview (a deterministic config problem, not a content-qua
     globalThis.fetch = previousFetch;
     restoreEnv(env);
     await restoreFiles(files);
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await restoreDurableClaims();
   }
 });
 
@@ -224,7 +242,7 @@ test('if persisting the terminal skip itself fails, the run surfaces a fatal sta
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     for (const path of DATA_FILES) await rm(path, { force: true });
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await snapshotAndClearDurableClaims();
     await installAccount('generate');
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
@@ -259,7 +277,7 @@ test('if persisting the terminal skip itself fails, the run surfaces a fatal sta
     globalThis.fetch = previousFetch;
     restoreEnv(env);
     await restoreFiles(files);
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await restoreDurableClaims();
   }
 });
 
@@ -269,7 +287,7 @@ test('an "auto" strategy Reel account may still succeed via a non-video mediaDec
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     for (const path of DATA_FILES) await rm(path, { force: true });
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await snapshotAndClearDurableClaims();
     await installAccount('auto');
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
@@ -285,12 +303,131 @@ test('an "auto" strategy Reel account may still succeed via a non-video mediaDec
     };
 
     const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: true, now: FIRST_POLL });
-    assert.notEqual(report[0].status, 'provider-deprecated', `an 'auto' account choosing mediaDecision:'none' must not fail as provider-deprecated, got: ${JSON.stringify(report[0])}`);
+    // Assert the actual successful outcome, not just the absence of one specific failure - a weaker
+    // "notEqual" assertion here would also pass if the run failed for some unrelated reason, without
+    // actually proving the stated non-video dry-run success path was reached.
+    assert.equal(report[0].status, 'dry-run', `expected a successful non-video dry run, got: ${JSON.stringify(report[0])}`);
+    // Instagram accounts never actually accept AI's mediaDecision:'none' (see resolveMediaDetailed in
+    // src/lib/media.mjs - ensureMediaForPlatform requires Instagram posts to always carry media), so the
+    // resolved decision here is 'generate', not 'none'. What this test actually proves is that dry-run
+    // reaches a full successful decision (not a provider-deprecated failure) even though the account's
+    // strategy is 'auto' - the deprecation guard never fires because dry-run's media path never calls
+    // the real Videos API in the first place (see generated()'s dry-run branch).
+    assert.equal(report[0].payload.mediaResolution.decision, 'generate');
     assert.equal(generateCalls, 1, 'an auto-strategy account must still be allowed to attempt generation');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
     await restoreFiles(files);
-    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await restoreDurableClaims();
+  }
+});
+
+// Regression coverage for: the terminal-skip persistence above reads slotHandled() at the TOP of the
+// per-slot loop, then - much later, after a full paid generatePost() call and a failed media attempt -
+// writes 'skipped' unconditionally. Those two points are not atomic: a concurrent runner (another
+// process, or in a hypothetical future parallelized loop) could publish the very same slot, or create
+// its approval issue, in between. The original markSlot() call would have silently clobbered that real,
+// newer outcome with a stale 'skipped' record - not a duplicate-post risk (since 'skipped' is also a
+// "handled" status), but real state corruption: a successfully published post's own record would lie
+// about what happened. markSlotIfUnhandled() closes this by refusing to downgrade an already-handled
+// slot. These tests fail on the pre-fix markSlot()-based code (which always overwrites) and pass on the
+// markSlotIfUnhandled()-based fix.
+
+test('markSlotIfUnhandled refuses to downgrade an already-published slot to skipped', async () => {
+  const files = await snapshotFiles([...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await markSlot('race-test:2026-09-25:08:00', 'published', { account: 'race-test', result: { id: 'post-1' } });
+
+    const outcome = await markSlotIfUnhandled('race-test:2026-09-25:08:00', 'skipped', { account: 'race-test', reason: 'provider-deprecated' });
+    assert.equal(outcome.applied, false, 'a write onto an already-handled slot must not apply');
+    assert.equal(outcome.current.status, 'published', 'the reported current state must reflect the real, newer outcome');
+
+    const slot = await getSlot('race-test:2026-09-25:08:00');
+    assert.equal(slot.status, 'published', 'the on-disk slot must still show published, not be overwritten to skipped');
+    assert.equal(slot.result?.id, 'post-1', 'the original publish detail must be preserved untouched');
+  } finally {
+    await restoreFiles(files);
+  }
+});
+
+test('markSlotIfUnhandled refuses to downgrade an already-approval_pending slot to skipped', async () => {
+  const files = await snapshotFiles([...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await markSlot('race-test:2026-09-25:08:00', 'approval_pending', { account: 'race-test', issue: 42 });
+
+    const outcome = await markSlotIfUnhandled('race-test:2026-09-25:08:00', 'skipped', { account: 'race-test', reason: 'media-too-large' });
+    assert.equal(outcome.applied, false);
+    assert.equal(outcome.current.status, 'approval_pending');
+
+    const slot = await getSlot('race-test:2026-09-25:08:00');
+    assert.equal(slot.status, 'approval_pending');
+    assert.equal(slot.issue, 42);
+  } finally {
+    await restoreFiles(files);
+  }
+});
+
+test('markSlotIfUnhandled DOES apply when the slot has not reached a handled status yet', async () => {
+  const files = await snapshotFiles([...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    const outcome = await markSlotIfUnhandled('race-test:2026-09-25:08:00', 'skipped', { account: 'race-test', reason: 'provider-deprecated' });
+    assert.equal(outcome.applied, true);
+
+    const slot = await getSlot('race-test:2026-09-25:08:00');
+    assert.equal(slot.status, 'skipped');
+  } finally {
+    await restoreFiles(files);
+  }
+});
+
+test('end-to-end: a slot published by a concurrent writer mid-run is never overwritten to skipped by this run\'s terminal-deprecation failure', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_REF_NAME');
+  const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await snapshotAndClearDurableClaims();
+    await installAccount('generate');
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
+    process.env.GH_TOKEN = 'test-gh-token';
+    delete process.env.GITHUB_TOKEN;
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_REF_NAME = 'main';
+
+    const slotId = 'deprecated-media-ig:2026-09-25:08:00';
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.openai.com/v1/responses') {
+        // Simulate a genuinely concurrent second runner completing a real publish for THIS EXACT slot
+        // at the moment this run's own generatePost() call resolves - i.e. strictly after this run's
+        // own earlier slotHandled() check already found the slot unhandled, and strictly before this
+        // run reaches its own markSlotIfUnhandled() call further down the stack.
+        await markSlot(slotId, 'published', { account: 'deprecated-media-ig', result: { id: 'concurrent-publish' } });
+        return generationResponse('generate');
+      }
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') return jsonResponse({ id: 7, assets: [] });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
+      if (target.startsWith('https://api.github.com/repos/owner/repo/contents/data/durable-claims/')) return jsonResponse({ message: 'Not Found' }, 404);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: FIRST_POLL });
+    assert.equal(report[0].status, 'already-handled', `this run must recognize the slot was concurrently handled, got: ${JSON.stringify(report[0])}`);
+    assert.equal(report[0].concurrentStatus, 'published');
+
+    const slot = await getSlot(slotId);
+    assert.equal(slot.status, 'published', 'the concurrently-published slot must survive this run\'s own terminal-deprecation failure untouched');
+    assert.equal(slot.result?.id, 'concurrent-publish');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+    await restoreDurableClaims();
   }
 });

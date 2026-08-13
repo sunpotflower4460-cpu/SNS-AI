@@ -1,7 +1,7 @@
 import { loadAccounts } from './lib/config.mjs';
 import { readHistory, recentHistory } from './lib/history.mjs';
 import { findDueSlots } from './lib/schedule.mjs';
-import { slotHandled, markSlot } from './lib/state.mjs';
+import { slotHandled, markSlot, markSlotIfUnhandled } from './lib/state.mjs';
 import { checkRateLimits } from './lib/safety.mjs';
 import { generatePost } from './lib/openai.mjs';
 import { resolveMediaDetailed, ensureMediaForPlatform } from './lib/media.mjs';
@@ -187,7 +187,15 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const TERMINAL_SKIP_CODES = new Set(['PROVIDER_DEPRECATED', 'MEDIA_HOSTING_TOO_LARGE', 'MEDIA_QA_INPUT_TOO_LARGE']);
         if (!dryRun && TERMINAL_SKIP_CODES.has(error.code)) {
           try {
-            await markSlot(slot.slotId, 'skipped', { account: accountId, reason: status, error: error.message });
+            // The slotHandled() check at the top of this loop iteration is not atomic with this write -
+            // a concurrent runner could have published this slot (or created its approval issue) in the
+            // meantime. markSlotIfUnhandled refuses to downgrade an already-terminal state, so that real
+            // outcome is never clobbered by this stale 'skipped' write.
+            const persisted = await markSlotIfUnhandled(slot.slotId, 'skipped', { account: accountId, reason: status, error: error.message });
+            if (!persisted.applied) {
+              report.push({ account: accountId, slot: slot.slotId, status: 'already-handled', concurrentStatus: persisted.current?.status || null });
+              continue;
+            }
           } catch (persistError) {
             // If the terminal skip itself can't be persisted (e.g. data/state.json is unwritable), the
             // whole point of it - bounding wasted repeat generation cost - is silently defeated, and
