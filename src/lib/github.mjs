@@ -64,11 +64,13 @@ export async function findApprovalIssue(accountId, slotId) {
   return null;
 }
 
-export async function createApprovalIssue(accountId, slotId, payload) {
+export async function createApprovalIssue(accountId, slotId, payload, { skipLookup = false } = {}) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
-  const existing = await findApprovalIssue(accountId, slotId);
-  if (existing) return existing;
+  if (!skipLookup) {
+    const existing = await findApprovalIssue(accountId, slotId);
+    if (existing) return existing;
+  }
   await ensureApprovalLabel();
   return githubRequest(`/repos/${owner}/${repo}/issues`, {
     method: 'POST',
