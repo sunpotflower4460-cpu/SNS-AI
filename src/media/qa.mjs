@@ -58,9 +58,10 @@ async function moderateImage(accountId, account, imageUrl) {
     input: [{ type: 'image_url', image_url: { url: imageUrl } }]
   }, { accountId, account, operation: 'media-moderation', retries: 1 });
   const result = response.results?.[0];
+  if (!result) throw new Error('Image moderation returned no result.');
   return {
-    flagged: Boolean(result?.flagged),
-    categories: Object.entries(result?.categories || {}).filter(([, value]) => value).map(([key]) => key)
+    flagged: Boolean(result.flagged),
+    categories: Object.entries(result.categories || {}).filter(([, value]) => value).map(([key]) => key)
   };
 }
 
