@@ -27,11 +27,16 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Run keyless smoke and readiness doctor
+      - name: Runtime static guards
         run: |
-          npm run smoke
-          npm run doctor -- --write
+          npm run validate
+          npm run check
+          npm run secret-scan
+      - name: Generate readiness report
+        id: health_run
+        run: npm run doctor -- --write
       - name: Persist readiness only when it changed
+        if: always() && steps.health_run.outcome != 'skipped'
         run: |
           if [[ -z "$(git status --porcelain -- data/reports/readiness.json data/reports/readiness.md)" ]]; then
             echo "Readiness unchanged."
