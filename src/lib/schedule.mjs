@@ -54,7 +54,7 @@ function learnedHourScore(time, strategy) {
   const hour = `${time.slice(0, 2)}:00`;
   const stat = strategy?.featureStats?.postingHour?.[hour];
   if (!stat) return 50;
-  return Number(stat.averageScore || 50) * (0.5 + 0.5 * Number(stat.confidence ?? 0));
+  return Number(stat.averageScore ?? 50) * (0.5 + 0.5 * Number(stat.confidence ?? 0));
 }
 
 export function effectiveScheduleTimes(account, strategy = null) {
