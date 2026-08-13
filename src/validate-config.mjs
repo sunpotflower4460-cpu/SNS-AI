@@ -4,9 +4,15 @@ import { validateTimeString } from './lib/schedule.mjs';
 function merged(config, account, key) { return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) }; }
 function positive(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) <= 0)) errors.push(`${id}: ${label} must be a positive number`); }
 function range(errors, id, label, value, min, max) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max)) errors.push(`${id}: ${label} must be ${min}..${max}`); }
+function validTimeZone(value) {
+  if (!value || typeof value !== 'string') return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date(0)); return true; }
+  catch { return false; }
+}
 
 export function validateConfig(config) {
   const errors = []; const modes = new Set(['auto', 'approval', 'manual', 'pause']); const platforms = new Set(['x', 'instagram']);
+  const dayNames = new Set(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
   const experimentDimensions = new Set(['hook', 'format', 'cta', 'mediaDecision']);
   const imageQualities = new Set(['low', 'medium', 'high', 'auto']);
   const imageSizes = new Set(['auto', '1024x1024', '1536x1024', '1024x1536']);
@@ -18,6 +24,12 @@ export function validateConfig(config) {
     if (!modes.has(account.mode || 'pause')) errors.push(`${id}: invalid mode "${account.mode}"`);
     for (const time of account.schedule?.times || []) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
     for (const time of account.schedule?.adaptiveCandidateTimes || []) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
+    for (const day of account.schedule?.days || []) if (!dayNames.has(day)) errors.push(`${id}: invalid schedule day "${day}"`);
+    if (account.schedule) {
+      const timeZone = account.schedule.timezone || config.defaults?.timezone || 'Asia/Tokyo';
+      if (!validTimeZone(timeZone)) errors.push(`${id}: invalid schedule timezone "${timeZone}"`);
+      range(errors, id, 'schedule.windowMinutes', account.schedule.windowMinutes, 1, 1440);
+    }
 
     const generation = merged(config, account, 'generation');
     positive(errors, id, 'generation.historyWindow', generation.historyWindow);
