@@ -91,7 +91,15 @@ async function durableStateBranchCheck() {
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   const branch = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
-  if (!token || !repo) return { checked: true, ok: false, branch, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
+  if (!token || !repo) {
+    return {
+      checked: false,
+      ok: null,
+      branch,
+      error: null,
+      note: 'Durable state branch was not verified because GitHub runtime metadata/token is unavailable. Run Live Preflight inside GitHub Actions before enabling auto mode.'
+    };
+  }
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
@@ -128,6 +136,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
   const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
   const durableState = await durableStateBranchCheck();
+  const durableReady = durableState.checked ? durableState.ok === true : true;
 
   for (const [id, account] of selected) {
     try {
@@ -153,7 +162,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
       const ownModels = requiredModels(account);
       const ownModelFailures = modelChecks.filter((check) => ownModels.includes(check.model) && !check.ok);
       const mediaReady = !kind || mediaHosting.ok;
-      const accountReady = durableState.ok && mediaReady && ownModelFailures.length === 0;
+      const accountReady = durableReady && mediaReady && ownModelFailures.length === 0;
       rows.push({
         account: id,
         platform: resolved.platform,
@@ -177,7 +186,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
   }
 
   const modelFailure = modelChecks.some((check) => !check.ok);
-  const ok = durableState.ok && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
+  const ok = durableReady && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
