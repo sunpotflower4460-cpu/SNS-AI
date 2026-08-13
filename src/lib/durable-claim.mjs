@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { githubContext, githubRequest } from './github.mjs';
 import { readJson, writeJsonAtomic } from './json-store.mjs';
@@ -20,7 +20,7 @@ function relativePath(slotId) {
 }
 
 function localPath(slotId) {
-  return `${LOCAL_DIR}${keyFor(slotId)}.json`;
+  return join(LOCAL_DIR, `${keyFor(slotId)}.json`);
 }
 
 function hasGithubRuntime() {
@@ -128,4 +128,9 @@ export async function durableClaimHandled(slotId) {
   return Boolean(claim && HANDLED_STATUSES.has(claim.status));
 }
 
-export const __test = { keyFor, relativePath, hasGithubRuntime, handledStatuses: HANDLED_STATUSES };
+function resetForTests() {
+  memory.clear();
+  shaMemory.clear();
+}
+
+export const __test = { keyFor, relativePath, localPath, hasGithubRuntime, handledStatuses: HANDLED_STATUSES, resetForTests };
