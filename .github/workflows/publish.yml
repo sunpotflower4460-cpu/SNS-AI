@@ -79,6 +79,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           RUN_ID: ${{ github.run_id }}
           INPUT_ACCOUNT: ${{ inputs.account }}
@@ -98,7 +99,20 @@ jobs:
               throw new Error('SNS command issue body must be valid JSON.');
             }
             if ((process.env.ISSUE_TITLE || '').startsWith('[approval]')) {
-              if (!payload.slotId) throw new Error('Approval issue payload must contain the original slotId.');
+              if (process.env.ISSUE_AUTHOR !== 'github-actions[bot]') {
+                throw new Error('Approval issues must be created by github-actions[bot].');
+              }
+              if (!payload.account || !payload.slotId) throw new Error('Approval issue payload must contain account and original slotId.');
+              const marker = payload._snsAi;
+              if (marker?.kind !== 'sns-ai-approval' || Number(marker?.version) !== 1
+                || String(marker?.account) !== String(payload.account)
+                || String(marker?.slotId) !== String(payload.slotId)) {
+                throw new Error('Approval issue is missing a valid SNS-AI provenance marker.');
+              }
+              const expectedTitle = `[approval] ${payload.account} ${payload.slotId}`;
+              if (process.env.ISSUE_TITLE !== expectedTitle) {
+                throw new Error('Approval issue title does not match its signed account/slot payload.');
+              }
             } else {
               payload.slotId = `${payload.account}:issue:${process.env.ISSUE_NUMBER}`;
             }
