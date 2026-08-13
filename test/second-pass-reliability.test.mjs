@@ -134,6 +134,31 @@ test('approval issue creation is idempotent when the exact issue already exists'
   }
 });
 
+test('approval issue lookup paginates recent issues without relying on search indexing', async () => {
+  const env = savedEnv(['GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY']);
+  const previousFetch = global.fetch;
+  let calls = 0;
+  try {
+    process.env.GITHUB_TOKEN = 'test-token';
+    delete process.env.GH_TOKEN;
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    global.fetch = async (url) => {
+      calls += 1;
+      const page = new URL(String(url)).searchParams.get('page');
+      const rows = page === '1'
+        ? Array.from({ length: 100 }, (_, index) => ({ number: index + 1, title: `other-${index}` }))
+        : [{ number: 501, title: '[approval] acct acct:slot:two' }];
+      return new Response(JSON.stringify(rows), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const issue = await createApprovalIssue('acct', 'acct:slot:two', { account: 'acct' });
+    assert.equal(issue.number, 501);
+    assert.equal(calls, 2);
+  } finally {
+    global.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
 test('circuit failure increments are not lost under concurrent mutations', async () => {
   const saved = await snapshotFile(RUNTIME_HEALTH);
   try {
@@ -157,4 +182,13 @@ test('provider failure classification retries only outcomes known not to have pu
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status: 429 }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status: 500 }), false);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post' }), false);
+});
+
+test('dry-run string inputs are normalized instead of using JavaScript truthiness', () => {
+  assert.equal(publishTest.boolValue(false), false);
+  assert.equal(publishTest.boolValue('false'), false);
+  assert.equal(publishTest.boolValue('0'), false);
+  assert.equal(publishTest.boolValue(true), true);
+  assert.equal(publishTest.boolValue('true'), true);
+  assert.equal(publishTest.boolValue('1'), true);
 });
