@@ -88,9 +88,9 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending', issue: issue.number, predictedScore: draft.predictedScore }); continue;
         }
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
-        report.push({ account: accountId, slot: slot.slotId, status: 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
+        report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'SLOT_ALREADY_CLAIMED'];
         if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
@@ -98,8 +98,9 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         });
         const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted'
           : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
-            : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
-              : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
+            : error.code === 'SLOT_ALREADY_CLAIMED' ? 'already-handled'
+              : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
+                : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
         report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }
