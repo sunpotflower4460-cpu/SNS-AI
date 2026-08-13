@@ -1,5 +1,19 @@
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+function calendarDay(year, month, day, delta = 0) {
+  const date = new Date(Date.UTC(year, month - 1, day + delta));
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + 1;
+  const d = date.getUTCDate();
+  return {
+    year: y,
+    month: m,
+    day: d,
+    weekday: DAY_NAMES[date.getUTCDay()],
+    dateKey: `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  };
+}
+
 export function localParts(date, timeZone) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -17,7 +31,7 @@ export function localParts(date, timeZone) {
   const day = Number(value('day'));
   const hour = Number(value('hour'));
   const minute = Number(value('minute'));
-  const weekdayIndex = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const calendar = calendarDay(year, month, day);
 
   return {
     year,
@@ -25,8 +39,8 @@ export function localParts(date, timeZone) {
     day,
     hour,
     minute,
-    weekday: DAY_NAMES[weekdayIndex],
-    dateKey: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    weekday: calendar.weekday,
+    dateKey: calendar.dateKey
   };
 }
 
@@ -44,11 +58,11 @@ function learnedHourScore(time, strategy) {
 }
 
 export function effectiveScheduleTimes(account, strategy = null) {
-  const base = (account.schedule?.times || []).filter(validateTimeString);
+  const base = [...new Set((account.schedule?.times || []).filter(validateTimeString))];
   if (!base.length) return [];
   if (account.learning?.adaptiveSchedule === false) return base;
   if (Number(strategy?.confidence || 0) < Number(account.learning?.adaptiveScheduleMinConfidence ?? 0.45)) return base;
-  const candidates = (account.schedule?.adaptiveCandidateTimes || []).filter(validateTimeString);
+  const candidates = [...new Set((account.schedule?.adaptiveCandidateTimes || []).filter(validateTimeString))];
   if (candidates.length <= base.length) return base;
   const count = Math.max(Number(account.learning?.adaptiveScheduleKeepAtLeast ?? 1), base.length);
   return [...candidates]
@@ -63,25 +77,45 @@ export function findDueSlots(accountId, account, now = new Date(), strategy = nu
   if (!schedule || !times.length) return [];
 
   const timeZone = schedule.timezone || 'Asia/Tokyo';
-  const windowMinutes = Number(schedule.windowMinutes ?? 30);
+  const configuredWindow = Number(schedule.windowMinutes ?? 30);
+  const windowMinutes = Number.isFinite(configuredWindow)
+    ? Math.min(1440, Math.max(1, configuredWindow))
+    : 30;
   const local = localParts(now, timeZone);
+  const currentDay = calendarDay(local.year, local.month, local.day);
+  const previousDay = calendarDay(local.year, local.month, local.day, -1);
   const allowedDays = schedule.days?.length ? schedule.days : DAY_NAMES;
-  if (!allowedDays.includes(local.weekday)) return [];
-
   const currentMinutes = local.hour * 60 + local.minute;
-  return times
-    .filter((time) => {
-      const [hour, minute] = time.split(':').map(Number);
-      const target = hour * 60 + minute;
-      return currentMinutes >= target && currentMinutes < target + windowMinutes;
-    })
-    .map((time) => ({
-      slotId: `${accountId}:${local.dateKey}:${time}`,
-      accountId,
-      time,
-      timeZone,
-      localDate: local.dateKey
-    }));
+
+  const due = [];
+  for (const time of times) {
+    const [hour, minute] = time.split(':').map(Number);
+    const target = hour * 60 + minute;
+    const end = target + windowMinutes;
+
+    if (allowedDays.includes(currentDay.weekday) && currentMinutes >= target && currentMinutes < end) {
+      due.push({
+        slotId: `${accountId}:${currentDay.dateKey}:${time}`,
+        accountId,
+        time,
+        timeZone,
+        localDate: currentDay.dateKey
+      });
+      continue;
+    }
+
+    const spillMinutes = end - 1440;
+    if (spillMinutes > 0 && allowedDays.includes(previousDay.weekday) && currentMinutes < spillMinutes) {
+      due.push({
+        slotId: `${accountId}:${previousDay.dateKey}:${time}`,
+        accountId,
+        time,
+        timeZone,
+        localDate: previousDay.dateKey
+      });
+    }
+  }
+  return due;
 }
 
 export function localDateKey(date, timeZone = 'Asia/Tokyo') {
