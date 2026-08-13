@@ -1,4 +1,4 @@
-function githubContext() {
+export function githubContext() {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const repository = process.env.GITHUB_REPOSITORY;
   if (!token || !repository) {
@@ -7,7 +7,7 @@ function githubContext() {
   return { token, repository };
 }
 
-async function githubRequest(path, options = {}) {
+export async function githubRequest(path, options = {}) {
   const { token } = githubContext();
   const response = await fetch(`https://api.github.com${path}`, {
     ...options,
@@ -47,14 +47,29 @@ export async function ensureApprovalLabel() {
   });
 }
 
+function approvalTitle(accountId, slotId) {
+  return `[approval] ${accountId} ${slotId}`;
+}
+
+export async function findApprovalIssue(accountId, slotId) {
+  const { repository } = githubContext();
+  const title = approvalTitle(accountId, slotId);
+  const safeTitle = title.replace(/"/g, '');
+  const q = encodeURIComponent(`repo:${repository} is:issue in:title "${safeTitle}"`);
+  const result = await githubRequest(`/search/issues?q=${q}&per_page=20`);
+  return (result.items || []).find((item) => item.title === title) || null;
+}
+
 export async function createApprovalIssue(accountId, slotId, payload) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
+  const existing = await findApprovalIssue(accountId, slotId);
+  if (existing) return existing;
   await ensureApprovalLabel();
   return githubRequest(`/repos/${owner}/${repo}/issues`, {
     method: 'POST',
     body: JSON.stringify({
-      title: `[approval] ${accountId} ${slotId}`,
+      title: approvalTitle(accountId, slotId),
       body: JSON.stringify(payload, null, 2)
     })
   });
