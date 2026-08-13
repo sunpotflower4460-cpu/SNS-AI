@@ -153,7 +153,10 @@ test('built-in video generation runs Sora job, QA preview, MP4 download, hosting
     };
     const result = await generateAndHostVideoDetailed('video-account', account, 'slot-video', {
       mediaPrompt: 'vertical video', text: 'caption'
-    });
+      // Pinned well before VIDEOS_API_DEPRECATION_DATE (src/media/openai-video.mjs) so this test keeps
+      // exercising the actual pipeline (Sora job -> QA preview -> MP4 download -> hosting -> cleanup)
+      // indefinitely, instead of failing at the deprecation guard once the real date passes.
+    }, { now: new Date('2026-01-01T00:00:00Z') });
     assert.equal(result.url, 'https://downloads.example/generated.mp4');
     assert.equal(result.qa.pass, true);
     assert.equal(result.qa.previewVariant, 'spritesheet');

@@ -18,6 +18,9 @@ function jsonResponse(value, status = 200) {
 function encodeClaim(claim) {
   return Buffer.from(`${JSON.stringify(claim)}\n`, 'utf8').toString('base64');
 }
+function branchResponse(treeSha) {
+  return jsonResponse({ name: 'sns-ai-state', commit: { sha: 'commit-sha', commit: { tree: { sha: treeSha } } } });
+}
 
 test('findStuckClaims skips cleanly when there is no GitHub runtime available', async () => {
   const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
@@ -33,7 +36,7 @@ test('findStuckClaims skips cleanly when there is no GitHub runtime available', 
   }
 });
 
-test('findStuckClaims reports no stuck claims when the durable-claims directory does not exist yet', async () => {
+test('findStuckClaims reports no stuck claims when the durable state branch does not exist yet', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
   process.env.GITHUB_TOKEN = 'test-token';
@@ -67,16 +70,27 @@ test('findStuckClaims only flags publishing/publish_unknown claims older than th
     'aged-failed.json': { slotId: 'acct-a:2026-08-01:10:00', account: 'acct-a', platform: 'x', status: 'failed', createdAt: hoursAgo(50), updatedAt: hoursAgo(50) },
     'corrupt.json': null
   };
+  const shaFor = (name) => `blob-${name}`;
 
   try {
     globalThis.fetch = async (url) => {
       const target = String(url);
-      if (target === 'https://api.github.com/repos/owner/repo/contents/data/durable-claims?ref=sns-ai-state') {
-        return jsonResponse(Object.keys(files).map((name) => ({ name, path: `data/durable-claims/${name}`, type: 'file' })));
+      if (target === 'https://api.github.com/repos/owner/repo/branches/sns-ai-state') return branchResponse('tree-sha');
+      if (target === 'https://api.github.com/repos/owner/repo/git/trees/tree-sha?recursive=1') {
+        return jsonResponse({
+          truncated: false,
+          tree: [
+            ...Object.keys(files).map((name) => ({ path: `data/durable-claims/${name}`, type: 'blob', sha: shaFor(name) })),
+            { path: 'data/durable-claims/.preflight-abc.json', type: 'blob', sha: 'blob-preflight-probe' },
+            { path: 'data/history.jsonl', type: 'blob', sha: 'blob-unrelated' },
+            { path: 'data/durable-claims', type: 'tree', sha: 'tree-durable-claims' }
+          ]
+        });
       }
-      const match = target.match(/\/contents\/data\/durable-claims\/([^?]+)\?ref=sns-ai-state$/);
-      if (match) {
-        const name = decodeURIComponent(match[1]);
+      const blobMatch = target.match(/\/git\/blobs\/blob-(.+)$/);
+      if (blobMatch) {
+        const name = blobMatch[1];
+        if (name === 'preflight-probe' || name === 'unrelated') return jsonResponse({ content: encodeClaim({ probe: true }) });
         if (name === 'corrupt.json') return jsonResponse({ content: Buffer.from('not-json', 'utf8').toString('base64') });
         return jsonResponse({ content: encodeClaim(files[name]) });
       }
@@ -85,6 +99,7 @@ test('findStuckClaims only flags publishing/publish_unknown claims older than th
 
     const report = await findStuckClaims({ maxAgeHours: 3 });
     assert.equal(report.skipped, false);
+    assert.equal(report.truncated, false);
     const bySlot = Object.fromEntries(report.stuck.filter((row) => row.slotId).map((row) => [row.slotId, row]));
 
     assert.ok(bySlot['acct-a:2026-08-01:08:00'], 'aged publishing claim must be reported');
@@ -94,6 +109,29 @@ test('findStuckClaims only flags publishing/publish_unknown claims older than th
     const unreadable = report.stuck.find((row) => row.file === 'corrupt.json');
     assert.ok(unreadable, 'a claim file that fails to decode must still be surfaced, not silently dropped');
     assert.equal(unreadable.status, 'unreadable');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('findStuckClaims surfaces truncated:true instead of silently under-reporting when the state branch tree exceeds the Trees API single-request limit', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
+  process.env.GITHUB_TOKEN = 'test-token';
+  delete process.env.GH_TOKEN;
+  process.env.GITHUB_REPOSITORY = 'owner/repo';
+  try {
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.github.com/repos/owner/repo/branches/sns-ai-state') return branchResponse('huge-tree-sha');
+      if (target === 'https://api.github.com/repos/owner/repo/git/trees/huge-tree-sha?recursive=1') {
+        return jsonResponse({ truncated: true, tree: [] });
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    const report = await findStuckClaims({ maxAgeHours: 3 });
+    assert.equal(report.truncated, true, 'a truncated Trees API response must be surfaced, not silently swallowed');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

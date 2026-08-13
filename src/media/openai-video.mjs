@@ -89,10 +89,14 @@ async function createVideo(accountId, account, prompt) {
     return reusable;
   }
 
+  // Charged once per logical call, not per HTTP attempt: the only retry left below is an explicit 429,
+  // which by definition means the request was rejected before any job was created, so a retry of it is
+  // not a second real paid generation. (Network exceptions and 5xx responses - the cases that really
+  // could mean "maybe a job was already created" - are never retried at all, see below.) Charging
+  // per-attempt here would incorrectly block the one safe retry when the account has exactly one unit
+  // of budget left.
+  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: false });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    // Charge budget for every real attempt (not once up front), so a retried call is actually
-    // counted - it is a second real paid generation, not a free reattempt.
-    await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: false, attempt: attempt + 1 });
     let response;
     try {
       response = await fetch(OPENAI_VIDEOS_URL, {

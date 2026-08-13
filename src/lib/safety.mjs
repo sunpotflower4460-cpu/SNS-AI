@@ -61,11 +61,16 @@ export function validateDraftText(account, text, { requireNonEmpty = true } = {}
 // already always true, i.e. it already fails closed (blocks every post) on its own. A negative
 // minMinutesBetweenPosts has no equivalent natural fail-closed comparison (`elapsed < negative` is
 // always false, disabling the cooldown entirely), so it also falls back to the safe default.
+// `value == null` (unset/explicit null) is checked BEFORE Number() conversion in both: Number(null) is
+// 0, not NaN, so without this check an explicit null would silently become "block every post" /
+// "no cooldown at all" instead of "use the default" - the same class of bug for a different reason.
 function safeMaxPostsPerDay(value, fallback) {
+  if (value == null) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 function safeMinMinutesBetweenPosts(value, fallback) {
+  if (value == null) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }

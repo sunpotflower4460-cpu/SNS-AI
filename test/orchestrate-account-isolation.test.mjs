@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { runAutopilot } from '../src/orchestrate.mjs';
+import { runAutopilot, hasFatalStatus } from '../src/orchestrate.mjs';
 
 // Regression coverage for: a single account whose schedule.timezone is invalid (a typo, or any config
 // change that bypassed npm run validate) used to throw straight out of findDueSlots() with nothing
@@ -135,9 +135,25 @@ test('a single account with an invalid schedule timezone does not abort a non-fo
     assert.ok(broken, 'the broken account must still surface an explicit, isolated failure entry');
     assert.equal(broken.status, 'account-error');
     assert.match(broken.error, /time zone/i);
+    // Isolating the failure to one account is only half the fix: the CLI entrypoint must still exit
+    // non-zero so a scheduled run doesn't look green while silently skipping an account.
+    assert.equal(hasFatalStatus(report), true, 'a report containing an account-error must make the CLI exit non-zero');
   } finally {
     restoreEnv(env);
     await restoreFiles(files);
     await rm(DURABLE_DIR, { recursive: true, force: true });
   }
+});
+
+test('hasFatalStatus flags real per-account/per-slot errors but not intentional control-flow pauses', () => {
+  assert.equal(hasFatalStatus([{ status: 'failed' }]), true);
+  assert.equal(hasFatalStatus([{ status: 'account-error' }]), true);
+  assert.equal(hasFatalStatus([{ status: 'state-error' }]), true);
+  assert.equal(hasFatalStatus([{ status: 'approval-reconcile-error' }]), true);
+  assert.equal(hasFatalStatus([{ status: 'published' }, { status: 'account-error' }]), true, 'one fatal entry among otherwise-successful ones must still trip the exit code');
+
+  for (const status of ['budget-exhausted', 'circuit-open', 'rate-limited', 'safety-brake', 'media-qa-failed', 'provider-deprecated', 'already-handled', 'published', 'dry-run', 'approval-pending']) {
+    assert.equal(hasFatalStatus([{ status }]), false, `${status} is an intentional control-flow outcome and must not fail the CLI`);
+  }
+  assert.equal(hasFatalStatus([]), false);
 });

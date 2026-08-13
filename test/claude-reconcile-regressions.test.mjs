@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { metricVector } from '../src/analytics/scorer.mjs';
 import { ensureExperiment } from '../src/experiments/engine.mjs';
 import { loadExperimentState, saveExperimentState } from '../src/experiments/store.mjs';
-import { moderateText } from '../src/lib/openai.mjs';
+import { moderateText, openaiRequest } from '../src/lib/openai.mjs';
 import { checkRateLimits, validateDraftText } from '../src/lib/safety.mjs';
 import { loadState, markSlot } from '../src/lib/state.mjs';
 import { generateAndHostImageDetailed } from '../src/media/openai-image.mjs';
@@ -80,6 +80,30 @@ test('config validation honors inherited autonomous mode and permits an explicit
   assert.ok(negative.some((error) => error.includes('budgets.openaiCallsPerDay')));
 });
 
+test('config validation rejects an account id that collides with the reserved dry-run-preview budget namespace', () => {
+  const errors = validateConfig({
+    defaults: { mode: 'pause' },
+    accounts: { 'brand::dry-run-preview': { platform: 'x', enabled: false } }
+  });
+  assert.ok(
+    errors.some((error) => error.startsWith('brand::dry-run-preview:') && error.includes('reserved')),
+    `expected a reserved-suffix error, got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('openaiRequest refuses to bill an account whose id collides with the reserved dry-run-preview namespace', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { throw new Error(`No request should have been made: ${url}`); };
+  try {
+    await assert.rejects(
+      openaiRequest('/responses', {}, { accountId: 'brand::dry-run-preview', account: {}, operation: 'test' }),
+      /reserved "::dry-run-preview" suffix/
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('rate-limit knobs fall back to their safe defaults instead of failing open on NaN, and stay fail-closed on a negative daily cap', () => {
   const account = { schedule: { timezone: 'UTC' } };
   const history = [{ account: 'acct', status: 'published', at: new Date('2026-08-13T00:58:00Z').toISOString() }];
@@ -102,6 +126,17 @@ test('rate-limit knobs fall back to their safe defaults instead of failing open 
   // confirm the NaN-guard above did not accidentally weaken that into "use the default cap instead".
   const negativeCap = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: -5, minMinutesBetweenPosts: 0 } }, [], now);
   assert.equal(negativeCap.ok, false, 'a negative maxPostsPerDay must still block every post, not fall back to the default cap');
+
+  // Number(null) is 0, not NaN, so an explicit null (an account-level override explicitly unsetting an
+  // inherited default, which validate-config's `value != null` checks already treat as "no opinion")
+  // must not silently become "block every post" / "no cooldown at all" - it must fall back to the
+  // default just like `undefined` does.
+  const nullCap = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: null, minMinutesBetweenPosts: 0 } },
+    Array.from({ length: 5 }, () => ({ account: 'acct', status: 'published', at: now.toISOString() })), now);
+  assert.equal(nullCap.ok, true, 'an explicit null maxPostsPerDay must fall back to the default cap (10), not become 0 and block every post');
+
+  const nullCooldown = checkRateLimits('acct', { ...account, safety: { maxPostsPerDay: 999, minMinutesBetweenPosts: null } }, history, now);
+  assert.equal(nullCooldown.ok, false, 'an explicit null minMinutesBetweenPosts must fall back to the default cooldown (15m), not become 0 and disable it');
 });
 
 test('concurrent slot writes preserve every independently handled slot', async () => {

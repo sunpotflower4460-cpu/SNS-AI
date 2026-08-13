@@ -21,10 +21,13 @@ async function generateImage(accountId, account, prompt) {
     output_format: 'png',
     n: 1
   };
+  // Charged once per logical call, not per HTTP attempt: the only retry left below is an explicit 429,
+  // which by definition means the request was rejected before any generation started, so a retry of it
+  // is not a second real paid generation. (Network exceptions and 5xx responses - the cases that really
+  // could mean "maybe it already ran" - are never retried at all, see below.) Charging per-attempt here
+  // would incorrectly block the one safe retry when the account has exactly one unit of budget left.
+  await consumeUsage(accountId, account, 'image', { model: body.model });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    // Charge budget for every real attempt (not once up front), so a retried call is actually
-    // counted - it is a second real paid generation, not a free reattempt.
-    await consumeUsage(accountId, account, 'image', { model: body.model, attempt: attempt + 1 });
     let response;
     try {
       response = await fetch(OPENAI_IMAGES_URL, {

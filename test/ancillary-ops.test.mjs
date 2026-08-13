@@ -4,7 +4,8 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildReadinessReport, writeReadinessReport } from '../src/ops/doctor.mjs';
+import { buildReadinessReport, writeReadinessReport, __test as doctorTest } from '../src/ops/doctor.mjs';
+import { VIDEOS_API_DEPRECATION_DATE } from '../src/media/openai-video.mjs';
 import { runMaintenance } from '../src/ops/maintenance.mjs';
 import { generateReport } from '../src/reports/generate.mjs';
 import { generateWeeklyReport } from '../src/reports/weekly.mjs';
@@ -99,6 +100,22 @@ test('readiness doctor warns about the confirmed OpenAI Videos API shutdown for 
       assert.match(warnings, /Videos API.*2026-09-24/s, 'an account depending on built-in Reel generation must be warned about the confirmed sora-2 shutdown date');
     });
   } finally { restoreEnv(env); }
+});
+
+test('the Videos API deprecation message escalates from a warning to an actionable blocker once the shutdown date passes', () => {
+  const beforeDate = new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) - 86_400_000).getTime();
+  const onDate = Date.parse(VIDEOS_API_DEPRECATION_DATE);
+  const afterDate = Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000;
+
+  assert.ok(doctorTest.videosApiDaysLeft(beforeDate) > 0, 'a day before the shutdown date must report positive days remaining');
+  assert.ok(doctorTest.videosApiDaysLeft(onDate) <= 0, 'on the shutdown date itself, days remaining must be zero or negative');
+  assert.ok(doctorTest.videosApiDaysLeft(afterDate) < 0, 'after the shutdown date, days remaining must be negative');
+
+  // buildReadinessReport/mediaReadiness route this message to `blockers` (not `warnings`) exactly when
+  // videosApiDaysLeft() <= 0 - readiness must not stay green for an account that can no longer publish.
+  assert.match(doctorTest.videosApiDeprecationMessage(beforeDate), /scheduled for shutdown/);
+  assert.match(doctorTest.videosApiDeprecationMessage(onDate), /was shut down/);
+  assert.match(doctorTest.videosApiDeprecationMessage(afterDate), /was shut down/);
 });
 
 test('maintenance compacts duplicates, archives expired rows, and quarantines malformed JSONL', async () => {

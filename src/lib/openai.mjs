@@ -21,6 +21,13 @@ export async function openaiRequest(path, body, meta = {}) {
       // mutation (see orchestrate.mjs and moderateText() below) - and the one unavoidable cost (the
       // preview generation call itself) is billed against a separate per-day counter so repeated
       // previews can never exhaust or interact with the account's live posting budget.
+      // Defense in depth on top of validate-config.mjs's reserved-suffix check: account IDs are
+      // free-form config keys used directly as budget-state object keys, so a real account literally
+      // named "<x>::dry-run-preview" would otherwise collide with account <x>'s preview counter and
+      // defeat the isolation this is meant to provide.
+      if (String(meta.accountId).includes('::dry-run-preview')) {
+        throw new Error(`Account id "${meta.accountId}" uses the reserved "::dry-run-preview" suffix; rename it in config/accounts.json.`);
+      }
       const budgetAccountId = meta.dryRun ? `${meta.accountId}::dry-run-preview` : meta.accountId;
       await consumeUsage(budgetAccountId, meta.account, 'openai', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
       if (meta.webSearch) await consumeUsage(budgetAccountId, meta.account, 'webSearch', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });

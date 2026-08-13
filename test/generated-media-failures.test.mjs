@@ -12,6 +12,12 @@ const USAGE_FILES = [
   fileURLToPath(new URL('../data/usage.jsonl', import.meta.url))
 ];
 
+// Every video test in this file that is NOT specifically testing the deprecation guard itself must
+// pin `now` well before VIDEOS_API_DEPRECATION_DATE - otherwise, once the real wall clock crosses that
+// date, these tests (which exercise retry/QA/hosting/cleanup behavior, nothing to do with the
+// deprecation guard) would all start failing at the guard instead of testing what they're named for.
+const PRE_DEPRECATION_NOW = { now: new Date('2026-01-01T00:00:00Z') };
+
 function jsonResponse(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {
     status,
@@ -238,7 +244,7 @@ test('video generation never retries a network exception or a 5xx response, only
       generateAndHostVideoDetailed('video-network-exception', {
         media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
         budgets: { enabled: false }
-      }, 'slot-video-network', { mediaPrompt: 'a scene' }),
+      }, 'slot-video-network', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW),
       /socket hang up/
     );
     assert.equal(videoCalls, 1, 'a network exception on the video-create POST must never be retried');
@@ -261,7 +267,7 @@ test('video generation never retries a network exception or a 5xx response, only
       generateAndHostVideoDetailed('video-5xx', {
         media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
         budgets: { enabled: false }
-      }, 'slot-video-5xx', { mediaPrompt: 'a scene' })
+      }, 'slot-video-5xx', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW)
     );
     assert.equal(videoCalls, 1, 'a 5xx response on the video-create POST must never be retried');
   } finally {
@@ -352,7 +358,7 @@ test('video generation reuses a recent completed job and falls back from sprites
         qa: { enabled: false, maxInputBytes: 1024, maxRegenerations: 0 }
       },
       budgets: { enabled: false }
-    }, 'slot-video-reuse', { mediaPrompt: 'reuse me', text: 'caption' });
+    }, 'slot-video-reuse', { mediaPrompt: 'reuse me', text: 'caption' }, PRE_DEPRECATION_NOW);
 
     assert.equal(result.url, 'https://downloads.example/reused.mp4');
     assert.equal(result.qa.previewVariant, 'thumbnail');
@@ -392,7 +398,7 @@ test('video creation retries a throttled create call and then fails fast when th
           qa: { enabled: false, maxRegenerations: 0 }
         },
         budgets: { enabled: false }
-      }, 'slot-video-failed', { mediaPrompt: 'fail render' }),
+      }, 'slot-video-failed', { mediaPrompt: 'fail render' }, PRE_DEPRECATION_NOW),
       /OpenAI video generation failed: render failed/
     );
     assert.equal(postCalls, 2);
@@ -435,7 +441,7 @@ test('video hosting rejects an oversized MP4 after a valid QA preview', async ()
         qa: { enabled: false, maxInputBytes: 1024, maxRegenerations: 0 }
       },
       budgets: { enabled: false }
-    }, 'slot-video-large', { mediaPrompt: 'large video' }).then(() => null, (error) => error);
+    }, 'slot-video-large', { mediaPrompt: 'large video' }, PRE_DEPRECATION_NOW).then(() => null, (error) => error);
 
     assert.match(rejection.message, /Generated video exceeds limit/);
     // A hosting-limit rejection is a config-tuning issue, not a provider outage: it must carry a

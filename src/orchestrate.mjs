@@ -157,7 +157,20 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
   }
   return report;
 }
+
+// Every status here reflects a real bug/unexpected error that isolated a single account/slot rather
+// than crashing the whole run (account-error/state-error/approval-reconcile-error come from the
+// per-account and per-slot try/catch guards added for exactly that isolation) - a scheduled run must
+// not exit 0 and look green while one of these silently skipped an account. Intentional control-flow
+// pauses (budget-exhausted, circuit-open, rate-limited, safety-brake, media-qa-failed,
+// provider-deprecated, already-handled) are deliberately excluded: those are the system working as
+// designed, not a bug to alert on.
+const FATAL_STATUSES = new Set(['failed', 'account-error', 'state-error', 'approval-reconcile-error']);
+export function hasFatalStatus(report) {
+  return (report || []).some((entry) => FATAL_STATUSES.has(entry.status));
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = parseArgs(process.argv.slice(2)); const report = await runAutopilot({ accountFilter: args.account || undefined, force: bool(args.force), dryRun: bool(args['dry-run']) || bool(process.env.DRY_RUN) });
-  console.log(JSON.stringify(report, null, 2)); if (report.some((entry) => entry.status === 'failed')) process.exitCode = 1;
+  console.log(JSON.stringify(report, null, 2)); if (hasFatalStatus(report)) process.exitCode = 1;
 }
