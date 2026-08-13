@@ -10,7 +10,8 @@ import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
 
 function parseArgs(argv) { const args = {}; for (let i = 0; i < argv.length; i += 1) { const token = argv[i]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[i + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; i += 1; } } return args; }
-async function loadPayload(args) { if (args.file) return JSON.parse(await readFile(args.file, 'utf8')); if (args.json) return JSON.parse(args.json); return { account: args.account, text: args.text || '', mediaUrl: args['media-url'], mediaType: args['media-type'] || 'image', mediaAltText: args['media-alt-text'] || '', dryRun: args['dry-run'] === true || args['dry-run'] === 'true', source: args.source || 'manual', slotId: args['slot-id'] }; }
+function boolValue(value) { return value === true || ['true', '1', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase()); }
+async function loadPayload(args) { if (args.file) return JSON.parse(await readFile(args.file, 'utf8')); if (args.json) return JSON.parse(args.json); return { account: args.account, text: args.text || '', mediaUrl: args['media-url'], mediaType: args['media-type'] || 'image', mediaAltText: args['media-alt-text'] || '', dryRun: boolValue(args['dry-run']), source: args.source || 'manual', slotId: args['slot-id'] }; }
 function providerPostId(result) { return result?.data?.id || result?.postId || result?.id || result?.mediaId || result?.media_id || result?.creationId || null; }
 
 function definitiveProviderFailure(error) {
@@ -31,6 +32,7 @@ async function bestEffort(label, task, warnings) {
 export async function publish(payload) {
   const account = await resolveAccount(payload.account);
   const text = String(payload.text || '').trim();
+  const dryRun = boolValue(payload.dryRun);
   validateDraftText(account, text, { requireNonEmpty: false });
   const common = {
     text,
@@ -38,12 +40,12 @@ export async function publish(payload) {
     mediaType: payload.mediaType || 'image',
     mediaAltText: String(payload.mediaAltText || '').slice(0, 1000),
     credential: account.credential,
-    dryRun: Boolean(payload.dryRun)
+    dryRun
   };
-  if (!payload.dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
+  if (!dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
 
   let durable = null;
-  if (!payload.dryRun && payload.slotId) {
+  if (!dryRun && payload.slotId) {
     durable = await beginPublishClaim(payload.slotId, {
       account: payload.account,
       platform: account.platform,
@@ -52,17 +54,19 @@ export async function publish(payload) {
       mediaType: payload.mediaType || null
     });
     if (durable.replay) {
-      return {
+      const replay = {
         platform: account.platform,
         postId: durable.claim?.providerPostId || null,
         idempotentReplay: true,
         durableClaim: durable.claim
       };
+      await appendAudit({ account: payload.account, stage: 'publish-idempotent-replay', slotId: payload.slotId, platform: account.platform, providerPostId: replay.postId }).catch(() => {});
+      return replay;
     }
   }
 
   const preWarnings = [];
-  await bestEffort('publish-attempt-audit', () => appendAudit({ account: payload.account, stage: payload.dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length }), preWarnings);
+  await bestEffort('publish-attempt-audit', () => appendAudit({ account: payload.account, stage: dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length }), preWarnings);
 
   let result;
   try {
@@ -71,7 +75,7 @@ export async function publish(payload) {
     else throw new Error(`Unsupported platform: ${account.platform}`);
   } catch (error) {
     const failureWarnings = [];
-    if (!payload.dryRun && payload.slotId) {
+    if (!dryRun && payload.slotId) {
       const claimStatus = definitiveProviderFailure(error) ? 'failed' : 'publish_unknown';
       await bestEffort('durable-claim-failure-state', () => finishPublishClaim(payload.slotId, claimStatus, {
         account: payload.account,
@@ -82,7 +86,7 @@ export async function publish(payload) {
         lastError: String(error.message || error).slice(0, 500)
       }), failureWarnings);
     }
-    if (!payload.dryRun && error.code !== 'CIRCUIT_OPEN') {
+    if (!dryRun && error.code !== 'CIRCUIT_OPEN') {
       await bestEffort('publish-circuit-failure', () => recordCircuitFailure(payload.account, 'publish', error, account.resilience), failureWarnings);
     }
     await bestEffort('publish-error-audit', () => appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500) }), failureWarnings);
@@ -90,10 +94,11 @@ export async function publish(payload) {
     throw error;
   }
 
-  if (payload.dryRun) return preWarnings.length ? { ...result, bookkeepingWarnings: preWarnings } : result;
+  if (dryRun) return preWarnings.length ? { ...result, bookkeepingWarnings: preWarnings } : result;
 
   const postId = providerPostId(result);
   const warnings = [...preWarnings];
+  if (!postId) warnings.push({ label: 'provider-post-id-missing', error: 'Provider returned success without a post id; automatic metrics may be unavailable.' });
   if (payload.slotId) {
     await bestEffort('durable-claim-published', () => finishPublishClaim(payload.slotId, 'published', {
       account: payload.account,
@@ -134,4 +139,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, detail: error.body, bookkeepingWarnings: error.bookkeepingWarnings || [] }, null, 2)); process.exitCode = 1; }
 }
 
-export const __test = { providerPostId, definitiveProviderFailure };
+export const __test = { providerPostId, definitiveProviderFailure, boolValue };
