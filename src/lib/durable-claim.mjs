@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, open, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { githubContext, githubRequest } from './github.mjs';
@@ -10,6 +10,7 @@ const STATE_BRANCH = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
 const memory = new Map();
 const shaMemory = new Map();
 const HANDLED_STATUSES = new Set(['publishing', 'publish_unknown', 'published']);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function keyFor(slotId) {
   return createHash('sha256').update(String(slotId || '')).digest('hex').slice(0, 40);
@@ -23,8 +24,34 @@ function localPath(slotId) {
   return join(LOCAL_DIR, `${keyFor(slotId)}.json`);
 }
 
+function localLockPath(slotId) {
+  return `${localPath(slotId)}.lock`;
+}
+
 function hasGithubRuntime() {
   return Boolean((process.env.GITHUB_TOKEN || process.env.GH_TOKEN) && process.env.GITHUB_REPOSITORY);
+}
+
+async function withLocalLock(slotId, task) {
+  const lockPath = localLockPath(slotId);
+  await mkdir(dirname(lockPath), { recursive: true });
+  let handle = null;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      handle = await open(lockPath, 'wx');
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (attempt === 99) throw new Error(`Timed out acquiring local durable claim lock for ${slotId}.`);
+      await sleep(50);
+    }
+  }
+  try {
+    return await task();
+  } finally {
+    await handle?.close().catch(() => {});
+    await unlink(lockPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+  }
 }
 
 async function readRemote(slotId) {
@@ -70,6 +97,7 @@ async function writeRemote(slotId, claim) {
 async function readLocal(slotId) {
   const claim = await readJson(localPath(slotId), null);
   if (claim) memory.set(slotId, claim);
+  else memory.delete(slotId);
   return claim;
 }
 
@@ -81,17 +109,9 @@ async function writeLocal(slotId, claim) {
   return claim;
 }
 
-export async function getDurableClaim(slotId, { fresh = false } = {}) {
-  if (!slotId) return null;
-  if (!fresh && memory.has(slotId)) return memory.get(slotId);
-  return hasGithubRuntime() ? readRemote(slotId) : readLocal(slotId);
-}
-
-export async function writeDurableClaim(slotId, status, detail = {}) {
-  if (!slotId) return null;
-  const previous = await getDurableClaim(slotId, { fresh: hasGithubRuntime() });
+function nextClaim(slotId, status, previous, detail = {}) {
   const now = new Date().toISOString();
-  const claim = {
+  return {
     ...(previous || {}),
     slotId,
     status,
@@ -99,23 +119,56 @@ export async function writeDurableClaim(slotId, status, detail = {}) {
     updatedAt: now,
     ...detail
   };
-  return hasGithubRuntime() ? writeRemote(slotId, claim) : writeLocal(slotId, claim);
 }
 
-export async function beginPublishClaim(slotId, detail = {}) {
-  if (!slotId) return { claimed: false, untracked: true, claim: null };
-  const existing = await getDurableClaim(slotId, { fresh: hasGithubRuntime() });
-  if (existing?.status === 'published') {
-    return { claimed: false, replay: true, claim: existing };
-  }
+function assertClaimCanBegin(slotId, existing) {
+  if (existing?.status === 'published') return { replay: true, claim: existing };
   if (['publishing', 'publish_unknown'].includes(existing?.status)) {
     const error = new Error(`Durable slot claim prevents duplicate publishing for ${slotId}; current status is ${existing.status}.`);
     error.code = 'SLOT_ALREADY_CLAIMED';
     error.claim = existing;
     throw error;
   }
-  const claim = await writeDurableClaim(slotId, 'publishing', detail);
-  return { claimed: true, replay: false, claim };
+  return { replay: false, claim: existing };
+}
+
+export async function getDurableClaim(slotId, { fresh = false } = {}) {
+  if (!slotId) return null;
+  if (hasGithubRuntime()) {
+    if (!fresh && memory.has(slotId)) return memory.get(slotId);
+    return readRemote(slotId);
+  }
+  return readLocal(slotId);
+}
+
+export async function writeDurableClaim(slotId, status, detail = {}) {
+  if (!slotId) return null;
+  if (hasGithubRuntime()) {
+    const previous = await getDurableClaim(slotId, { fresh: true });
+    return writeRemote(slotId, nextClaim(slotId, status, previous, detail));
+  }
+  return withLocalLock(slotId, async () => {
+    const previous = await readLocal(slotId);
+    return writeLocal(slotId, nextClaim(slotId, status, previous, detail));
+  });
+}
+
+export async function beginPublishClaim(slotId, detail = {}) {
+  if (!slotId) return { claimed: false, untracked: true, claim: null };
+  if (hasGithubRuntime()) {
+    const existing = await getDurableClaim(slotId, { fresh: true });
+    const check = assertClaimCanBegin(slotId, existing);
+    if (check.replay) return { claimed: false, replay: true, claim: existing };
+    const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail));
+    return { claimed: true, replay: false, claim };
+  }
+  return withLocalLock(slotId, async () => {
+    const existing = await readLocal(slotId);
+    const check = assertClaimCanBegin(slotId, existing);
+    if (check.replay) return { claimed: false, replay: true, claim: existing };
+    const claim = await writeLocal(slotId, nextClaim(slotId, 'publishing', existing, detail));
+    return { claimed: true, replay: false, claim };
+  });
 }
 
 export async function finishPublishClaim(slotId, status, detail = {}) {
@@ -133,4 +186,4 @@ function resetForTests() {
   shaMemory.clear();
 }
 
-export const __test = { keyFor, relativePath, localPath, hasGithubRuntime, handledStatuses: HANDLED_STATUSES, resetForTests };
+export const __test = { keyFor, relativePath, localPath, localLockPath, hasGithubRuntime, handledStatuses: HANDLED_STATUSES, resetForTests };
