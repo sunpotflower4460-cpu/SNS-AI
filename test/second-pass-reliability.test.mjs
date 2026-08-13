@@ -127,7 +127,7 @@ test('approval issue creation is idempotent when the exact issue already exists'
     const issue = await createApprovalIssue('acct', 'acct:2026-08-13:10:00', { account: 'acct' });
     assert.equal(issue.number, 42);
     assert.equal(calls.length, 1, 'existing approval must avoid label/create API calls');
-    assert.match(calls[0].url, /\/issues\?state=all/);
+    assert.match(calls[0].url, /\/issues\?state=open/);
   } finally {
     global.fetch = previousFetch;
     restoreEnv(env);
