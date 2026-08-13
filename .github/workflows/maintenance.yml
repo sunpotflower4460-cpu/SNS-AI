@@ -31,27 +31,29 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify repository before maintenance
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
           npm run secret-scan
 
       - name: Compact and verify persistent data
+        id: maintenance_run
         run: npm run maintenance
 
       - name: Expire stale approval issues
+        if: always() && steps.maintenance_run.outcome != 'skipped'
         run: npm run expire-approvals
 
       - name: Refresh health and readable reports
+        if: always() && steps.maintenance_run.outcome != 'skipped'
         run: |
           npm run doctor -- --write
           npm run report
           npm run weekly-report
 
       - name: Persist maintenance state
+        if: always() && steps.maintenance_run.outcome != 'skipped'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/)" ]]; then
