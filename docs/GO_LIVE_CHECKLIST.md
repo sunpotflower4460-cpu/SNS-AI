@@ -6,7 +6,7 @@
 
 - [ ] Repository Actionsが有効
 - [ ] `SNS Autopilot` workflowがactive
-- [ ] durable idempotency用の`ns-ai-state`ではなく **`sns-ai-state`** branchが存在
+- [ ] durable idempotency用の **`sns-ai-state`** branchが存在
 - [ ] Live Preflightの`durableState.ok`がtrue
 - [ ] repositoryがpublic、またはbuilt-in media hostingを使わず外部public CDNを設定
 - [ ] `OPENAI_API_KEY` Secret登録
