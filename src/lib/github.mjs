@@ -56,7 +56,7 @@ export async function findApprovalIssue(accountId, slotId) {
   const [owner, repo] = repository.split('/');
   const title = approvalTitle(accountId, slotId);
   for (let page = 1; page <= 5; page += 1) {
-    const issues = await githubRequest(`/repos/${owner}/${repo}/issues?state=all&per_page=100&page=${page}&sort=created&direction=desc`);
+    const issues = await githubRequest(`/repos/${owner}/${repo}/issues?state=open&per_page=100&page=${page}&sort=created&direction=desc`);
     const match = (issues || []).find((item) => !item.pull_request && item.title === title);
     if (match) return match;
     if (!Array.isArray(issues) || issues.length < 100) break;
