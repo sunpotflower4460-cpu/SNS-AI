@@ -3,9 +3,16 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAccounts, loadConfig } from '../lib/config.mjs';
 import { validateConfig } from '../validate-config.mjs';
+import { VIDEOS_API_DEPRECATION_DATE } from '../media/openai-video.mjs';
 
 const REPORT_JSON = fileURLToPath(new URL('../../data/reports/readiness.json', import.meta.url));
 const REPORT_MD = fileURLToPath(new URL('../../data/reports/readiness.md', import.meta.url));
+
+function videosApiDeprecationWarning() {
+  const daysLeft = Math.ceil((Date.parse(VIDEOS_API_DEPRECATION_DATE) - Date.now()) / 86_400_000);
+  if (daysLeft <= 0) return `OpenAI's Videos API (sora-2/sora-2-pro) was shut down on ${VIDEOS_API_DEPRECATION_DATE}. Built-in Reel generation for this account will fail closed until it is reconfigured to a different media strategy.`;
+  return `OpenAI's Videos API (sora-2/sora-2-pro) is scheduled for shutdown on ${VIDEOS_API_DEPRECATION_DATE} (about ${daysLeft} day(s) from now), with no replacement model listed as of this check. Built-in Reel generation for this account will stop working on that date - plan a migration to media.strategy: endpoint or another video source before then.`;
+}
 
 function xUsesMedia(account) {
   return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
@@ -73,10 +80,12 @@ function mediaReadiness(account) {
   const mediaType = media.type || 'image';
   const blockers = [];
   const warnings = [];
+  const usesBuiltInVideo = mediaType === 'reel' && media.internalVideoGeneration !== false && strategy !== 'none' && !/^https:\/\//i.test(media.endpoint || '');
   if (account.platform === 'x') {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
     if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access. Refreshed OAuth2 tokens are encrypted into data/x-oauth2-state.json using X_OAUTH2_STATE_KEY.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
+    if (usesBuiltInVideo) warnings.push(videosApiDeprecationWarning());
     return { blockers, warnings };
   }
   if (account.platform !== 'instagram') return { blockers, warnings };
@@ -94,6 +103,7 @@ function mediaReadiness(account) {
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push(`${strategy} needs library media, media.endpoint, or matching built-in media generation.`);
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
+    if (mediaType === 'reel') warnings.push(videosApiDeprecationWarning());
   }
   warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');

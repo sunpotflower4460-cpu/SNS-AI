@@ -125,7 +125,13 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           experiment, sourceCount: sources.length, dryRun
         });
 
-        if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
+        // A dry run never calls the publisher and (as of the dry-run budget-isolation fix) never even
+        // runs moderation - it proves nothing about whether a real publish would actually succeed. It
+        // must not touch the resilience circuit breaker: recordCircuitSuccess() unconditionally resets
+        // failures/openUntil/lastError in data/runtime-health.json, which autopilot.yml commits
+        // whenever it changes even for dry runs - so a manual preview run could silently erase a
+        // legitimate open circuit (real prior failures) that was correctly protecting the account.
+        if (dryRun) { report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
           const issue = await createApprovalIssue(accountId, slot.slotId, payload); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
           await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending', issue: issue.number, predictedScore: draft.predictedScore }); continue;
@@ -133,7 +139,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
         report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED'];
         if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
@@ -143,7 +149,8 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
             : error.code === 'SLOT_ALREADY_CLAIMED' ? 'already-handled'
               : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' || error.code === 'MEDIA_HOSTING_TOO_LARGE' ? 'media-qa-failed'
-                : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
+                : error.code === 'PROVIDER_DEPRECATED' ? 'provider-deprecated'
+                  : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
         report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }

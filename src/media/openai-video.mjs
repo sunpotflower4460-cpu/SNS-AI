@@ -22,6 +22,25 @@ function oversizeError(variant, maxBytes) {
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Built-in video generation requires OPENAI_API_KEY.'); return key; }
 function authHeaders(extra = {}) { return { Authorization: `Bearer ${apiKey()}`, ...extra }; }
 
+// OpenAI's official deprecations page lists the entire Videos API - every sora-2/sora-2-pro model
+// alias included - as shut down on this date, with no replacement model listed as of the date this was
+// verified. After that date this backend must fail loudly and immediately with an actionable message,
+// not attempt a real request and surface OpenAI's own confusing 404/410 instead, and not repeatedly
+// trip the resilience circuit breaker for an outage that will never self-heal by retrying.
+export const VIDEOS_API_DEPRECATION_DATE = '2026-09-24T00:00:00Z';
+
+export function assertVideosApiStillAvailable(now = new Date()) {
+  if (now.getTime() >= Date.parse(VIDEOS_API_DEPRECATION_DATE)) {
+    const error = new Error(
+      `OpenAI's Videos API (including sora-2/sora-2-pro) was shut down on ${VIDEOS_API_DEPRECATION_DATE}. `
+      + 'Built-in Reel/video generation is unavailable until this account is reconfigured to a supported '
+      + 'video backend (e.g. media.strategy: endpoint, or a future replacement model once one exists).'
+    );
+    error.code = 'PROVIDER_DEPRECATED';
+    throw error;
+  }
+}
+
 function createVideoForm({ model, prompt, size, seconds }) {
   const form = new FormData();
   form.set('model', String(model));
@@ -65,10 +84,15 @@ async function createVideo(accountId, account, prompt) {
   const size = account.media?.videoSize || '720x1280';
   const seconds = String(Number(account.media?.videoSeconds ?? 8));
   const reusable = await findReusableVideo({ prompt, model, size, seconds });
-  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: Boolean(reusable) });
-  if (reusable) return reusable;
+  if (reusable) {
+    await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: true });
+    return reusable;
+  }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    // Charge budget for every real attempt (not once up front), so a retried call is actually
+    // counted - it is a second real paid generation, not a free reattempt.
+    await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: false, attempt: attempt + 1 });
     let response;
     try {
       response = await fetch(OPENAI_VIDEOS_URL, {
@@ -77,13 +101,17 @@ async function createVideo(accountId, account, prompt) {
         body: createVideoForm({ model, prompt, size, seconds })
       });
     } catch (error) {
-      if (attempt === 1) throw error;
-      await sleep(1500);
-      continue;
+      // A network-level failure gives no proof the request wasn't already accepted server-side.
+      // Retrying could silently create a second (orphaned, still-billed) video job for a request
+      // that actually succeeded - fail closed instead, matching every SNS provider mutation here.
+      throw error;
     }
     const parsed = await response.json().catch(() => ({}));
     if (response.ok) return parsed;
-    if ((response.status === 429 || response.status >= 500) && attempt === 0) {
+    // Only a 429 is safe to retry: an explicit rate-limit rejection is guaranteed to have been
+    // rejected before any job was created. A 5xx is not - it can occur after the job was already
+    // accepted, so it is treated the same as a network exception: fail closed, no retry.
+    if (response.status === 429 && attempt === 0) {
       const retryAfter = Number(response.headers.get('retry-after') || 0);
       await sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 2000);
       continue;
@@ -145,7 +173,8 @@ async function deleteVideoQuietly(videoId) {
   try { await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}`, { method: 'DELETE', headers: authHeaders() }); } catch { /* best effort */ }
 }
 
-export async function generateAndHostVideoDetailed(accountId, account, slotId, draft) {
+export async function generateAndHostVideoDetailed(accountId, account, slotId, draft, { now = new Date() } = {}) {
+  assertVideosApiStillAvailable(now);
   const originalPrompt = String(draft?.mediaPrompt || '').trim();
   if (!originalPrompt) throw new Error('AI selected video generation but supplied no mediaPrompt.');
   const model = account.media?.videoModel || 'sora-2';

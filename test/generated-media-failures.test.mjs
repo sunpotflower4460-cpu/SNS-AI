@@ -4,7 +4,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { generateAndHostImageDetailed } from '../src/media/openai-image.mjs';
-import { generateAndHostVideoDetailed } from '../src/media/openai-video.mjs';
+import { generateAndHostVideoDetailed, assertVideosApiStillAvailable, VIDEOS_API_DEPRECATION_DATE } from '../src/media/openai-video.mjs';
 import { cleanupGeneratedAssets, ensurePublicRelease } from '../src/media/release-host.mjs';
 
 const USAGE_FILES = [
@@ -48,6 +48,37 @@ function releaseLookup(target) {
   if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
   return null;
 }
+
+test('the OpenAI Videos API deprecation guard fails closed on/after the confirmed shutdown date, not before', () => {
+  // OpenAI's official deprecations page confirms the entire Videos API (every sora-2/sora-2-pro model
+  // alias) is shut down on this date with no replacement model listed. Verified against a primary
+  // source, not just secondary reporting - see the commit message / audit notes for the citation.
+  assert.doesNotThrow(() => assertVideosApiStillAvailable(new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) - 1)));
+  assert.throws(
+    () => assertVideosApiStillAvailable(new Date(VIDEOS_API_DEPRECATION_DATE)),
+    (error) => error.code === 'PROVIDER_DEPRECATED' && /shut down/.test(error.message)
+  );
+  assert.throws(
+    () => assertVideosApiStillAvailable(new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000)),
+    (error) => error.code === 'PROVIDER_DEPRECATED'
+  );
+});
+
+test('video generation fails closed before any API call once the Videos API deprecation date has passed', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { throw new Error(`No request should have been made: ${url}`); };
+  try {
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-deprecated', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-deprecated', { mediaPrompt: 'a scene' }, { now: new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000) }),
+      (error) => error.code === 'PROVIDER_DEPRECATED'
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test('image generation retries throttling, regenerates after QA failure, and uploads only the corrected result', async () => {
   const previousFetch = globalThis.fetch;
@@ -121,6 +152,118 @@ test('image generation retries throttling, regenerates after QA failure, and upl
     assert.equal(generatedPrompts[1], 'original visual request');
     assert.match(generatedPrompts[2], /QUALITY CORRECTION FOR RETRY 1/);
     assert.match(generatedPrompts[2], /Repair the broken focal object/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
+test('image generation never retries a network exception or a 5xx response, only an explicit 429', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let imageCalls = 0;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/images/generations') {
+        imageCalls += 1;
+        // A network-level failure gives no proof the first call was not already accepted
+        // server-side; retrying it would risk a second, silently paid generation.
+        throw new TypeError('fetch failed: socket hang up');
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostImageDetailed('image-network-exception', {
+        media: { qa: { enabled: false, maxRegenerations: 0 } }, budgets: { enabled: false }
+      }, 'slot-image-network', { mediaPrompt: 'a diagram' }),
+      /socket hang up/
+    );
+    assert.equal(imageCalls, 1, 'a network exception on the generation POST must never be retried');
+    const usage = (await readFile(USAGE_FILES[1], 'utf8')).trim().split('\n').filter(Boolean);
+    assert.equal(usage.length, 1, 'exactly one real attempt was made, so exactly one usage row must be recorded');
+
+    imageCalls = 0;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/images/generations') {
+        imageCalls += 1;
+        // A 5xx can occur after the request was already accepted for processing, unlike a 429
+        // rate-limit rejection - it must be treated as ambiguous too, not retried.
+        return jsonResponse({ error: { message: 'internal error' } }, 500);
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    await assert.rejects(
+      generateAndHostImageDetailed('image-5xx', {
+        media: { qa: { enabled: false, maxRegenerations: 0 } }, budgets: { enabled: false }
+      }, 'slot-image-5xx', { mediaPrompt: 'a diagram' })
+    );
+    assert.equal(imageCalls, 1, 'a 5xx response on the generation POST must never be retried');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
+test('video generation never retries a network exception or a 5xx response, only an explicit 429', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let videoCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        videoCalls += 1;
+        throw new TypeError('fetch failed: socket hang up');
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-network-exception', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-network', { mediaPrompt: 'a scene' }),
+      /socket hang up/
+    );
+    assert.equal(videoCalls, 1, 'a network exception on the video-create POST must never be retried');
+    const usage = (await readFile(USAGE_FILES[1], 'utf8')).trim().split('\n').filter(Boolean);
+    assert.equal(usage.length, 1, 'exactly one real attempt was made, so exactly one usage row must be recorded');
+
+    videoCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        videoCalls += 1;
+        return jsonResponse({ error: { message: 'internal error' } }, 500);
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-5xx', {
+        media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
+        budgets: { enabled: false }
+      }, 'slot-video-5xx', { mediaPrompt: 'a scene' })
+    );
+    assert.equal(videoCalls, 1, 'a 5xx response on the video-create POST must never be retried');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

@@ -81,6 +81,26 @@ test('readiness doctor blocks missing secrets, becomes ready with complete crede
   } finally { restoreEnv(env); }
 });
 
+test('readiness doctor warns about the confirmed OpenAI Videos API shutdown for accounts relying on built-in Reel generation', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram' });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.match(warnings, /Videos API.*2026-09-24/s, 'an account depending on built-in Reel generation must be warned about the confirmed sora-2 shutdown date');
+    });
+  } finally { restoreEnv(env); }
+});
+
 test('maintenance compacts duplicates, archives expired rows, and quarantines malformed JSONL', async () => {
   const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
