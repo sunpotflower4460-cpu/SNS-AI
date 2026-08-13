@@ -55,9 +55,9 @@ async function createVideo(accountId, account, prompt) {
   const size = account.media?.videoSize || '720x1280';
   const seconds = String(Number(account.media?.videoSeconds ?? 8));
   const reusable = await findReusableVideo({ prompt, model, size, seconds });
+  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds), reused: Boolean(reusable) });
   if (reusable) return reusable;
 
-  await consumeUsage(accountId, account, 'video', { model, size, seconds: Number(seconds) });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
