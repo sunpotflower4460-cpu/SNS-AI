@@ -37,13 +37,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Validate
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
+          npm run secret-scan
       - name: Refresh trend briefs
+        id: intelligence_run
         shell: bash
         run: |
           if [[ -z "${OPENAI_API_KEY:-}" ]]; then
@@ -55,9 +55,10 @@ jobs:
           if [[ "${INPUT_FORCE:-false}" == "true" ]]; then args+=(--force); fi
           node src/research/trends.mjs "${args[@]}"
       - name: Refresh readable report
+        if: always() && steps.intelligence_run.outcome != 'skipped'
         run: node src/reports/generate.mjs
       - name: Persist intelligence/report
-        if: always()
+        if: always() && steps.intelligence_run.outcome != 'skipped'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi

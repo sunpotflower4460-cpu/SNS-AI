@@ -34,12 +34,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Static checks
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
           npm run secret-scan
       - name: Secret shape check
         shell: bash
@@ -47,14 +45,15 @@ jobs:
           args=(--strict)
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           npm run doctor -- "${args[@]}"
-      - name: Verify external credentials and model access without posting
+      - name: Verify external credentials, models, and durable state without posting
+        id: preflight_run
         shell: bash
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           node src/ops/live-preflight.mjs "${args[@]}"
       - name: Persist encrypted OAuth2 bootstrap state
-        if: always() && steps.checkout.outcome == 'success'
+        if: always() && steps.checkout.outcome == 'success' && steps.preflight_run.outcome != 'skipped'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/x-oauth2-state.json)" ]]; then

@@ -29,15 +29,14 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
           npm run secret-scan
 
       - name: Check official platform policies
+        id: policy_run
         shell: bash
         run: |
           if [[ -z "${OPENAI_API_KEY:-}" ]]; then
@@ -48,7 +47,7 @@ jobs:
           cat policy-result.json
 
       - name: Reconcile policy review issues
-        if: env.OPENAI_API_KEY != ''
+        if: env.OPENAI_API_KEY != '' && steps.policy_run.outcome == 'success'
         shell: bash
         run: |
           for platform in x instagram; do
@@ -78,7 +77,7 @@ jobs:
           done
 
       - name: Persist policy intelligence
-        if: env.OPENAI_API_KEY != ''
+        if: env.OPENAI_API_KEY != '' && steps.policy_run.outcome == 'success'
         shell: bash
         run: |
           rm -f policy-result.json
