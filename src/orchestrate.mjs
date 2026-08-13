@@ -38,7 +38,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         continue;
       }
 
-      if (!dryRun && account.mode === 'approval') {
+      if (!dryRun && !force && account.mode === 'approval') {
         try {
           const existingIssue = await findApprovalIssue(accountId, slot.slotId);
           if (existingIssue) {
@@ -101,7 +101,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 
         if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
-          const issue = await createApprovalIssue(accountId, slot.slotId, payload); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
+          const issue = await createApprovalIssue(accountId, slot.slotId, payload, { skipLookup: true }); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
           await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending', issue: issue.number, predictedScore: draft.predictedScore }); continue;
         }
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
