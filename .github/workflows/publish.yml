@@ -78,6 +78,9 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
           INPUT_ACCOUNT: ${{ inputs.account }}
           INPUT_TEXT: ${{ inputs.text }}
           INPUT_MEDIA_URL: ${{ inputs.media_url }}
@@ -94,6 +97,11 @@ jobs:
             } catch {
               throw new Error('SNS command issue body must be valid JSON.');
             }
+            if ((process.env.ISSUE_TITLE || '').startsWith('[approval]')) {
+              if (!payload.slotId) throw new Error('Approval issue payload must contain the original slotId.');
+            } else {
+              payload.slotId = `${payload.account}:issue:${process.env.ISSUE_NUMBER}`;
+            }
           } else {
             payload = {
               account: process.env.INPUT_ACCOUNT,
@@ -101,7 +109,8 @@ jobs:
               mediaUrl: process.env.INPUT_MEDIA_URL || undefined,
               mediaType: process.env.INPUT_MEDIA_TYPE || 'image',
               dryRun: String(process.env.INPUT_DRY_RUN).toLowerCase() === 'true',
-              source: 'manual'
+              source: 'manual',
+              slotId: `${process.env.INPUT_ACCOUNT}:workflow:${process.env.RUN_ID}`
             };
           }
           writeFileSync('payload.json', JSON.stringify(payload));
@@ -153,4 +162,4 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Publishing failed. Open the linked Actions run for details."
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ The publishing run failed. The provider may already have accepted the post if the failure happened during response/state persistence, so do not retry blindly. Check the Actions log and durable slot claim first."
