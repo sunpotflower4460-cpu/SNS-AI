@@ -12,8 +12,15 @@ export async function openaiRequest(path, body, meta = {}) {
   const retries = Number(meta.retries ?? 2);
   for (let attempt = 0; ; attempt += 1) {
     if (meta.accountId && meta.account) {
-      // Dry-run previews still call the real API for a faithful preview, but are billed against a
-      // separate per-day counter so repeated previews can never exhaust the account's live posting budget.
+      // Deliberate design decision (see docs/GO_LIVE_CHECKLIST.md and PR history): dry-run previews
+      // still call the real Responses API so an operator can actually see what would be posted before
+      // enabling live mode - a preview that never shows real generated text has limited value, and
+      // "exercises the full decision path" is an explicit test expectation (see
+      // test/top-level-branches.test.mjs). Every OTHER side effect a real publish has is eliminated for
+      // dry-run: no moderation call, no media generation, no approval issue, no state/history/circuit
+      // mutation (see orchestrate.mjs and moderateText() below) - and the one unavoidable cost (the
+      // preview generation call itself) is billed against a separate per-day counter so repeated
+      // previews can never exhaust or interact with the account's live posting budget.
       const budgetAccountId = meta.dryRun ? `${meta.accountId}::dry-run-preview` : meta.accountId;
       await consumeUsage(budgetAccountId, meta.account, 'openai', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
       if (meta.webSearch) await consumeUsage(budgetAccountId, meta.account, 'webSearch', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });

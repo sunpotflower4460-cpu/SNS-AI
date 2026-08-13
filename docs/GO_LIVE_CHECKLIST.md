@@ -102,6 +102,7 @@ Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを�
 - [ ] Live Preflight `ready`
 - [ ] Live Preflight `durableState.ok === true`
 - [ ] Autopilot `force=true / dry_run=true` success
+  - dry_runは実際にOpenAIの生成APIを呼びます（draft確認のため意図的な仕様）。moderation・media生成・publish・approval issue作成・state/circuit更新は一切行わず、生成コストは本番の日次予算とは別カウンタで計上されます。
 - [ ] generated draftを確認
 - [ ] media利用時controlled generation success
 - [ ] approval modeで実投稿1件success
