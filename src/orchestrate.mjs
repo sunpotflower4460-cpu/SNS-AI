@@ -170,18 +170,33 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
         }).catch(() => {});
         const status = autopilotErrorStatus(error);
-        // PROVIDER_DEPRECATED and MEDIA_HOSTING_TOO_LARGE are both excluded from the resilience circuit
-        // (see nonCircuitCodes above) precisely because they are config/lifecycle problems, not transient
-        // outages - but that also means nothing else stops the SAME due slot from re-paying for a full
-        // generatePost() call on every subsequent poll within its scheduling window (autopilot.yml runs
-        // every 10 minutes). Persisting a terminal 'skipped' state bounds that waste to at most one paid
-        // attempt per slot per window, without an early pre-generation guard: an early guard here would
-        // (a) also block legitimate dry-run previews, which must still exercise the full decision path per
-        // the documented preview-fidelity design, and (b) make the cache-hit-before-deprecation-guard path
-        // inside generateAndHostVideoDetailed unreachable, since the cache key depends on the AI-generated
-        // mediaPrompt that only exists after generatePost() has already run.
-        if (!dryRun && (status === 'provider-deprecated' || status === 'media-too-large')) {
-          await markSlot(slot.slotId, 'skipped', { account: accountId, reason: status, error: error.message }).catch(() => {});
+        // PROVIDER_DEPRECATED, MEDIA_HOSTING_TOO_LARGE, and MEDIA_QA_INPUT_TOO_LARGE are all excluded
+        // from the resilience circuit (see nonCircuitCodes above) precisely because they are
+        // config/lifecycle problems, not transient outages - but that also means nothing else stops the
+        // SAME due slot from re-paying for a full generatePost() call on every subsequent poll within its
+        // scheduling window (autopilot.yml runs every 10 minutes). Persisting a terminal 'skipped' state
+        // bounds that waste to at most one paid attempt per slot per window, without an early
+        // pre-generation guard: an early guard here would (a) also block legitimate dry-run previews,
+        // which must still exercise the full decision path per the documented preview-fidelity design,
+        // and (b) make the cache-hit-before-deprecation-guard path inside generateAndHostVideoDetailed
+        // unreachable, since the cache key depends on the AI-generated mediaPrompt that only exists after
+        // generatePost() has already run. Matched on error.code (not the aggregated `status` string) so
+        // MEDIA_QA_FAILED - a genuine content-quality rejection that a fresh regeneration attempt with
+        // different AI-generated content might actually pass - is deliberately NOT included here, even
+        // though it shares the 'media-qa-failed' status with MEDIA_QA_INPUT_TOO_LARGE.
+        const TERMINAL_SKIP_CODES = new Set(['PROVIDER_DEPRECATED', 'MEDIA_HOSTING_TOO_LARGE', 'MEDIA_QA_INPUT_TOO_LARGE']);
+        if (!dryRun && TERMINAL_SKIP_CODES.has(error.code)) {
+          try {
+            await markSlot(slot.slotId, 'skipped', { account: accountId, reason: status, error: error.message });
+          } catch (persistError) {
+            // If the terminal skip itself can't be persisted (e.g. data/state.json is unwritable), the
+            // whole point of it - bounding wasted repeat generation cost - is silently defeated, and
+            // `status` here is deliberately non-fatal so the run would otherwise finish green while the
+            // same slot keeps regenerating on every future poll. Surface this as a fatal state-error
+            // instead of swallowing it, so a human notices.
+            report.push({ account: accountId, slot: slot.slotId, status: 'state-error', error: `Failed to persist terminal skip for ${status}: ${String(persistError.message || persistError)}` });
+            continue;
+          }
         }
         report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }

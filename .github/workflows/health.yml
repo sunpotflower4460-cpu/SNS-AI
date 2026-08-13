@@ -36,6 +36,11 @@ jobs:
         id: health_run
         run: npm run doctor -- --write
       - name: Report stuck durable publish claims
+        # This is an independent diagnostic, not dependent on the preceding steps' outcomes - a
+        # persistent config/static-check failure (or a readiness-report failure) must not silently
+        # suppress the one thing that surfaces slots stuck in publishing/publish_unknown, precisely on
+        # the days the health job is already unhealthy and most needs visibility.
+        if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run stale-claims

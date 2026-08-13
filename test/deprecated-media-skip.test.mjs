@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { runAutopilot } from '../src/orchestrate.mjs';
 
 // Regression coverage for: once the confirmed OpenAI Videos API shutdown date passes, an account whose
@@ -90,6 +91,11 @@ function generationResponse(mediaDecision) {
 // FIRST_POLL and SECOND_POLL, exactly like two real autopilot.yml runs 10 minutes apart would see.
 const FIRST_POLL = new Date('2026-09-24T23:15:00Z'); // 2026-09-25 08:15 JST
 const SECOND_POLL = new Date('2026-09-24T23:25:00Z'); // 2026-09-25 08:25 JST
+// Same two-polls-in-one-window trick, but BEFORE the shutdown date - needed for scenarios (QA-input
+// oversize, the persistence-failure test) that must reach past the deprecation guard to hit a different
+// deterministic failure, which a post-shutdown `now` would short-circuit before ever getting there.
+const FIRST_POLL_PRE_SHUTDOWN = new Date('2026-08-13T23:15:00Z'); // 2026-08-14 08:15 JST
+const SECOND_POLL_PRE_SHUTDOWN = new Date('2026-08-13T23:25:00Z'); // 2026-08-14 08:25 JST
 
 test('a live PROVIDER_DEPRECATED failure marks the slot skipped, so the next poll within the same window does not re-pay for generation', async () => {
   const previousFetch = globalThis.fetch;
@@ -127,6 +133,128 @@ test('a live PROVIDER_DEPRECATED failure marks the slot skipped, so the next pol
     const secondReport = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: SECOND_POLL });
     assert.equal(secondReport[0].status, 'already-handled', `expected the second poll (same due window) to see the slot already handled, got: ${JSON.stringify(secondReport[0])}`);
     assert.equal(generateCalls, 1, 'the second poll within the same scheduling window must NOT pay for a second generatePost() call');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+  }
+});
+
+test('an oversized QA preview (a deterministic config problem, not a content-quality one) also marks the slot skipped', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_REF_NAME');
+  const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+    const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
+    config.accounts['deprecated-media-ig'] = {
+      ...account('generate'),
+      media: { ...account('generate').media, qa: { enabled: true, maxInputBytes: 10, maxRegenerations: 0 } }
+    };
+    await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
+    process.env.GH_TOKEN = 'test-gh-token';
+    delete process.env.GITHUB_TOKEN;
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_REF_NAME = 'main';
+
+    let generateCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target === 'https://api.openai.com/v1/responses') { generateCalls += 1; return generationResponse('generate'); }
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') return jsonResponse({ id: 7, assets: [] });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
+      if (target.startsWith('https://api.github.com/repos/owner/repo/contents/data/durable-claims/')) return jsonResponse({ message: 'Not Found' }, 404);
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') return jsonResponse({ id: 'video-qa-oversize-e2e', status: 'completed' });
+      // Both preview variants exceed the tiny maxInputBytes above - a deterministic config-tuning
+      // failure (raise qa.maxInputBytes), not a content-quality rejection that might pass on retry.
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize-e2e/content?variant=spritesheet') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize-e2e/content?variant=thumbnail') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize-e2e' && options.method === 'DELETE') return new Response(null, { status: 204 });
+      throw new Error(`Unexpected mocked URL: ${target} ${options.method || 'GET'}`);
+    };
+
+    const firstReport = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: FIRST_POLL_PRE_SHUTDOWN });
+    assert.equal(firstReport[0].status, 'media-qa-failed', `expected the first poll to fail with media-qa-failed, got: ${JSON.stringify(firstReport[0])}`);
+    assert.equal(generateCalls, 1);
+
+    const secondReport = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: SECOND_POLL_PRE_SHUTDOWN });
+    assert.equal(secondReport[0].status, 'already-handled', `expected the second poll to see the slot already handled, got: ${JSON.stringify(secondReport[0])}`);
+    assert.equal(generateCalls, 1, 'the second poll must NOT pay for a second generatePost() call for a deterministic QA-input-size failure');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+  }
+});
+
+test('if persisting the terminal skip itself fails, the run surfaces a fatal state-error instead of silently finishing green', async (t) => {
+  const STATE_FILE = fileURLToPath(new URL('../data/state.json', import.meta.url));
+  // Root bypasses ordinary chmod-based permission denial, so the immutable filesystem attribute (which
+  // even root cannot write through without first clearing it) is the only reliable way to force this
+  // write to fail in a sandboxed environment - but it needs the underlying filesystem's support, which
+  // isn't guaranteed (e.g. some container/overlay filesystems silently ignore it), so this is verified
+  // with a real round-trip probe rather than assumed from the `chattr` command merely existing.
+  const probePath = fileURLToPath(new URL('../data/.chattr-probe.tmp', import.meta.url));
+  let chattrSupported = false;
+  try {
+    await writeFile(probePath, 'probe', 'utf8');
+    execFileSync('chattr', ['+i', probePath]);
+    try { await writeFile(probePath, 'should fail', 'utf8'); }
+    catch { chattrSupported = true; }
+  } catch { chattrSupported = false; }
+  finally {
+    try { execFileSync('chattr', ['-i', probePath]); } catch { /* ignore */ }
+    await rm(probePath, { force: true });
+  }
+  if (!chattrSupported) { t.skip('chattr immutable-attribute is not enforced in this environment'); return; }
+
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_REF_NAME');
+  const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await installAccount('generate');
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
+    process.env.GH_TOKEN = 'test-gh-token';
+    delete process.env.GITHUB_TOKEN;
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_REF_NAME = 'main';
+
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.openai.com/v1/responses') return generationResponse('generate');
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') return jsonResponse({ id: 7, assets: [] });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
+      if (target.startsWith('https://api.github.com/repos/owner/repo/contents/data/durable-claims/')) return jsonResponse({ message: 'Not Found' }, 404);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    // markSlot ultimately writes data/state.json via a temp-file-then-rename; the immutable attribute
+    // makes that rename fail with EPERM even for root, unlike a plain chmod (which root bypasses) -
+    // this is the only reliable way to force the write itself to fail in this sandboxed environment.
+    await writeFile(STATE_FILE, `${JSON.stringify({ slots: {} }, null, 2)}\n`, 'utf8');
+    execFileSync('chattr', ['+i', STATE_FILE]);
+    try {
+      const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: FIRST_POLL });
+      assert.equal(report[0].status, 'state-error', `expected a fatal state-error when the terminal skip can't be persisted, got: ${JSON.stringify(report[0])}`);
+      assert.match(report[0].error, /Failed to persist terminal skip/);
+    } finally {
+      execFileSync('chattr', ['-i', STATE_FILE]);
+    }
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
