@@ -53,11 +53,10 @@ function approvalTitle(accountId, slotId) {
 
 export async function findApprovalIssue(accountId, slotId) {
   const { repository } = githubContext();
+  const [owner, repo] = repository.split('/');
   const title = approvalTitle(accountId, slotId);
-  const safeTitle = title.replace(/"/g, '');
-  const q = encodeURIComponent(`repo:${repository} is:issue in:title "${safeTitle}"`);
-  const result = await githubRequest(`/search/issues?q=${q}&per_page=20`);
-  return (result.items || []).find((item) => item.title === title) || null;
+  const issues = await githubRequest(`/repos/${owner}/${repo}/issues?state=all&per_page=100&sort=created&direction=desc`);
+  return (issues || []).find((item) => !item.pull_request && item.title === title) || null;
 }
 
 export async function createApprovalIssue(accountId, slotId, payload) {
