@@ -249,6 +249,10 @@ test('approval mode creates an approval issue and X media preflight validates OA
         if (target === 'https://api.openai.com/v1/models/gpt-5') {
           return jsonResponse({ id: 'gpt-5', owned_by: 'openai' });
         }
+        if (target.startsWith('https://api.github.com/repos/owner/repo/issues?state=open') && !options.method) {
+          githubCalls.push('issue-lookup');
+          return jsonResponse([]);
+        }
         if (target === 'https://api.github.com/repos/owner/repo/labels/approved') {
           githubCalls.push('label-get');
           return jsonResponse({ message: 'Not Found' }, 404);
@@ -281,7 +285,7 @@ test('approval mode creates an approval issue and X media preflight validates OA
       assert.equal(approval.length, 1);
       assert.equal(approval[0].status, 'approval-pending');
       assert.equal(approval[0].issue, 77);
-      assert.deepEqual(githubCalls, ['label-get', 'label-create', 'issue-create']);
+      assert.deepEqual(githubCalls, ['issue-lookup', 'issue-lookup', 'label-get', 'label-create', 'issue-create']);
       const slot = await getSlot('example-x:manual:2026-08-13T00:00');
       assert.equal(slot?.status, 'approval_pending');
 
