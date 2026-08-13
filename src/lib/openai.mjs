@@ -102,7 +102,8 @@ export async function moderateText(text, account, accountId) {
   if (account.safety?.moderation === false) return { flagged: false };
   const response = await openaiRequest('/moderations', { model: account.safety?.moderationModel || 'omni-moderation-latest', input: text }, { accountId, account, operation: 'moderation', retries: 1 });
   const result = response.results?.[0];
-  if (result?.flagged) {
+  if (!result) throw new Error('Moderation returned no result.');
+  if (result.flagged) {
     const flagged = Object.entries(result.categories || {}).filter(([, value]) => value).map(([key]) => key);
     throw new Error(`Moderation blocked generated post: ${flagged.join(', ') || 'flagged'}`);
   }
