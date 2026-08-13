@@ -1,0 +1,10 @@
+{
+  "accounts": {
+    "image-moderation-empty": {
+      "localDate": "2026-08-13",
+      "counts": {
+        "openai": 1
+      }
+    }
+  }
+}
