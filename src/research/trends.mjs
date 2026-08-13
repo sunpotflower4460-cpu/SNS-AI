@@ -11,6 +11,7 @@ function fresh(brief, hours) { return brief?.generatedAt && Date.now() - new Dat
 
 export async function refreshTrends({ accountFilter, force = false } = {}) {
   const accounts = await loadAccounts(); const report = [];
+  if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue;
     if (!account.enabled || account.research?.trendIntelligence !== true) continue;
