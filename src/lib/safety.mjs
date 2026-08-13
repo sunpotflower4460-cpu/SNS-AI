@@ -11,11 +11,14 @@ function urlsIn(text) {
   }).filter(Boolean);
 }
 
-export function validateDraftText(account, text) {
+export function validateDraftText(account, text, { requireNonEmpty = true } = {}) {
   const value = String(text || '').trim();
-  if (!value) throw new Error('AI generated an empty post.');
-  const limit = platformTextLimit(account);
-  if (value.length > limit) throw new Error(`Generated text is ${value.length} characters, over configured limit ${limit}.`);
+  if (!value) {
+    if (requireNonEmpty) throw new Error('AI generated an empty post.');
+  } else {
+    const limit = platformTextLimit(account);
+    if (value.length > limit) throw new Error(`Generated text is ${value.length} characters, over configured limit ${limit}.`);
+  }
 
   const safety = account.safety || {};
   const blocked = safety.blockedPhrases || [];
@@ -64,7 +67,9 @@ export function checkRateLimits(accountId, account, history, now = new Date()) {
 
   if (latest) {
     const elapsed = (now.getTime() - Date.parse(latest.at)) / 60000;
-    if (elapsed < minMinutes) return { ok: false, reason: `minimum interval not met (${Math.floor(elapsed)}m < ${minMinutes}m)` };
+    if (!Number.isFinite(elapsed) || elapsed < minMinutes) {
+      return { ok: false, reason: Number.isFinite(elapsed) ? `minimum interval not met (${Math.floor(elapsed)}m < ${minMinutes}m)` : 'last post timestamp is unparseable' };
+    }
   }
   return { ok: true };
 }
