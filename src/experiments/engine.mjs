@@ -32,7 +32,7 @@ export async function ensureExperiment(accountId, account, strategy) {
   if (Number(strategy?.sampleSize || 0) < Number(account.experiments?.minimumStrategySamples ?? 6)) return null;
   const dimensions = (account.experiments?.dimensions || Object.keys(DEFAULT_VARIANTS)).filter((d) => DEFAULT_VARIANTS[d]);
   if (!dimensions.length) return null;
-  const round = (state.completed || []).length;
+  const round = state.completedCount ?? (state.completed || []).length;
   const dimension = dimensions[round % dimensions.length];
   const variants = variantsFor(account, dimension);
   const active = {
@@ -82,6 +82,11 @@ export async function evaluateExperiment(accountId, account, history, snapshots)
     scoreGap: Math.round(gap * 10) / 10,
     confidence: enough ? Math.min(1, Math.round((Math.min(...Object.values(stats).map((x) => x.n)) / Math.max(3, experiment.minSamplesPerVariant * 2)) * 100) / 100) : 0
   };
-  await saveExperimentState(accountId, { account: accountId, active: null, completed: [...(state.completed || []), completed] });
+  await saveExperimentState(accountId, {
+    account: accountId,
+    active: null,
+    completed: [...(state.completed || []), completed],
+    completedCount: (state.completedCount ?? (state.completed || []).length) + 1
+  });
   return { status: completed.status, experiment: completed, stats };
 }
