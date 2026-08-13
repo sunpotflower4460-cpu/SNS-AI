@@ -9,7 +9,19 @@ const STUCK_STATUSES = new Set(['publishing', 'publish_unknown']);
 // timeout and would burn through the GitHub API rate limit on its own as the claim count grows into the
 // thousands. Bounded to a small constant so this stays a good API citizen rather than firing hundreds of
 // concurrent requests at once. Read lazily (not a module-load-time const) so tests can override it.
-function blobFetchConcurrency() { return Math.max(1, Number(process.env.STALE_CLAIMS_BLOB_CONCURRENCY || 8)); }
+const DEFAULT_BLOB_FETCH_CONCURRENCY = 8;
+const MAX_BLOB_FETCH_CONCURRENCY = 16;
+function blobFetchConcurrency() {
+  // A malformed value (e.g. "abc") makes Number(...) return NaN. Math.max(1, NaN) is ALSO NaN (NaN
+  // poisons any arithmetic comparison), which used to flow into mapWithConcurrency's
+  // Array.from({length: NaN}) - that silently produces ZERO workers, so every claim blob would go
+  // unevaluated and the report would come back "stuck: []" even with real stuck claims sitting there.
+  // Reject anything that isn't a positive integer instead of letting it degrade into a silent no-op, and
+  // cap an oversized value so a mistyped env var can't fire hundreds of concurrent requests either.
+  const configured = Number(process.env.STALE_CLAIMS_BLOB_CONCURRENCY);
+  if (!Number.isInteger(configured) || configured <= 0) return DEFAULT_BLOB_FETCH_CONCURRENCY;
+  return Math.min(configured, MAX_BLOB_FETCH_CONCURRENCY);
+}
 
 function decodeBlob(blob) {
   const decoded = Buffer.from(String(blob.content || '').replace(/\n/g, ''), 'base64').toString('utf8');

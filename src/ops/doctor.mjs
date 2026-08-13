@@ -59,8 +59,18 @@ function usesBuiltInMedia(account) {
 // 'auto' can reach it too whenever the AI-chosen mediaDecision is 'generate', or 'library' with an
 // empty pool - so this must NOT be gated on "no library configured" the way the existing
 // library/endpoint/built-in fallback warning below it is.
-function usesBuiltInVideoGeneration(account) {
+export function usesBuiltInVideoGeneration(account) {
   return (account.media?.type || 'image') === 'reel' && usesBuiltInMedia(account);
+}
+
+// A STRICT subset of usesBuiltInVideoGeneration above: true only when built-in video generation is
+// UNCONDITIONALLY reached (strategy: 'generate'), never merely possible ('auto', where the AI might
+// instead pick 'library'/'none' and still succeed without ever calling the Videos API). Callers that
+// need to skip a real, paid call ahead of time - not just warn about it - must gate on this stricter
+// check: gating on the broader usesBuiltInVideoGeneration would incorrectly block 'auto' accounts that
+// could still have published successfully via a non-video path.
+export function alwaysUsesBuiltInVideoGeneration(account) {
+  return (account.media?.type || 'image') === 'reel' && (account.media?.strategy || 'none') === 'generate' && usesBuiltInMedia(account);
 }
 
 function usesOpenAI(account) {
@@ -90,7 +100,7 @@ function budgetWarnings(account) {
   return warnings;
 }
 
-function mediaReadiness(account) {
+function mediaReadiness(account, { now = Date.now() } = {}) {
   const media = account.media || {};
   const strategy = media.strategy || 'none';
   const mediaType = media.type || 'image';
@@ -103,7 +113,7 @@ function mediaReadiness(account) {
     // pool/fixed/external/endpoint strategies resolve existing media URLs and never call the Videos
     // API (see src/lib/media.mjs) - only 'auto'/'generate' without an HTTPS endpoint can actually
     // reach built-in video generation, matching usesBuiltInMedia()'s own predicate.
-    if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
+    if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft(now) <= 0 ? blockers : warnings).push(videosApiDeprecationMessage(now));
     return { blockers, warnings };
   }
   if (account.platform !== 'instagram') return { blockers, warnings };
@@ -124,13 +134,13 @@ function mediaReadiness(account) {
   }
   // Unlike the fallback warning above, this must NOT be gated on "no library configured": 'generate'
   // always uses built-in video generation regardless of a configured library, and 'auto' can too.
-  if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
+  if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft(now) <= 0 ? blockers : warnings).push(videosApiDeprecationMessage(now));
   warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };
 }
 
-export async function buildReadinessReport({ accountFilter } = {}) {
+export async function buildReadinessReport({ accountFilter, now = Date.now() } = {}) {
   const config = await loadConfig();
   const accounts = await loadAccounts();
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
@@ -163,7 +173,7 @@ export async function buildReadinessReport({ accountFilter } = {}) {
           warnings.push(...expiry.warnings);
         }
       }
-      const media = mediaReadiness(account);
+      const media = mediaReadiness(account, { now });
       blockers.push(...media.blockers);
       warnings.push(...media.warnings);
     } else if (!account.enabled || account.mode === 'pause') {

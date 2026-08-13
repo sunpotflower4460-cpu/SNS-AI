@@ -42,12 +42,15 @@ function createStatefulContentsMock() {
       const path = decodeURIComponent(pathMatch[1]);
       const method = (options.method || 'GET').toUpperCase();
       if (method === 'GET') {
-        // A small real delay (not just a microtask tick) forces BOTH racing callers' reads to genuinely
-        // overlap in flight, rather than relying on incidental microtask-ordering of the current call
-        // chain's await points - so this stays a real interleaving test even if a future refactor
-        // changes how many awaits sit between the read and the write.
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        // The snapshot MUST be captured before the delay, not after: if it were read after waking up,
+        // the first caller's PUT (which has no artificial delay) could complete and mutate `store`
+        // during the second caller's wait, so the second caller would read the ALREADY-WRITTEN state
+        // instead of a genuine pre-write snapshot - silently turning this into a sequential
+        // read-after-write test that never exercises the sha-conflict path at all. Capturing here and
+        // only delaying the response delivery is what actually forces both callers to have raced from
+        // the same pre-write view, regardless of which one's timer fires first.
         const row = store.get(path);
+        await new Promise((resolve) => setTimeout(resolve, 5));
         if (!row) return jsonResponse({ message: 'Not Found' }, 404);
         return jsonResponse({ content: row.content, sha: row.sha });
       }
@@ -109,9 +112,13 @@ test('two concurrent beginPublishClaim() calls for the same slot against a real 
       assert.equal(loserOutcome.claimed, false);
     }
 
-    // Exactly one PUT should have actually created the claim; a second racing PUT is expected (that's
-    // the conflict the mock rejects with 409/422) but no THIRD blind write should ever happen.
-    assert.ok(mock.putCount() <= 2, `expected at most 2 PUT attempts (winner's create + loser's rejected create), got ${mock.putCount()}`);
+    // Because both callers' GET snapshots are captured before the artificial network delay (see the
+    // mock above), they are guaranteed to race from the same pre-write view every run - so this must be
+    // exactly 2 PUTs (winner's create + loser's rejected create) every time, not just "at most 2". A
+    // loose upper bound would still pass even if timing accidentally let the loser observe the winner's
+    // write during its own GET and skip the PUT conflict entirely (putCount === 1), silently degrading
+    // this into a test that never actually exercises the sha-conflict path.
+    assert.equal(mock.putCount(), 2, `expected exactly 2 PUT attempts (winner's create + loser's rejected create), got ${mock.putCount()}`);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

@@ -12,6 +12,13 @@ import { generateWeeklyReport } from '../src/reports/weekly.mjs';
 import { recordFeedback } from '../src/feedback/record.mjs';
 import { recentHumanFeedback } from '../src/feedback/store.mjs';
 
+// Every readiness assertion below that checks for the pre-shutdown WARNING wording (as opposed to
+// specifically testing the warning->blocker escalation itself) must pin `now` before
+// VIDEOS_API_DEPRECATION_DATE - otherwise, once the real wall clock crosses that date, buildReadinessReport
+// would correctly move the message from `warnings` to `blockers` (see the escalation test below) and these
+// unrelated readiness-shape assertions would start failing at the wrong layer.
+const PRE_DEPRECATION_NOW = Date.parse(VIDEOS_API_DEPRECATION_DATE) - 86_400_000;
+
 const CONFIG = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
 const FILES = [
   '../data/history.jsonl', '../data/metrics.jsonl', '../data/usage.jsonl', '../data/audit.jsonl',
@@ -95,7 +102,7 @@ test('readiness doctor warns about the confirmed OpenAI Videos API shutdown for 
       process.env.OPENAI_API_KEY = 'k';
       process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
 
-      const report = await buildReadinessReport({ accountFilter: 'example-instagram' });
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: PRE_DEPRECATION_NOW });
       const warnings = report.accounts[0].warnings.join(' ');
       assert.match(warnings, /Videos API.*2026-09-24/s, 'an account depending on built-in Reel generation must be warned about the confirmed sora-2 shutdown date');
     });
@@ -143,7 +150,7 @@ test('readiness doctor warns an Instagram Reel account about the Videos API shut
       process.env.OPENAI_API_KEY = 'k';
       process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
 
-      const report = await buildReadinessReport({ accountFilter: 'example-instagram' });
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: PRE_DEPRECATION_NOW });
       const warnings = report.accounts[0].warnings.join(' ');
       assert.match(warnings, /Videos API.*2026-09-24/s, 'a configured library must not suppress the Videos API shutdown warning for strategy: generate');
     });
@@ -164,6 +171,29 @@ test('the Videos API deprecation message escalates from a warning to an actionab
   assert.match(doctorTest.videosApiDeprecationMessage(beforeDate), /scheduled for shutdown/);
   assert.match(doctorTest.videosApiDeprecationMessage(onDate), /was shut down/);
   assert.match(doctorTest.videosApiDeprecationMessage(afterDate), /was shut down/);
+});
+
+test('buildReadinessReport itself (not just the low-level message helpers) moves the Videos API notice from warnings to blockers once now passes the shutdown date', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        media: { strategy: 'generate', type: 'reel', internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const afterShutdown = Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000;
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram', now: afterShutdown });
+      const row = report.accounts[0];
+      assert.match(row.blockers.join(' '), /Videos API.*was shut down/, 'past the shutdown date, the notice must be an actionable blocker, not just a warning');
+      assert.doesNotMatch(row.warnings.join(' '), /Videos API/, 'the notice must not also linger in warnings once it has escalated to a blocker');
+      assert.equal(row.ready, false, 'an account that can no longer publish must not be reported as ready');
+    });
+  } finally { restoreEnv(env); }
 });
 
 test('maintenance compacts duplicates, archives expired rows, and quarantines malformed JSONL', async () => {

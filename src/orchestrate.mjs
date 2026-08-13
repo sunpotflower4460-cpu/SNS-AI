@@ -14,6 +14,8 @@ import { loadExperimentState } from './experiments/store.mjs';
 import { assignmentForSlot } from './experiments/engine.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
 import { assertAutonomyBrakeClear } from './ops/brake.mjs';
+import { alwaysUsesBuiltInVideoGeneration } from './ops/doctor.mjs';
+import { assertVideosApiStillAvailable } from './media/openai-video.mjs';
 import { publish } from './publish.mjs';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
@@ -111,6 +113,24 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         continue;
       }
       if (!rate.ok) { report.push({ account: accountId, slot: slot.slotId, status: 'rate-limited', reason: rate.reason }); continue; }
+
+      // For an account whose Reel strategy UNCONDITIONALLY reaches built-in video generation
+      // ('generate' - see alwaysUsesBuiltInVideoGeneration), the eventual PROVIDER_DEPRECATED failure
+      // inside generateAndHostVideoDetailed is not a maybe - it is certain. Without this early,
+      // zero-cost check, autopilot.yml's every-10-minutes schedule would keep paying for a fresh
+      // generatePost() call for the same due slot (and again for every future day's slot) forever,
+      // with zero chance of ever publishing, since the Videos API shutdown never self-heals. 'auto'
+      // accounts are deliberately NOT gated here - the AI might still pick 'library'/'none' and
+      // publish successfully, so blocking them ahead of time would incorrectly suppress a real chance
+      // to publish; they keep hitting the existing post-generation guard as before.
+      if (alwaysUsesBuiltInVideoGeneration(account)) {
+        try { assertVideosApiStillAvailable(now); }
+        catch (error) {
+          report.push({ account: accountId, slot: slot.slotId, status: autopilotErrorStatus(error), error: error.message });
+          await appendAudit({ account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null, error: String(error.message || error).slice(0, 500), dryRun }).catch(() => {});
+          continue;
+        }
+      }
 
       const experimentAssignment = assignmentForSlot(experimentState?.active, slot.slotId);
       try {

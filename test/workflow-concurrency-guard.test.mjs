@@ -33,7 +33,11 @@ function persistsRepoState(yaml) {
   // `git commit -a` (or `-am`/`--all`) stages every already-tracked modified file, which silently
   // includes any tracked data/ changes even with no explicit `data/` pathspec anywhere on the line.
   const commitsAllTracked = /git\s+commit\s+(?:\S+\s+)*(?:-a[m]?\b|--all\b)/.test(yaml);
-  return addsDataPath || commitsDataPath || commitsAllTracked;
+  // `git add -A` / `git add --all` with NO pathspec at all also silently stages every tracked-and-
+  // untracked change repo-wide (including data/), same as `git commit -a` does for already-tracked
+  // files - a bare "-A"/"--all" is not itself the literal "data/" pathspec addsDataPath looks for.
+  const addsAllTracked = /git\s+add\s+(?:\S+\s+)*(?:-A\b|--all\b)/.test(yaml);
+  return addsDataPath || commitsDataPath || commitsAllTracked || addsAllTracked;
 }
 
 function declaresConcurrencyGroup(yaml, group) {
@@ -90,6 +94,11 @@ test('sanity: persistsRepoState recognizes flagged git add/commit variants, not 
   assert.equal(persistsRepoState('run: |\n  git add data/report.json\n  git commit -m "x" data/report.json\n'), true);
   assert.equal(persistsRepoState('run: |\n  git add data/report.json\n  git commit -am "x"\n'), true);
   assert.equal(persistsRepoState('run: |\n  git add src/index.mjs\n  git commit -m "unrelated code change"\n'), false);
+  // A bare `-A`/`--all` with NO pathspec stages every tracked-and-untracked change repo-wide, including
+  // data/, even though "data/" never literally appears on the `git add` line - the same blind spot
+  // `git commit -a` has, just on the add side instead of the commit side.
+  assert.equal(persistsRepoState('run: |\n  git add -A\n  git commit -m "x"\n'), true);
+  assert.equal(persistsRepoState('run: |\n  git add --all\n  git commit -m "x"\n'), true);
 });
 
 test('sanity: declaresCancelInProgressFalse is not fooled by an unrelated job-level concurrency block', () => {

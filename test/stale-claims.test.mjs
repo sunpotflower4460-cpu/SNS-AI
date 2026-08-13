@@ -216,3 +216,47 @@ test('findStuckClaims fetches claim blobs with bounded concurrency, not one at a
     restoreEnv(env);
   }
 });
+
+test('a malformed or oversized STALE_CLAIMS_BLOB_CONCURRENCY falls back to a safe default instead of silently skipping every claim', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY', 'STALE_CLAIMS_BLOB_CONCURRENCY');
+  process.env.GITHUB_TOKEN = 'test-token';
+  delete process.env.GH_TOKEN;
+  process.env.GITHUB_REPOSITORY = 'owner/repo';
+  const stuckClaim = { slotId: 'acct-a:2026-08-01:08:00', account: 'acct-a', platform: 'x', status: 'publishing', createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' };
+  const fetchFor = async (url) => {
+    const target = String(url);
+    if (target === 'https://api.github.com/repos/owner/repo/branches/sns-ai-state') return branchResponse('tree-sha');
+    if (target === 'https://api.github.com/repos/owner/repo/git/trees/tree-sha?recursive=1') {
+      return jsonResponse({ truncated: false, tree: [{ path: 'data/durable-claims/claim-0.json', type: 'blob', sha: 'blob-0' }] });
+    }
+    if (target === 'https://api.github.com/repos/owner/repo/git/blobs/blob-0') return jsonResponse({ content: encodeClaim(stuckClaim) });
+    throw new Error(`Unexpected mocked URL: ${target}`);
+  };
+  try {
+    globalThis.fetch = fetchFor;
+    // Number('abc') is NaN, and Math.max(1, NaN) is ALSO NaN (NaN poisons the comparison) - this used
+    // to flow straight into Array.from({length: NaN}), which silently creates ZERO workers. The blob
+    // would never be fetched and the report would come back "stuck: []" even though a genuinely stuck
+    // claim exists in the tree - a silent no-op is worse than a crash here, since it masks a real
+    // problem as "all clear".
+    process.env.STALE_CLAIMS_BLOB_CONCURRENCY = 'abc';
+    const malformed = await findStuckClaims({ maxAgeHours: 3 });
+    assert.equal(malformed.stuck.length, 1, 'a malformed concurrency setting must still fall back to a safe default and evaluate every blob');
+    assert.equal(malformed.stuck[0].slotId, stuckClaim.slotId);
+
+    process.env.STALE_CLAIMS_BLOB_CONCURRENCY = '0';
+    const zero = await findStuckClaims({ maxAgeHours: 3 });
+    assert.equal(zero.stuck.length, 1, 'a zero concurrency setting must also fall back to the default, not spawn zero workers');
+
+    // An oversized value must be capped, not taken at face value - otherwise a mistyped env var (e.g. an
+    // extra zero) could fire one concurrent request per accumulated claim and defeat the whole point of
+    // bounding the fetch loop.
+    process.env.STALE_CLAIMS_BLOB_CONCURRENCY = '100000';
+    const oversized = await findStuckClaims({ maxAgeHours: 3 });
+    assert.equal(oversized.stuck.length, 1, 'an oversized concurrency setting must still evaluate every blob (capped internally, not rejected)');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
