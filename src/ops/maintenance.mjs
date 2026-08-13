@@ -17,6 +17,14 @@ const SPECS = [
   ['data/audit.jsonl', 'auditRetentionDays', 'at', 'audit']
 ];
 
+// Dry-run preview usage rows are recorded under a synthetic "<accountId>::dry-run-preview" account key
+// (see src/lib/openai.mjs) so preview cost never shares a budget bucket with the real account. That
+// key is not a real entry in config/accounts.json, though - without stripping the suffix here, every
+// preview row would silently fall back to the global default retention regardless of what the real
+// account's own maintenance.usageRetentionDays says, which could retain preview cost-tracking data far
+// longer than an operator who intentionally shortened retention (e.g. for a data-sensitivity reason)
+// would expect.
+function baseAccountId(accountId) { return String(accountId || '').replace(/::dry-run-preview$/, ''); }
 function hash(value) { return createHash('sha256').update(value).digest('hex'); }
 function monthOf(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'unknown' : date.toISOString().slice(0, 7); }
 function keyFor(row, type) { return `${monthOf(row.at || row.collectedAt)}|${type}|${row.account || '_global'}|${row.status || row.kind || row.stage || '_'}`; }
@@ -57,7 +65,10 @@ export async function runMaintenance() {
   const results = []; const quarantined = [];
   for (const [relative, retentionKey, dateKey, type] of SPECS) {
     const path = join(ROOT, relative);
-    const retentionForRow = (row) => row?.account && accounts[row.account]?.maintenance?.[retentionKey] != null ? accounts[row.account].maintenance[retentionKey] : (defaults[retentionKey] ?? 180);
+    const retentionForRow = (row) => {
+      const account = row?.account && accounts[baseAccountId(row.account)];
+      return account?.maintenance?.[retentionKey] != null ? account.maintenance[retentionKey] : (defaults[retentionKey] ?? 180);
+    };
     const result = await compactFile(path, retentionForRow, dateKey, type, archive);
     results.push({ ...result, quarantine: undefined }); quarantined.push(...result.quarantine);
   }

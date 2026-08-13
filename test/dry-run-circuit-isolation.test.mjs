@@ -113,3 +113,40 @@ test('a successful dry-run decision never resets real prior failure history on t
     await rm(DURABLE_DIR, { recursive: true, force: true });
   }
 });
+
+test('a FAILING dry-run decision never opens or increments the live resilience circuit either', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
+  try {
+    for (const path of DATA_FILES) await rm(path, { force: true });
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+    await installAccount();
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
+      'circuit-dry-x': { consumerKey: 'key', consumerSecret: 'secret', accessToken: 'token', accessTokenSecret: 'token-secret' }
+    });
+    const acct = account();
+
+    // Simulate a persistently failing Responses API (e.g. a transient outage) hit during a manual
+    // preview run. Even though this reaches runAutopilot's generic catch block, it must not open or
+    // increment the LIVE circuit - only a real (non-dry-run) failure may do that.
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.openai.com/v1/responses') return new Response(JSON.stringify({ error: { message: 'internal error' } }), { status: 500, headers: { 'content-type': 'application/json' } });
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const dryReport = await runAutopilot({ accountFilter: 'circuit-dry-x', force: true, dryRun: true, now: new Date('2026-08-13T00:00:00+09:00') });
+    assert.equal(dryReport[0].status, 'failed', `expected the dry-run preview itself to fail, got: ${JSON.stringify(dryReport[0])}`);
+
+    const afterFailedDryRun = await circuitStatus('circuit-dry-x', 'autopilot', acct.resilience);
+    assert.equal(afterFailedDryRun.failures || 0, 0, 'a failed dry-run preview must not increment the live circuit failure count');
+    assert.equal(afterFailedDryRun.open, false, 'a failed dry-run preview must never open the live circuit');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+    await rm(DURABLE_DIR, { recursive: true, force: true });
+  }
+});

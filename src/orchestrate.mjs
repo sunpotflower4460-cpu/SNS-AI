@@ -19,6 +19,26 @@ import { publish } from './publish.mjs';
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
 function bool(value) { return value === true || String(value).toLowerCase() === 'true'; }
 
+// Maps a thrown error's `code` to the report status an operator/CLI sees. Kept as a pure, exported
+// function (rather than inline in the catch block) so the mapping itself - especially that
+// MEDIA_HOSTING_TOO_LARGE and MEDIA_QA_FAILED/MEDIA_QA_INPUT_TOO_LARGE map to DIFFERENT statuses - is
+// directly unit-testable without having to drive a full runAutopilot() call through mocked media
+// generation.
+export function autopilotErrorStatus(error) {
+  if (error.code === 'BUDGET_EXHAUSTED') return 'budget-exhausted';
+  if (error.code === 'CIRCUIT_OPEN') return 'circuit-open';
+  if (error.code === 'SLOT_ALREADY_CLAIMED') return 'already-handled';
+  if (error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE') return 'media-qa-failed';
+  // Distinct from media-qa-failed: an oversize asset is a config-tuning problem (raise
+  // maxHostedImageBytes/maxHostedVideoBytes), not the AI-generated visual itself failing quality
+  // review - collapsing the two into one status would make an operator chase a nonexistent QA
+  // regression instead of a byte-limit setting.
+  if (error.code === 'MEDIA_HOSTING_TOO_LARGE') return 'media-too-large';
+  if (error.code === 'PROVIDER_DEPRECATED') return 'provider-deprecated';
+  if (error.code === 'AUTONOMY_BRAKE') return 'safety-brake';
+  return 'failed';
+}
+
 export async function runAutopilot({ now = new Date(), accountFilter, force = false, dryRun = false } = {}) {
   const accounts = await loadAccounts(); const report = [];
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
@@ -140,18 +160,16 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
         const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED'];
-        if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
+        // Same reasoning as the dry-run success path above: a dry run proves nothing about whether a
+        // real publish would succeed, so a FAILED dry-run preview (a transient Responses API hiccup,
+        // malformed model output, etc.) must not be able to open/increment the live circuit either -
+        // that would let a manual preview block later legitimate scheduled publishing.
+        if (!dryRun && !nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
           error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
         }).catch(() => {});
-        const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted'
-          : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
-            : error.code === 'SLOT_ALREADY_CLAIMED' ? 'already-handled'
-              : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' || error.code === 'MEDIA_HOSTING_TOO_LARGE' ? 'media-qa-failed'
-                : error.code === 'PROVIDER_DEPRECATED' ? 'provider-deprecated'
-                  : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
-        report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
+        report.push({ account: accountId, slot: slot.slotId, status: autopilotErrorStatus(error), error: error.message });
       }
     }
   }
@@ -163,8 +181,8 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 // per-account and per-slot try/catch guards added for exactly that isolation) - a scheduled run must
 // not exit 0 and look green while one of these silently skipped an account. Intentional control-flow
 // pauses (budget-exhausted, circuit-open, rate-limited, safety-brake, media-qa-failed,
-// provider-deprecated, already-handled) are deliberately excluded: those are the system working as
-// designed, not a bug to alert on.
+// media-too-large, provider-deprecated, already-handled) are deliberately excluded: those are the
+// system working as designed, not a bug to alert on.
 const FATAL_STATUSES = new Set(['failed', 'account-error', 'state-error', 'approval-reconcile-error']);
 export function hasFatalStatus(report) {
   return (report || []).some((entry) => FATAL_STATUSES.has(entry.status));

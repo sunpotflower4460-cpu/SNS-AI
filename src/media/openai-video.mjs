@@ -178,7 +178,6 @@ async function deleteVideoQuietly(videoId) {
 }
 
 export async function generateAndHostVideoDetailed(accountId, account, slotId, draft, { now = new Date() } = {}) {
-  assertVideosApiStillAvailable(now);
   const originalPrompt = String(draft?.mediaPrompt || '').trim();
   if (!originalPrompt) throw new Error('AI selected video generation but supplied no mediaPrompt.');
   const model = account.media?.videoModel || 'sora-2';
@@ -196,31 +195,33 @@ export async function generateAndHostVideoDetailed(accountId, account, slotId, d
     const cached = await findAsset(release, name);
     if (cached) return { url: cached, qa: { pass: true, cached: true, score: null, issues: [], previewVariant: 'cached-passed' }, altText: '', attempt, prompt };
 
+    // Only enforced once a cache miss means we're actually about to call the Videos API - a
+    // previously-generated, QA-approved video already sitting in the public release cache (see the
+    // findAsset check above) must still be served after the shutdown date, since reusing it makes no
+    // API call at all.
+    assertVideosApiStillAvailable(now);
     const created = await createVideo(accountId, account, prompt);
-    const completed = await waitForVideo(created, account);
-    const preview = await downloadQaPreview(completed.id, maxPreviewBytes);
-    const qa = await reviewVisualBytes(accountId, account, preview.bytes, preview.contentType, {
-      mediaType: `reel-${preview.variant}`, prompt: originalPrompt, postText: draft?.text || ''
-    });
-    qa.previewVariant = preview.variant;
-    if (qa.pass) {
-      // QA already passed (paid API cost already sunk) - if the full-resolution download turns out
-      // oversized, or the upload itself fails, this still must not leak the generated video on the
-      // OpenAI account indefinitely, same as the QA-failure branch below.
-      try {
+    try {
+      // Everything from here through the QA/hosting decision must clean up the OpenAI-side video job
+      // on ANY failure - a thrown error from waitForVideo, the QA preview download, or the QA review
+      // call itself must not leak it, any more than a definitive QA fail or a post-QA oversize
+      // rejection does.
+      const completed = await waitForVideo(created, account);
+      const preview = await downloadQaPreview(completed.id, maxPreviewBytes);
+      const qa = await reviewVisualBytes(accountId, account, preview.bytes, preview.contentType, {
+        mediaType: `reel-${preview.variant}`, prompt: originalPrompt, postText: draft?.text || ''
+      });
+      qa.previewVariant = preview.variant;
+      if (qa.pass) {
         const video = await downloadAsset(completed.id, 'video', maxBytes);
         const url = await uploadReleaseAsset(release, name, video.bytes, video.contentType || 'video/mp4');
         return { url, qa, altText: qa.altText || '', attempt, prompt };
-      } finally {
-        await deleteVideoQuietly(completed.id);
       }
-    }
 
-    lastQa = qa;
-    await deleteVideoQuietly(completed.id);
-    if (attempt < maxRegenerations) {
-      prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
-      continue;
+      lastQa = qa;
+      if (attempt < maxRegenerations) prompt = correctedMediaPrompt(originalPrompt, qa, attempt + 1);
+    } finally {
+      await deleteVideoQuietly(created?.id);
     }
   }
 

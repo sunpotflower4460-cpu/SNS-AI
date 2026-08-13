@@ -102,6 +102,54 @@ test('readiness doctor warns about the confirmed OpenAI Videos API shutdown for 
   } finally { restoreEnv(env); }
 });
 
+test('readiness doctor does not falsely warn X Reel accounts that only ever resolve hosted media (never call the Videos API)', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-x'] = {
+        ...config.accounts['example-x'], enabled: true, mode: 'auto',
+        // 'pool' always resolves an existing library URL (src/lib/media.mjs) and never calls the
+        // built-in video generator, unlike 'auto'/'generate'.
+        media: { strategy: 'pool', type: 'reel', urls: ['https://cdn.example/a.mp4'], internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.X_OAUTH2_STATE_KEY = 'k'.repeat(48);
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
+        'example-x': { consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as', oauth2ClientId: 'client', oauth2RefreshToken: 'refresh' }
+      });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-x' });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.doesNotMatch(warnings, /Videos API/, 'a pool-strategy Reel account never invokes the Videos API and must not be warned about its shutdown');
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('readiness doctor warns an Instagram Reel account about the Videos API shutdown even when a media library is also configured', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-instagram'] = {
+        ...config.accounts['example-instagram'], enabled: true, mode: 'auto',
+        // strategy: 'generate' always invokes built-in video generation regardless of media.urls
+        // (src/lib/media.mjs's generated() never consults the library for 'generate') - a configured
+        // library must not suppress this warning.
+        media: { strategy: 'generate', type: 'reel', urls: ['https://cdn.example/a.mp4'], internalVideoGeneration: true }
+      };
+      await writeJson(CONFIG, config);
+      process.env.OPENAI_API_KEY = 'k';
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-instagram': { accessToken: 'at', igUserId: 'ig' } });
+
+      const report = await buildReadinessReport({ accountFilter: 'example-instagram' });
+      const warnings = report.accounts[0].warnings.join(' ');
+      assert.match(warnings, /Videos API.*2026-09-24/s, 'a configured library must not suppress the Videos API shutdown warning for strategy: generate');
+    });
+  } finally { restoreEnv(env); }
+});
+
 test('the Videos API deprecation message escalates from a warning to an actionable blocker once the shutdown date passes', () => {
   const beforeDate = new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) - 86_400_000).getTime();
   const onDate = Date.parse(VIDEOS_API_DEPRECATION_DATE);
@@ -145,6 +193,39 @@ test('maintenance compacts duplicates, archives expired rows, and quarantines ma
       assert.match(quarantine, /broken-json/);
       const archive = JSON.parse(await readFile(pathOf('../data/archive/monthly-summary.json'), 'utf8'));
       assert.equal(Object.values(archive.buckets).some((x) => x.type === 'history' && x.count === 1), true);
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('maintenance applies the real account\'s configured retention to its dry-run-preview usage rows too, not the global default', async () => {
+  const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
+  delete process.env.GH_TOKEN; delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPOSITORY;
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      // A deliberately short, account-specific retention (unlike the ~180 day global default) makes the
+      // two possible behaviors observably different: if the preview row incorrectly falls back to the
+      // global default, it survives this run; if it correctly inherits example-x's own retention, it
+      // gets archived just like the real account's own row does.
+      config.accounts['example-x'] = { ...config.accounts['example-x'], maintenance: { usageRetentionDays: 1 } };
+      await writeJson(CONFIG, config);
+
+      const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+      await writeJsonl(pathOf('../data/usage.jsonl'), [
+        { at: tenDaysAgo, account: 'example-x', kind: 'openai' },
+        { at: tenDaysAgo, account: 'example-x::dry-run-preview', kind: 'openai' }
+      ]);
+
+      const result = await runMaintenance();
+      const row = result.results.find((x) => x.type === 'usage');
+      assert.equal(row.before, 2);
+      assert.equal(row.after, 0, 'both the real account row and its dry-run-preview counterpart must be archived under the account\'s 1-day retention, not silently kept under the ~180 day default');
+      assert.equal(row.removed, 2);
+
+      const archive = JSON.parse(await readFile(pathOf('../data/archive/monthly-summary.json'), 'utf8'));
+      const buckets = Object.values(archive.buckets).filter((x) => x.type === 'usage');
+      assert.equal(buckets.some((x) => x.account === 'example-x'), true);
+      assert.equal(buckets.some((x) => x.account === 'example-x::dry-run-preview'), true, 'the preview bucket must stay a distinct archive entry, only the retention policy is shared');
     });
   } finally { restoreEnv(env); }
 });

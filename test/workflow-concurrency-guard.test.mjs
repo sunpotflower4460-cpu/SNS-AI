@@ -23,7 +23,17 @@ const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta
 const REQUIRED_GROUP = 'sns-ai-write';
 
 function persistsRepoState(yaml) {
-  return /git\s+add\s+data\/|git\s+commit[^\n]*data\//.test(yaml);
+  // Flags allowed between "add"/"commit" and the actual pathspec/switch so `git add -- data/` and
+  // `git add -A data/` are recognized the same as the plain `git add data/` every current workflow
+  // uses - a future workflow that phrases its persist step slightly differently must not slip past
+  // this guard undetected. `-\S*` only matches dash-prefixed tokens, so it can never itself consume the
+  // literal `data/` pathspec and turn this into an unconditional match.
+  const addsDataPath = /git\s+add\s+(?:-\S*\s+)*data\//.test(yaml);
+  const commitsDataPath = /git\s+commit\s+[^\n]*?\bdata\//.test(yaml);
+  // `git commit -a` (or `-am`/`--all`) stages every already-tracked modified file, which silently
+  // includes any tracked data/ changes even with no explicit `data/` pathspec anywhere on the line.
+  const commitsAllTracked = /git\s+commit\s+(?:\S+\s+)*(?:-a[m]?\b|--all\b)/.test(yaml);
+  return addsDataPath || commitsDataPath || commitsAllTracked;
 }
 
 function declaresConcurrencyGroup(yaml, group) {
@@ -31,8 +41,19 @@ function declaresConcurrencyGroup(yaml, group) {
   return Boolean(match) && match[1].replace(/^["']|["']$/g, '') === group;
 }
 
+// Scoped to only the lines that actually belong to the ROOT-level `concurrency:` mapping (the
+// consecutive indented lines immediately following it) - not "cancel-in-progress: false" anywhere
+// later in the file. Without this scoping, a job-level `concurrency:` block belonging to a completely
+// different job (with its own, unrelated cancel-in-progress: false) could make this function wrongly
+// report the root guard as safe even when the root mapping itself never sets cancel-in-progress: false
+// (or sets it to true).
+function rootConcurrencyBlock(yaml) {
+  const match = yaml.match(/^concurrency:\r?\n((?:[ \t]+[^\n]*\r?\n?)*)/m);
+  return match ? match[1] : '';
+}
+
 function declaresCancelInProgressFalse(yaml) {
-  return /^concurrency:[\s\S]*?cancel-in-progress:\s*false/m.test(yaml);
+  return /cancel-in-progress:\s*false/.test(rootConcurrencyBlock(yaml));
 }
 
 test('every workflow that persists data/ state back to the repo shares the sns-ai-write concurrency group', async () => {
@@ -61,4 +82,36 @@ test('sanity: this test can actually detect a missing concurrency group', () => 
   const withCancelTrue = `concurrency:\n  group: ${REQUIRED_GROUP}\n  cancel-in-progress: true\n${withoutGroup}`;
   assert.equal(declaresConcurrencyGroup(withCancelTrue, REQUIRED_GROUP), true);
   assert.equal(declaresCancelInProgressFalse(withCancelTrue), false);
+});
+
+test('sanity: persistsRepoState recognizes flagged git add/commit variants, not just the plain form', () => {
+  assert.equal(persistsRepoState('run: |\n  git add -- data/\n  git commit -m "x"\n'), true);
+  assert.equal(persistsRepoState('run: |\n  git add -A data/\n  git commit -m "x"\n'), true);
+  assert.equal(persistsRepoState('run: |\n  git add data/report.json\n  git commit -m "x" data/report.json\n'), true);
+  assert.equal(persistsRepoState('run: |\n  git add data/report.json\n  git commit -am "x"\n'), true);
+  assert.equal(persistsRepoState('run: |\n  git add src/index.mjs\n  git commit -m "unrelated code change"\n'), false);
+});
+
+test('sanity: declaresCancelInProgressFalse is not fooled by an unrelated job-level concurrency block', () => {
+  // Root-level concurrency omits cancel-in-progress entirely (defaults to true in GitHub Actions), but
+  // a DIFFERENT job further down declares its own unrelated concurrency block with cancel-in-progress:
+  // false. The root guard must still be reported as unsafe - it is not actually cancel-in-progress:
+  // false at the root, regardless of what an unrelated job-level block says.
+  const rootOnlyGroupWithUnrelatedJobLevelFalse = [
+    'concurrency:',
+    `  group: ${REQUIRED_GROUP}`,
+    'jobs:',
+    '  other-job:',
+    '    concurrency:',
+    '      group: some-other-job-group',
+    '      cancel-in-progress: false'
+  ].join('\n');
+  assert.equal(declaresConcurrencyGroup(rootOnlyGroupWithUnrelatedJobLevelFalse, REQUIRED_GROUP), true);
+  assert.equal(
+    declaresCancelInProgressFalse(rootOnlyGroupWithUnrelatedJobLevelFalse), false,
+    'an unrelated job-level cancel-in-progress: false must not satisfy the root-level guard'
+  );
+
+  const rootDeclaresItToo = `${rootOnlyGroupWithUnrelatedJobLevelFalse.replace('  group: sns-ai-write', '  group: sns-ai-write\n  cancel-in-progress: false')}`;
+  assert.equal(declaresCancelInProgressFalse(rootDeclaresItToo), true);
 });

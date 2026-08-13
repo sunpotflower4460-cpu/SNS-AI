@@ -8,7 +8,10 @@ import { beginPublishClaim, __test as claimTest } from '../src/lib/durable-claim
 // production scenario (two overlapping runners / a retried CI run racing a still-in-flight one) that
 // Step 3 Case A of the independent audit asks to reproduce. This file backs the mock with real
 // create/update sha semantics (PUT without a matching current sha is rejected, mirroring GitHub's
-// actual behavior) and fires two beginPublishClaim() calls concurrently via Promise.all.
+// actual behavior) and fires two beginPublishClaim() calls concurrently via Promise.allSettled (not
+// Promise.all, since exactly one call is expected to reject with SLOT_ALREADY_CLAIMED in the
+// reject-instead-of-replay outcome, and Promise.all would short-circuit on that rejection before the
+// test ever got to inspect the winner's result).
 
 function saveEnv(...names) { return Object.fromEntries(names.map((name) => [name, process.env[name]])); }
 function restoreEnv(saved) {
@@ -39,6 +42,11 @@ function createStatefulContentsMock() {
       const path = decodeURIComponent(pathMatch[1]);
       const method = (options.method || 'GET').toUpperCase();
       if (method === 'GET') {
+        // A small real delay (not just a microtask tick) forces BOTH racing callers' reads to genuinely
+        // overlap in flight, rather than relying on incidental microtask-ordering of the current call
+        // chain's await points - so this stays a real interleaving test even if a future refactor
+        // changes how many awaits sit between the read and the write.
+        await new Promise((resolve) => setTimeout(resolve, 5));
         const row = store.get(path);
         if (!row) return jsonResponse({ message: 'Not Found' }, 404);
         return jsonResponse({ content: row.content, sha: row.sha });

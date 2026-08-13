@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -54,6 +55,13 @@ function releaseLookup(target) {
   if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
   return null;
 }
+// Mirrors the private safe()/digest() naming in src/media/openai-video.mjs exactly, so a test can
+// pre-populate a release asset that generateAndHostVideoDetailed will actually recognize as a cache hit.
+function cachedVideoAssetName(accountId, slotId, model, size, seconds, prompt) {
+  const digest = createHash('sha256').update(`qa-v2-spritesheet|${slotId}|${model}|${size}|${seconds}|${prompt}`).digest('hex').slice(0, 20);
+  const safeAccountId = String(accountId || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'video';
+  return `${safeAccountId}-${digest}.mp4`;
+}
 
 test('the OpenAI Videos API deprecation guard fails closed on/after the confirmed shutdown date, not before', () => {
   // OpenAI's official deprecations page confirms the entire Videos API (every sora-2/sora-2-pro model
@@ -70,10 +78,21 @@ test('the OpenAI Videos API deprecation guard fails closed on/after the confirme
   );
 });
 
-test('video generation fails closed before any API call once the Videos API deprecation date has passed', async () => {
+test('video generation fails closed before any OpenAI Videos API call once the deprecation date has passed, but still serves an already-cached video', async () => {
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => { throw new Error(`No request should have been made: ${url}`); };
+  const env = mediaEnv();
   try {
+    // The deprecation guard is enforced only AFTER the release-cache lookup (see
+    // src/media/openai-video.mjs) - ensurePublicRelease()/findAsset() are GitHub calls, not OpenAI
+    // Videos API calls, so they must still be allowed to run even past the shutdown date. Any request
+    // to api.openai.com/v1/videos, however, must never happen.
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target.startsWith('https://api.openai.com/v1/videos')) throw new Error(`No OpenAI Videos API call should have been made: ${target}`);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
     await assert.rejects(
       generateAndHostVideoDetailed('video-deprecated', {
         media: { videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8, qa: { enabled: false, maxRegenerations: 0 } },
@@ -83,6 +102,91 @@ test('video generation fails closed before any API call once the Videos API depr
     );
   } finally {
     globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('a cache hit for an already-approved video is still served after the OpenAI Videos API shutdown date, with zero Videos API calls', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  try {
+    const accountId = 'video-cached-after-deprecation';
+    const slotId = 'slot-video-cached';
+    const model = 'sora-2';
+    const size = '720x1280';
+    const seconds = 8;
+    const prompt = 'a previously approved cached scene';
+    const name = cachedVideoAssetName(accountId, slotId, model, size, seconds, prompt);
+
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') {
+        return jsonResponse({ id: 7, assets: [{ name, browser_download_url: 'https://downloads.example/cached.mp4' }] });
+      }
+      if (target.startsWith('https://api.openai.com/v1/videos')) throw new Error(`No OpenAI Videos API call should have been made: ${target}`);
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const result = await generateAndHostVideoDetailed(accountId, {
+      media: { videoModel: model, videoSize: size, videoSeconds: seconds, qa: { enabled: false, maxRegenerations: 0 } },
+      budgets: { enabled: false }
+    }, slotId, { mediaPrompt: prompt }, { now: new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000) });
+
+    assert.equal(result.url, 'https://downloads.example/cached.mp4');
+    assert.equal(result.qa.cached, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('a QA-processing failure (not a definitive QA rejection) still deletes the OpenAI-side video job exactly once', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let deletes = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') {
+        return jsonResponse({ id: 'video-qa-crash', status: 'completed' });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-crash/content?variant=spritesheet') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      // Moderation runs before the vision QA call and fails outright here - a transient QA-pipeline
+      // error, not a definitive "QA reviewed the video and rejected it" outcome. It must still clean up
+      // the OpenAI-side job exactly like a QA rejection or an oversize download already does.
+      if (target === 'https://api.openai.com/v1/moderations') {
+        return jsonResponse({ error: { message: 'moderation pipeline crashed' } }, 400);
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-crash' && options.method === 'DELETE') {
+        deletes += 1;
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      generateAndHostVideoDetailed('video-qa-crash', {
+        media: {
+          videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
+          qa: { enabled: true, maxInputBytes: 1024, maxRegenerations: 0, minScore: 75 }
+        },
+        budgets: { enabled: false }
+      }, 'slot-video-qa-crash', { mediaPrompt: 'a scene that will crash QA' }, PRE_DEPRECATION_NOW),
+      /moderation pipeline crashed/
+    );
+    assert.equal(deletes, 1, 'a QA-processing exception (not a QA rejection) must still delete the OpenAI-side video job exactly once');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
   }
 });
 

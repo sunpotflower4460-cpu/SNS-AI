@@ -22,6 +22,34 @@ function branchResponse(treeSha) {
   return jsonResponse({ name: 'sns-ai-state', commit: { sha: 'commit-sha', commit: { tree: { sha: treeSha } } } });
 }
 
+test('findStuckClaims rejects a non-positive or non-numeric maxAgeHours instead of silently using a nonsensical cutoff', async () => {
+  await assert.rejects(findStuckClaims({ maxAgeHours: 0 }), /maxAgeHours must be a positive number/);
+  await assert.rejects(findStuckClaims({ maxAgeHours: -3 }), /maxAgeHours must be a positive number/);
+  await assert.rejects(findStuckClaims({ maxAgeHours: 'abc' }), /maxAgeHours must be a positive number/);
+  await assert.rejects(findStuckClaims({ maxAgeHours: NaN }), /maxAgeHours must be a positive number/);
+});
+
+test('findStuckClaims propagates a non-404 GitHub API error (e.g. rate-limited/forbidden) instead of silently returning an empty report', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
+  process.env.GITHUB_TOKEN = 'test-token';
+  delete process.env.GH_TOKEN;
+  process.env.GITHUB_REPOSITORY = 'owner/repo';
+  try {
+    // A 403 (e.g. secondary rate limit, insufficient token scope) is a genuinely different failure
+    // mode from "the branch doesn't exist yet" (404) - it must surface as a loud failure too, not be
+    // swallowed the same way a 404 used to be.
+    globalThis.fetch = async () => jsonResponse({ message: 'API rate limit exceeded' }, 403);
+    await assert.rejects(
+      findStuckClaims({ maxAgeHours: 3 }),
+      (error) => error.status === 403
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
 test('findStuckClaims skips cleanly when there is no GitHub runtime available', async () => {
   const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
   delete process.env.GITHUB_TOKEN;
@@ -36,17 +64,22 @@ test('findStuckClaims skips cleanly when there is no GitHub runtime available', 
   }
 });
 
-test('findStuckClaims reports no stuck claims when the durable state branch does not exist yet', async () => {
+test('findStuckClaims fails loudly instead of silently reporting "no stuck claims" when the durable state branch does not exist', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY');
   process.env.GITHUB_TOKEN = 'test-token';
   delete process.env.GH_TOKEN;
   process.env.GITHUB_REPOSITORY = 'owner/repo';
   try {
+    // The sns-ai-state branch is a documented go-live precondition (docs/GO_LIVE_CHECKLIST.md): without
+    // it, no durable claim is ever recorded and duplicate-publish protection is not active at all. A
+    // missing branch must surface as a hard failure a human has to act on, not collapse into an empty,
+    // falsely-reassuring "no stuck claims" report.
     globalThis.fetch = async () => jsonResponse({ message: 'Not Found' }, 404);
-    const report = await findStuckClaims({ maxAgeHours: 3 });
-    assert.equal(report.skipped, false);
-    assert.deepEqual(report.stuck, []);
+    await assert.rejects(
+      findStuckClaims({ maxAgeHours: 3 }),
+      (error) => error.code === 'DURABLE_STATE_BRANCH_MISSING' && /sns-ai-state/.test(error.message)
+    );
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
@@ -132,6 +165,52 @@ test('findStuckClaims surfaces truncated:true instead of silently under-reportin
     };
     const report = await findStuckClaims({ maxAgeHours: 3 });
     assert.equal(report.truncated, true, 'a truncated Trees API response must be surfaced, not silently swallowed');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('findStuckClaims fetches claim blobs with bounded concurrency, not one at a time', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY', 'STALE_CLAIMS_BLOB_CONCURRENCY');
+  process.env.GITHUB_TOKEN = 'test-token';
+  delete process.env.GH_TOKEN;
+  process.env.GITHUB_REPOSITORY = 'owner/repo';
+  process.env.STALE_CLAIMS_BLOB_CONCURRENCY = '4';
+  const BLOB_COUNT = 20;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  try {
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target === 'https://api.github.com/repos/owner/repo/branches/sns-ai-state') return branchResponse('tree-sha');
+      if (target === 'https://api.github.com/repos/owner/repo/git/trees/tree-sha?recursive=1') {
+        return jsonResponse({
+          truncated: false,
+          tree: Array.from({ length: BLOB_COUNT }, (_, i) => ({ path: `data/durable-claims/claim-${i}.json`, type: 'blob', sha: `blob-${i}` }))
+        });
+      }
+      const blobMatch = target.match(/\/git\/blobs\/blob-(\d+)$/);
+      if (blobMatch) {
+        // As data/durable-claims/ grows into the thousands (nothing ever deletes a claim file), a fully
+        // sequential one-request-per-blob loop would eventually exhaust the GitHub API rate limit on its
+        // own. This asserts requests genuinely overlap (bounded concurrency), not just that the final
+        // report is correct - a naive "await in a for loop" would still pass a correctness-only test.
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        inFlight -= 1;
+        return jsonResponse({ content: encodeClaim({ status: 'published' }) });
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const report = await findStuckClaims({ maxAgeHours: 3 });
+    assert.equal(report.skipped, false);
+    assert.deepEqual(report.stuck, []);
+    assert.ok(maxInFlight > 1, `expected overlapping blob requests, saw max concurrency ${maxInFlight}`);
+    assert.ok(maxInFlight <= 4, `expected concurrency capped at 4, saw max concurrency ${maxInFlight}`);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

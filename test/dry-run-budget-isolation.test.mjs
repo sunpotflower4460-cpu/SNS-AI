@@ -10,7 +10,7 @@ import { usageToday } from '../src/ops/budget.mjs';
 // (a) every "safe" dry-run preview cost real money, and (b) repeated previews earlier in the day could
 // exhaust openaiCallsPerDay and cause a legitimate LATER scheduled live post to fail with
 // BUDGET_EXHAUSTED. This test fails on the pre-fix code (a live run right after a dry run for the same
-// account, sharing a budget of exactly 1 call/day, hits BUDGET_EXHAUSTED) and passes on the fix.
+// account, sharing a budget of 2 calls/day, hits BUDGET_EXHAUSTED) and passes on the fix.
 
 const CONFIG_FILE = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
 const DURABLE_DIR = fileURLToPath(new URL('../data/durable-claims/', import.meta.url));
@@ -138,9 +138,9 @@ test('a dry-run preview does not consume the account\'s live daily OpenAI budget
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
 
-    // With the fix, this live run still has its full 1/1 daily allowance available, because the dry
+    // With the fix, this live run still has its full 2/2 daily allowance available, because the dry
     // run above was billed against a separate preview bucket. On the pre-fix code this throws
-    // BUDGET_EXHAUSTED because the dry run already spent the account's only daily OpenAI call.
+    // BUDGET_EXHAUSTED because the dry run already spent one of the account's two daily OpenAI calls.
     const liveReport = await runAutopilot({ accountFilter: 'dry-budget-x', force: true, dryRun: false, now: new Date('2026-08-13T00:05:00+09:00') });
     assert.equal(liveReport[0].status, 'published', `expected a live publish, got: ${JSON.stringify(liveReport[0])}`);
   } finally {

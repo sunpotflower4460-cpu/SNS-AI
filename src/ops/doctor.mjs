@@ -54,6 +54,15 @@ function usesBuiltInMedia(account) {
   return type === 'image' && media.internalImageGeneration !== false;
 }
 
+// 'generate' always invokes built-in video generation for a Reel regardless of whether a media
+// library is also configured (src/lib/media.mjs's `generated()` never consults media.urls), and
+// 'auto' can reach it too whenever the AI-chosen mediaDecision is 'generate', or 'library' with an
+// empty pool - so this must NOT be gated on "no library configured" the way the existing
+// library/endpoint/built-in fallback warning below it is.
+function usesBuiltInVideoGeneration(account) {
+  return (account.media?.type || 'image') === 'reel' && usesBuiltInMedia(account);
+}
+
 function usesOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true
@@ -87,12 +96,14 @@ function mediaReadiness(account) {
   const mediaType = media.type || 'image';
   const blockers = [];
   const warnings = [];
-  const usesBuiltInVideo = mediaType === 'reel' && media.internalVideoGeneration !== false && strategy !== 'none' && !/^https:\/\//i.test(media.endpoint || '');
   if (account.platform === 'x') {
     if (!['image', 'reel'].includes(mediaType)) blockers.push('X media.type must be image or reel when media is configured.');
     if (strategy !== 'none') warnings.push('X v2 image/video upload uses OAuth2 user context. Authorize with tweet.write, users.read, media.write, and offline.access. Refreshed OAuth2 tokens are encrypted into data/x-oauth2-state.json using X_OAUTH2_STATE_KEY.');
     if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
-    if (usesBuiltInVideo) (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
+    // pool/fixed/external/endpoint strategies resolve existing media URLs and never call the Videos
+    // API (see src/lib/media.mjs) - only 'auto'/'generate' without an HTTPS endpoint can actually
+    // reach built-in video generation, matching usesBuiltInMedia()'s own predicate.
+    if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
     return { blockers, warnings };
   }
   if (account.platform !== 'instagram') return { blockers, warnings };
@@ -110,8 +121,10 @@ function mediaReadiness(account) {
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push(`${strategy} needs library media, media.endpoint, or matching built-in media generation.`);
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
-    if (mediaType === 'reel') (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
   }
+  // Unlike the fallback warning above, this must NOT be gated on "no library configured": 'generate'
+  // always uses built-in video generation regardless of a configured library, and 'auto' can too.
+  if (usesBuiltInVideoGeneration(account)) (videosApiDaysLeft() <= 0 ? blockers : warnings).push(videosApiDeprecationMessage());
   warnings.push('Instagram API with Instagram Login requires a Professional account and an access token authorized for instagram_business_basic and instagram_business_content_publish; analytics also requires the relevant Insights access.');
   if (media.qa?.enabled !== false && ['auto', 'generate'].includes(strategy)) warnings.push('Generated media is subject to pre-publish moderation and visual QA before hosting/publishing.');
   return { blockers, warnings };

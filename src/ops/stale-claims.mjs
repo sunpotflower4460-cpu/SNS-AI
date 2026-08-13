@@ -1,12 +1,34 @@
+import { pathToFileURL } from 'node:url';
 import { githubContext, githubRequest } from '../lib/github.mjs';
 
 const STATE_BRANCH = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
 const CLAIMS_DIR = 'data/durable-claims/';
 const STUCK_STATUSES = new Set(['publishing', 'publish_unknown']);
+// Bounded, not fully sequential: data/durable-claims/ only ever grows (nothing deletes a claim file),
+// so a fully sequential one-request-per-blob loop would eventually take longer than the health workflow's
+// timeout and would burn through the GitHub API rate limit on its own as the claim count grows into the
+// thousands. Bounded to a small constant so this stays a good API citizen rather than firing hundreds of
+// concurrent requests at once. Read lazily (not a module-load-time const) so tests can override it.
+function blobFetchConcurrency() { return Math.max(1, Number(process.env.STALE_CLAIMS_BLOB_CONCURRENCY || 8)); }
 
 function decodeBlob(blob) {
   const decoded = Buffer.from(String(blob.content || '').replace(/\n/g, ''), 'base64').toString('utf8');
   return JSON.parse(decoded);
+}
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // Uses the Git Trees API (recursive) rather than the Contents API directory listing: the Contents API
@@ -16,12 +38,55 @@ function decodeBlob(blob) {
 // purpose. The Trees API supports up to 100,000 entries per request (reporting `truncated: true` if
 // even that is exceeded, which this surfaces rather than silently dropping).
 async function listClaimBlobs(owner, repo) {
-  const branch = await githubRequest(`/repos/${owner}/${repo}/branches/${encodeURIComponent(STATE_BRANCH)}`);
+  let branch;
+  try {
+    branch = await githubRequest(`/repos/${owner}/${repo}/branches/${encodeURIComponent(STATE_BRANCH)}`);
+  } catch (error) {
+    if (error.status === 404) {
+      // The sns-ai-state branch is a documented go-live precondition (docs/GO_LIVE_CHECKLIST.md), not
+      // something that comes and goes normally - the durable-claim CAS guard that prevents duplicate
+      // posting cannot even function without it. Reporting "stuck: []" here would read as "everything is
+      // fine" when the actual situation is "idempotency protection is not active at all". Fail loudly
+      // instead so this surfaces as a health-check failure a human has to act on.
+      const missing = new Error(
+        `Durable state branch "${STATE_BRANCH}" does not exist. This is a required precondition for `
+        + 'duplicate-publish protection (see docs/GO_LIVE_CHECKLIST.md) - without it, no claim is ever '
+        + 'durably recorded. Create the branch before trusting any "no stuck claims" result.'
+      );
+      missing.code = 'DURABLE_STATE_BRANCH_MISSING';
+      throw missing;
+    }
+    throw error;
+  }
   const treeSha = branch?.commit?.commit?.tree?.sha;
   if (!treeSha) throw new Error(`Could not resolve the tree for branch "${STATE_BRANCH}".`);
   const tree = await githubRequest(`/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`);
   const blobs = (tree?.tree || []).filter((entry) => entry.type === 'blob' && entry.path.startsWith(CLAIMS_DIR) && entry.path.endsWith('.json'));
   return { blobs, truncated: Boolean(tree?.truncated) };
+}
+
+async function evaluateClaimBlob(owner, repo, entry, cutoff) {
+  const file = entry.path.slice(CLAIMS_DIR.length);
+  let claim;
+  try {
+    const blob = await githubRequest(`/repos/${owner}/${repo}/git/blobs/${entry.sha}`);
+    claim = decodeBlob(blob);
+  } catch (error) {
+    return { file, status: 'unreadable', error: String(error.message || error).slice(0, 300) };
+  }
+  if (!STUCK_STATUSES.has(claim?.status)) return null;
+  const updatedAt = Date.parse(claim.updatedAt || claim.createdAt || '');
+  const stale = !Number.isFinite(updatedAt) || updatedAt < cutoff;
+  if (!stale) return null;
+  return {
+    file,
+    slotId: claim.slotId || null,
+    account: claim.account || null,
+    platform: claim.platform || null,
+    status: claim.status,
+    updatedAt: claim.updatedAt || null,
+    ageHours: Number.isFinite(updatedAt) ? Math.round(((Date.now() - updatedAt) / 3_600_000) * 10) / 10 : null
+  };
 }
 
 // Durable claims are the single source of truth preventing duplicate publishes: once a slot reaches
@@ -43,44 +108,16 @@ export async function findStuckClaims({ maxAgeHours = Number(process.env.STUCK_C
   const [owner, repo] = repository.split('/');
   const cutoff = Date.now() - normalizedMaxAgeHours * 3_600_000;
 
-  let blobs;
-  let truncated = false;
-  try {
-    ({ blobs, truncated } = await listClaimBlobs(owner, repo));
-  } catch (error) {
-    if (error.status === 404) return { skipped: false, maxAgeHours: normalizedMaxAgeHours, stuck: [], truncated: false };
-    throw error;
-  }
+  // A missing sns-ai-state branch is deliberately NOT caught here (see listClaimBlobs) - it must
+  // propagate as a hard failure, not collapse into an empty, falsely-reassuring report.
+  const { blobs, truncated } = await listClaimBlobs(owner, repo);
 
-  const stuck = [];
-  for (const entry of blobs) {
-    const file = entry.path.slice(CLAIMS_DIR.length);
-    let claim;
-    try {
-      const blob = await githubRequest(`/repos/${owner}/${repo}/git/blobs/${entry.sha}`);
-      claim = decodeBlob(blob);
-    } catch (error) {
-      stuck.push({ file, status: 'unreadable', error: String(error.message || error).slice(0, 300) });
-      continue;
-    }
-    if (!STUCK_STATUSES.has(claim?.status)) continue;
-    const updatedAt = Date.parse(claim.updatedAt || claim.createdAt || '');
-    const stale = !Number.isFinite(updatedAt) || updatedAt < cutoff;
-    if (!stale) continue;
-    stuck.push({
-      file,
-      slotId: claim.slotId || null,
-      account: claim.account || null,
-      platform: claim.platform || null,
-      status: claim.status,
-      updatedAt: claim.updatedAt || null,
-      ageHours: Number.isFinite(updatedAt) ? Math.round(((Date.now() - updatedAt) / 3_600_000) * 10) / 10 : null
-    });
-  }
+  const evaluated = await mapWithConcurrency(blobs, blobFetchConcurrency(), (entry) => evaluateClaimBlob(owner, repo, entry, cutoff));
+  const stuck = evaluated.filter(Boolean);
   return { skipped: false, maxAgeHours: normalizedMaxAgeHours, stuck, truncated };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const report = await findStuckClaims();
   console.log(JSON.stringify(report, null, 2));
   if (report.truncated) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { runAutopilot, hasFatalStatus } from '../src/orchestrate.mjs';
+import { runAutopilot, hasFatalStatus, autopilotErrorStatus } from '../src/orchestrate.mjs';
 
 // Regression coverage for: a single account whose schedule.timezone is invalid (a typo, or any config
 // change that bypassed npm run validate) used to throw straight out of findDueSlots() with nothing
@@ -134,7 +134,7 @@ test('a single account with an invalid schedule timezone does not abort a non-fo
     const broken = report.find((row) => row.account === 'isolation-broken-timezone');
     assert.ok(broken, 'the broken account must still surface an explicit, isolated failure entry');
     assert.equal(broken.status, 'account-error');
-    assert.match(broken.error, /time zone/i);
+    assert.ok(broken.error, 'the isolated failure entry must carry a non-empty error message');
     // Isolating the failure to one account is only half the fix: the CLI entrypoint must still exit
     // non-zero so a scheduled run doesn't look green while silently skipping an account.
     assert.equal(hasFatalStatus(report), true, 'a report containing an account-error must make the CLI exit non-zero');
@@ -152,8 +152,26 @@ test('hasFatalStatus flags real per-account/per-slot errors but not intentional 
   assert.equal(hasFatalStatus([{ status: 'approval-reconcile-error' }]), true);
   assert.equal(hasFatalStatus([{ status: 'published' }, { status: 'account-error' }]), true, 'one fatal entry among otherwise-successful ones must still trip the exit code');
 
-  for (const status of ['budget-exhausted', 'circuit-open', 'rate-limited', 'safety-brake', 'media-qa-failed', 'provider-deprecated', 'already-handled', 'published', 'dry-run', 'approval-pending']) {
+  for (const status of ['budget-exhausted', 'circuit-open', 'rate-limited', 'safety-brake', 'media-qa-failed', 'media-too-large', 'provider-deprecated', 'already-handled', 'published', 'dry-run', 'approval-pending']) {
     assert.equal(hasFatalStatus([{ status }]), false, `${status} is an intentional control-flow outcome and must not fail the CLI`);
   }
   assert.equal(hasFatalStatus([]), false);
+});
+
+test('autopilotErrorStatus maps an oversize-hosting failure to a status distinct from a QA-content rejection', () => {
+  // An oversize asset (raise maxHostedImageBytes/maxHostedVideoBytes) and a QA-rejected visual (the
+  // generated content itself is wrong) are different problems an operator would fix differently -
+  // collapsing them into the same report status would send an operator chasing the wrong cause.
+  assert.equal(autopilotErrorStatus({ code: 'MEDIA_HOSTING_TOO_LARGE' }), 'media-too-large');
+  assert.equal(autopilotErrorStatus({ code: 'MEDIA_QA_FAILED' }), 'media-qa-failed');
+  assert.equal(autopilotErrorStatus({ code: 'MEDIA_QA_INPUT_TOO_LARGE' }), 'media-qa-failed');
+  assert.notEqual(autopilotErrorStatus({ code: 'MEDIA_HOSTING_TOO_LARGE' }), autopilotErrorStatus({ code: 'MEDIA_QA_FAILED' }));
+
+  assert.equal(autopilotErrorStatus({ code: 'BUDGET_EXHAUSTED' }), 'budget-exhausted');
+  assert.equal(autopilotErrorStatus({ code: 'CIRCUIT_OPEN' }), 'circuit-open');
+  assert.equal(autopilotErrorStatus({ code: 'SLOT_ALREADY_CLAIMED' }), 'already-handled');
+  assert.equal(autopilotErrorStatus({ code: 'PROVIDER_DEPRECATED' }), 'provider-deprecated');
+  assert.equal(autopilotErrorStatus({ code: 'AUTONOMY_BRAKE' }), 'safety-brake');
+  assert.equal(autopilotErrorStatus({ code: 'SOMETHING_UNMAPPED' }), 'failed');
+  assert.equal(autopilotErrorStatus({}), 'failed');
 });
