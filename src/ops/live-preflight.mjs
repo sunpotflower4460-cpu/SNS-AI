@@ -88,18 +88,20 @@ async function repositoryHostingCheck(required) {
 }
 
 async function durableStateBranchCheck() {
-  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY;
   const branch = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
-  if (!token || !repo) {
+  const required = String(process.env.SNS_REQUIRE_DURABLE_STATE || '').toLowerCase() === 'true';
+  if (!required) {
     return {
       checked: false,
       ok: null,
       branch,
       error: null,
-      note: 'Durable state branch was not verified because GitHub runtime metadata/token is unavailable. Run Live Preflight inside GitHub Actions before enabling auto mode.'
+      note: 'Durable state branch verification is deferred. The GitHub Live Preflight workflow enables the mandatory check before auto mode.'
     };
   }
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) return { checked: true, ok: false, branch, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
@@ -149,9 +151,9 @@ export async function runLivePreflight({ accountFilter } = {}) {
           oauth2Identity = await verifyXOAuth2Credential(resolved.credential);
           if (String(oauth2Identity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
           const scopes = String(oauth2Identity.session?.scope || '').split(/\s+/).filter(Boolean);
-          const required = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
+          const requiredScopes = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
           if (scopes.length) {
-            const missing = required.filter((scope) => !scopes.includes(scope));
+            const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
             if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
           }
         }
