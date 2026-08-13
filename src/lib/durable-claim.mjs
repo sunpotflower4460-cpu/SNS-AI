@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { githubContext, githubRequest } from './github.mjs';
@@ -11,6 +11,7 @@ const memory = new Map();
 const shaMemory = new Map();
 const HANDLED_STATUSES = new Set(['publishing', 'publish_unknown', 'published']);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const UNKNOWN_LOCK_STALE_MS = 30_000;
 
 function keyFor(slotId) {
   return createHash('sha256').update(String(slotId || '')).digest('hex').slice(0, 40);
@@ -32,16 +33,75 @@ function hasGithubRuntime() {
   return Boolean((process.env.GITHUB_TOKEN || process.env.GH_TOKEN) && process.env.GITHUB_REPOSITORY);
 }
 
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'EPERM') return true;
+    if (error.code === 'ESRCH') return false;
+    return true;
+  }
+}
+
+async function readLockOwner(lockPath) {
+  try {
+    const raw = await readFile(lockPath, 'utf8');
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    return null;
+  }
+}
+
+async function reclaimStaleLocalLock(lockPath) {
+  let info;
+  try {
+    info = await stat(lockPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return true;
+    throw error;
+  }
+
+  const owner = await readLockOwner(lockPath);
+  const ownerPid = Number(owner?.pid);
+  const knownDeadOwner = Number.isInteger(ownerPid) && ownerPid > 0 && !processAlive(ownerPid);
+  const unknownAndOld = (!Number.isInteger(ownerPid) || ownerPid <= 0) && Date.now() - info.mtimeMs >= UNKNOWN_LOCK_STALE_MS;
+  if (!knownDeadOwner && !unknownAndOld) return false;
+
+  try {
+    await unlink(lockPath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return true;
+    return false;
+  }
+}
+
+async function releaseOwnedLocalLock(lockPath, token) {
+  const current = await readLockOwner(lockPath);
+  if (!current || current.token !== token) return;
+  await unlink(lockPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+}
+
 async function withLocalLock(slotId, task) {
   const lockPath = localLockPath(slotId);
   await mkdir(dirname(lockPath), { recursive: true });
+  const token = randomBytes(16).toString('hex');
   let handle = null;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       handle = await open(lockPath, 'wx');
+      await handle.writeFile(JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }), 'utf8');
       break;
     } catch (error) {
+      if (handle) {
+        await handle.close().catch(() => {});
+        handle = null;
+      }
       if (error.code !== 'EEXIST') throw error;
+      if (await reclaimStaleLocalLock(lockPath)) continue;
       if (attempt === 99) throw new Error(`Timed out acquiring local durable claim lock for ${slotId}.`);
       await sleep(50);
     }
@@ -50,7 +110,7 @@ async function withLocalLock(slotId, task) {
     return await task();
   } finally {
     await handle?.close().catch(() => {});
-    await unlink(lockPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+    await releaseOwnedLocalLock(lockPath, token);
   }
 }
 
@@ -186,4 +246,15 @@ function resetForTests() {
   shaMemory.clear();
 }
 
-export const __test = { keyFor, relativePath, localPath, localLockPath, hasGithubRuntime, handledStatuses: HANDLED_STATUSES, resetForTests };
+export const __test = {
+  keyFor,
+  relativePath,
+  localPath,
+  localLockPath,
+  hasGithubRuntime,
+  handledStatuses: HANDLED_STATUSES,
+  resetForTests,
+  processAlive,
+  readLockOwner,
+  reclaimStaleLocalLock
+};
