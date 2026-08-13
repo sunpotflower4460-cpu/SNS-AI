@@ -6,11 +6,15 @@
 
 - [ ] Repository Actionsが有効
 - [ ] `SNS Autopilot` workflowがactive
+- [ ] durable idempotency用の **`sns-ai-state`** branchが存在
+- [ ] Live Preflightの`durableState.ok`がtrue
 - [ ] repositoryがpublic、またはbuilt-in media hostingを使わず外部public CDNを設定
 - [ ] `OPENAI_API_KEY` Secret登録
 - [ ] `SOCIAL_CREDENTIALS_JSON` Secret登録
 - [ ] X image/video利用時は`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）
 - [ ] optional external media利用時だけ`MEDIA_SERVICE_TOKEN`
+
+`sns-ai-state`は外部SNSへpublishする直前にslot claimを耐久保存する専用branchです。通常の履歴/state pushが投稿後に失敗しても、次runが同じslotを再送しないための最後のidempotency guardとして使います。削除しないでください。
 
 Autopilotは毎時`03,13,23,33,43,53`分にpollします。投稿scheduleはアカウントtimezoneの`times` + `windowMinutes`で判定します。
 
@@ -96,6 +100,7 @@ Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを�
 - [ ] CI green
 - [ ] Doctor `ready`
 - [ ] Live Preflight `ready`
+- [ ] Live Preflight `durableState.ok === true`
 - [ ] Autopilot `force=true / dry_run=true` success
 - [ ] generated draftを確認
 - [ ] media利用時controlled generation success
@@ -119,6 +124,7 @@ research / history / strategy
   → candidate selection
   → optional image/video generation
   → media moderation / visual QA
+  → durable slot claim on sns-ai-state
   → X / Instagram publish
   → history/state persistence
   → Metrics Collector

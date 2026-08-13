@@ -87,11 +87,78 @@ async function repositoryHostingCheck(required) {
   }
 }
 
+function githubHeaders(token) {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json'
+  };
+}
+
+async function durableStateBranchCheck() {
+  const branch = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
+  const required = String(process.env.SNS_REQUIRE_DURABLE_STATE || '').toLowerCase() === 'true';
+  if (!required) {
+    return {
+      checked: false,
+      ok: null,
+      branch,
+      writeVerified: false,
+      error: null,
+      note: 'Durable state branch verification is deferred. The GitHub Live Preflight workflow enables the mandatory write probe before auto mode.'
+    };
+  }
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) return { checked: true, ok: false, branch, writeVerified: false, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
+  const headers = githubHeaders(token);
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, { headers });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { checked: true, ok: false, branch, writeVerified: false, error: body?.message || `Durable state branch check failed with ${response.status}` };
+    if (body?.name !== branch) return { checked: true, ok: false, branch, writeVerified: false, error: 'GitHub returned a different durable state branch.' };
+
+    const probeId = `${process.env.GITHUB_RUN_ID || 'local'}-${process.env.GITHUB_RUN_ATTEMPT || '1'}-${Date.now()}`;
+    const probePath = `data/durable-claims/.preflight-${probeId}.json`;
+    const createResponse = await fetch(`https://api.github.com/repos/${repo}/contents/${probePath}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        message: 'chore: verify SNS durable state write access',
+        content: Buffer.from(`${JSON.stringify({ kind: 'sns-ai-preflight-probe', at: new Date().toISOString() })}\n`, 'utf8').toString('base64'),
+        branch
+      })
+    });
+    const created = await createResponse.json().catch(() => ({}));
+    if (!createResponse.ok || !created?.content?.sha) {
+      return { checked: true, ok: false, branch, writeVerified: false, error: created?.message || `Durable state write probe failed with ${createResponse.status}` };
+    }
+
+    const deleteResponse = await fetch(`https://api.github.com/repos/${repo}/contents/${probePath}`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({
+        message: 'chore: remove SNS durable state preflight probe',
+        sha: created.content.sha,
+        branch
+      })
+    });
+    const deleted = await deleteResponse.json().catch(() => ({}));
+    if (!deleteResponse.ok) {
+      return { checked: true, ok: false, branch, writeVerified: true, cleanupFailed: true, error: deleted?.message || `Durable state probe cleanup failed with ${deleteResponse.status}` };
+    }
+    return { checked: true, ok: true, branch, writeVerified: true, error: null };
+  } catch (error) {
+    return { checked: true, ok: false, branch, writeVerified: false, error: error.message };
+  }
+}
+
 export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false } };
+  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
@@ -110,6 +177,8 @@ export async function runLivePreflight({ accountFilter } = {}) {
 
   const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
+  const durableState = await durableStateBranchCheck();
+  const durableReady = durableState.checked ? durableState.ok === true : true;
 
   for (const [id, account] of selected) {
     try {
@@ -122,9 +191,9 @@ export async function runLivePreflight({ accountFilter } = {}) {
           oauth2Identity = await verifyXOAuth2Credential(resolved.credential);
           if (String(oauth2Identity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
           const scopes = String(oauth2Identity.session?.scope || '').split(/\s+/).filter(Boolean);
-          const required = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
+          const requiredScopes = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
           if (scopes.length) {
-            const missing = required.filter((scope) => !scopes.includes(scope));
+            const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
             if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
           }
         }
@@ -135,7 +204,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
       const ownModels = requiredModels(account);
       const ownModelFailures = modelChecks.filter((check) => ownModels.includes(check.model) && !check.ok);
       const mediaReady = !kind || mediaHosting.ok;
-      const accountReady = mediaReady && ownModelFailures.length === 0;
+      const accountReady = durableReady && mediaReady && ownModelFailures.length === 0;
       rows.push({
         account: id,
         platform: resolved.platform,
@@ -159,12 +228,13 @@ export async function runLivePreflight({ accountFilter } = {}) {
   }
 
   const modelFailure = modelChecks.some((check) => !check.ok);
-  const ok = !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
+  const ok = durableReady && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError && !modelFailure : null, error: openaiError, models: modelChecks },
     mediaHosting,
+    durableState,
     accounts: rows
   };
 }
@@ -180,3 +250,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exitCode = 1;
   }
 }
+
+export const __test = { durableStateBranchCheck };

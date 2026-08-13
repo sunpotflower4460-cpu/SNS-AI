@@ -24,6 +24,7 @@ jobs:
       X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_REQUIRE_DURABLE_STATE: 'true'
       INPUT_ACCOUNT: ${{ inputs.account }}
     steps:
       - uses: actions/checkout@v7

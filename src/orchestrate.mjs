@@ -5,7 +5,7 @@ import { slotHandled, markSlot } from './lib/state.mjs';
 import { checkRateLimits } from './lib/safety.mjs';
 import { generatePost } from './lib/openai.mjs';
 import { resolveMediaDetailed, ensureMediaForPlatform } from './lib/media.mjs';
-import { createApprovalIssue } from './lib/github.mjs';
+import { createApprovalIssue, findApprovalIssue } from './lib/github.mjs';
 import { appendAudit } from './lib/audit.mjs';
 import { loadStrategy } from './learning/store.mjs';
 import { loadTrendBrief } from './research/trends.mjs';
@@ -34,13 +34,30 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         if (!force && await slotHandled(slot.slotId)) { report.push({ account: accountId, slot: slot.slotId, status: 'already-handled' }); continue; }
       } catch (error) {
         report.push({ account: accountId, slot: slot.slotId, status: 'state-error', error: error.message });
-        await appendAudit({ account: accountId, stage: 'autopilot-state-error', slotId: slot.slotId, error: String(error.message || error).slice(0, 500) });
+        await appendAudit({ account: accountId, stage: 'autopilot-state-error', slotId: slot.slotId, error: String(error.message || error).slice(0, 500) }).catch(() => {});
         continue;
       }
+
+      if (!dryRun && !force && account.mode === 'approval') {
+        try {
+          const existingIssue = await findApprovalIssue(accountId, slot.slotId);
+          if (existingIssue) {
+            await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: existingIssue.number });
+            await appendAudit({ account: accountId, stage: 'approval-state-recovered', slotId: slot.slotId, issue: existingIssue.number }).catch(() => {});
+            report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending-recovered', issue: existingIssue.number });
+            continue;
+          }
+        } catch (error) {
+          await appendAudit({ account: accountId, stage: 'approval-reconcile-error', slotId: slot.slotId, error: String(error.message || error).slice(0, 500) }).catch(() => {});
+          report.push({ account: accountId, slot: slot.slotId, status: 'approval-reconcile-error', error: error.message });
+          continue;
+        }
+      }
+
       try { await assertAutonomyBrakeClear(accountId, account); }
       catch (error) {
         report.push({ account: accountId, slot: slot.slotId, status: 'safety-brake', reason: error.reason || error.message, openUntil: error.openUntil || null });
-        await appendAudit({ account: accountId, stage: 'autopilot-safety-brake', slotId: slot.slotId, reason: error.reason || null, openUntil: error.openUntil || null });
+        await appendAudit({ account: accountId, stage: 'autopilot-safety-brake', slotId: slot.slotId, reason: error.reason || null, openUntil: error.openUntil || null }).catch(() => {});
         continue;
       }
       try { await assertCircuitClosed(accountId, 'autopilot', account.resilience); }
@@ -84,22 +101,23 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 
         if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
-          const issue = await createApprovalIssue(accountId, slot.slotId, payload); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
+          const issue = await createApprovalIssue(accountId, slot.slotId, payload, { skipLookup: true }); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
           await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending', issue: issue.number, predictedScore: draft.predictedScore }); continue;
         }
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
-        report.push({ account: accountId, slot: slot.slotId, status: 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
+        report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'SLOT_ALREADY_CLAIMED'];
         if (!nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
           error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
-        });
+        }).catch(() => {});
         const status = error.code === 'BUDGET_EXHAUSTED' ? 'budget-exhausted'
           : error.code === 'CIRCUIT_OPEN' ? 'circuit-open'
-            : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
-              : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
+            : error.code === 'SLOT_ALREADY_CLAIMED' ? 'already-handled'
+              : error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE' ? 'media-qa-failed'
+                : error.code === 'AUTONOMY_BRAKE' ? 'safety-brake' : 'failed';
         report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }

@@ -24,7 +24,8 @@ export function buildStrategy({ accountId, account, history, snapshots, now = ne
     const scored = scoreSnapshot(snapshot, windowSnapshots, account.objectives?.weights || {});
     return { snapshot, post, score: scored.score, confidence: scored.confidence, features: historyFeatures(post, timeZone) };
   }).filter(Boolean);
-  const overall = mean(samples.map((s) => s.score)) || 50;
+  const sampleScores = samples.map((s) => s.score);
+  const overall = sampleScores.length ? mean(sampleScores) : 50;
   const featureStats = {};
   for (const dimension of FEATURE_DIMENSIONS) {
     const groups = new Map();

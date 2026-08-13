@@ -62,5 +62,8 @@ export async function resolveAccount(accountId, { allowDisabled = false } = {}) 
   const credentialKey = account.credentialKey || accountId;
   const credential = credentials[credentialKey];
   if (!credential) throw new Error(`No credentials found for key "${credentialKey}" in SOCIAL_CREDENTIALS_JSON.`);
-  return { id: accountId, ...account, credential };
+  const resolvedCredential = account.platform === 'x'
+    ? { ...credential, oauth2StateId: credential.oauth2StateId || credentialKey }
+    : credential;
+  return { id: accountId, ...account, credential: resolvedCredential };
 }
