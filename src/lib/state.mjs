@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { writeJsonAtomic } from './json-store.mjs';
 
 const STATE_FILE = fileURLToPath(new URL('../../data/state.json', import.meta.url));
 
@@ -23,8 +23,7 @@ async function saveState(state) {
     })
   );
 
-  await mkdir(dirname(STATE_FILE), { recursive: true });
-  await writeFile(STATE_FILE, `${JSON.stringify({ ...state, slots }, null, 2)}\n`, 'utf8');
+  await writeJsonAtomic(STATE_FILE, { ...state, slots });
 }
 
 export async function getSlot(slotId) {
