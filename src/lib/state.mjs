@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { durableClaimHandled } from './durable-claim.mjs';
 import { readJson, writeJsonAtomic } from './json-store.mjs';
 
 const STATE_FILE = fileURLToPath(new URL('../../data/state.json', import.meta.url));
@@ -49,5 +50,6 @@ export async function markSlot(slotId, status, detail = {}) {
 
 export async function slotHandled(slotId) {
   const slot = await getSlot(slotId);
-  return Boolean(slot && ['published', 'approval_pending', 'skipped'].includes(slot.status));
+  if (slot && ['published', 'approval_pending', 'skipped', 'publishing', 'publish_unknown'].includes(slot.status)) return true;
+  return durableClaimHandled(slotId);
 }
