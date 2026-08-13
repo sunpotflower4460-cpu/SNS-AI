@@ -87,6 +87,15 @@ async function repositoryHostingCheck(required) {
   }
 }
 
+function githubHeaders(token) {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json'
+  };
+}
+
 async function durableStateBranchCheck() {
   const branch = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
   const required = String(process.env.SNS_REQUIRE_DURABLE_STATE || '').toLowerCase() === 'true';
@@ -95,22 +104,53 @@ async function durableStateBranchCheck() {
       checked: false,
       ok: null,
       branch,
+      writeVerified: false,
       error: null,
-      note: 'Durable state branch verification is deferred. The GitHub Live Preflight workflow enables the mandatory check before auto mode.'
+      note: 'Durable state branch verification is deferred. The GitHub Live Preflight workflow enables the mandatory write probe before auto mode.'
     };
   }
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
-  if (!token || !repo) return { checked: true, ok: false, branch, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
+  if (!token || !repo) return { checked: true, ok: false, branch, writeVerified: false, error: 'GitHub runtime metadata/token is unavailable for durable state branch check.' };
+  const headers = githubHeaders(token);
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
-      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
-    });
+    const response = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`, { headers });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return { checked: true, ok: false, branch, error: body?.message || `Durable state branch check failed with ${response.status}` };
-    return { checked: true, ok: body?.name === branch, branch, error: body?.name === branch ? null : 'GitHub returned a different durable state branch.' };
+    if (!response.ok) return { checked: true, ok: false, branch, writeVerified: false, error: body?.message || `Durable state branch check failed with ${response.status}` };
+    if (body?.name !== branch) return { checked: true, ok: false, branch, writeVerified: false, error: 'GitHub returned a different durable state branch.' };
+
+    const probeId = `${process.env.GITHUB_RUN_ID || 'local'}-${process.env.GITHUB_RUN_ATTEMPT || '1'}-${Date.now()}`;
+    const probePath = `data/durable-claims/.preflight-${probeId}.json`;
+    const createResponse = await fetch(`https://api.github.com/repos/${repo}/contents/${probePath}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        message: 'chore: verify SNS durable state write access',
+        content: Buffer.from(`${JSON.stringify({ kind: 'sns-ai-preflight-probe', at: new Date().toISOString() })}\n`, 'utf8').toString('base64'),
+        branch
+      })
+    });
+    const created = await createResponse.json().catch(() => ({}));
+    if (!createResponse.ok || !created?.content?.sha) {
+      return { checked: true, ok: false, branch, writeVerified: false, error: created?.message || `Durable state write probe failed with ${createResponse.status}` };
+    }
+
+    const deleteResponse = await fetch(`https://api.github.com/repos/${repo}/contents/${probePath}`, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({
+        message: 'chore: remove SNS durable state preflight probe',
+        sha: created.content.sha,
+        branch
+      })
+    });
+    const deleted = await deleteResponse.json().catch(() => ({}));
+    if (!deleteResponse.ok) {
+      return { checked: true, ok: false, branch, writeVerified: true, cleanupFailed: true, error: deleted?.message || `Durable state probe cleanup failed with ${deleteResponse.status}` };
+    }
+    return { checked: true, ok: true, branch, writeVerified: true, error: null };
   } catch (error) {
-    return { checked: true, ok: false, branch, error: error.message };
+    return { checked: true, ok: false, branch, writeVerified: false, error: error.message };
   }
 }
 
