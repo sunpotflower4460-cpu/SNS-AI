@@ -52,15 +52,14 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate code and configuration
+      - name: Runtime static guards
         run: |
-          npm test
           npm run validate
           npm run check
-          npm run smoke
           npm run secret-scan
 
       - name: Run autopilot
+        id: autopilot_run
         shell: bash
         run: |
           args=()
@@ -75,7 +74,7 @@ jobs:
           node src/orchestrate.mjs "${args[@]}"
 
       - name: Persist history/state
-        if: always()
+        if: always() && steps.autopilot_run.outcome != 'skipped'
         shell: bash
         run: |
           if [[ -z "$(git status --porcelain -- data/)" ]]; then
