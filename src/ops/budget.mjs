@@ -11,6 +11,13 @@ const LIMIT_KEYS = {
   image: 'imageGenerationsPerDay',
   video: 'videoGenerationsPerDay'
 };
+let mutationQueue = Promise.resolve();
+
+function serializeMutation(task) {
+  const run = mutationQueue.then(task, task);
+  mutationQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 function dateFor(account) {
   const timeZone = account?.schedule?.timezone || account?.timezone || 'Asia/Tokyo';
@@ -28,19 +35,14 @@ function currentRow(state, accountId, account) {
   return { localDate: previous.localDate, counts: { ...(previous.counts || {}) } };
 }
 
-export async function usageToday(accountId, account, kind) {
-  const state = await loadState();
-  const row = currentRow(state, accountId, account);
-  return Number(row.counts?.[kind] || 0);
-}
-
-export async function assertUsageBudget(accountId, account, kind) {
+function budgetStatusFromState(state, accountId, account, kind) {
   if (account?.budgets?.enabled === false) return { allowed: true, disabled: true };
   const limitKey = LIMIT_KEYS[kind];
   if (!limitKey) return { allowed: true };
   const limit = Number(account?.budgets?.[limitKey]);
-  if (!Number.isFinite(limit) || limit <= 0) return { allowed: true, unlimited: true };
-  const used = await usageToday(accountId, account, kind);
+  if (!Number.isFinite(limit)) return { allowed: true, unlimited: true };
+  const row = currentRow(state, accountId, account);
+  const used = Number(row.counts?.[kind] || 0);
   if (used >= limit) {
     const error = new Error(`Daily ${kind} budget exhausted for ${accountId}: ${used}/${limit}.`);
     error.code = 'BUDGET_EXHAUSTED';
@@ -52,8 +54,7 @@ export async function assertUsageBudget(accountId, account, kind) {
   return { allowed: true, used, limit, remaining: limit - used };
 }
 
-export async function recordUsage(accountId, account, kind, detail = {}) {
-  const state = await loadState();
+async function recordUsageFromState(state, accountId, account, kind, detail = {}) {
   state.accounts ||= {};
   const rowState = currentRow(state, accountId, account);
   rowState.counts[kind] = Number(rowState.counts[kind] || 0) + 1;
@@ -72,8 +73,25 @@ export async function recordUsage(accountId, account, kind, detail = {}) {
   return row;
 }
 
+export async function usageToday(accountId, account, kind) {
+  const state = await loadState();
+  const row = currentRow(state, accountId, account);
+  return Number(row.counts?.[kind] || 0);
+}
+
+export async function assertUsageBudget(accountId, account, kind) {
+  return budgetStatusFromState(await loadState(), accountId, account, kind);
+}
+
+export async function recordUsage(accountId, account, kind, detail = {}) {
+  return serializeMutation(async () => recordUsageFromState(await loadState(), accountId, account, kind, detail));
+}
+
 export async function consumeUsage(accountId, account, kind, detail = {}) {
-  const status = await assertUsageBudget(accountId, account, kind);
-  await recordUsage(accountId, account, kind, detail);
-  return status;
+  return serializeMutation(async () => {
+    const state = await loadState();
+    const status = budgetStatusFromState(state, accountId, account, kind);
+    await recordUsageFromState(state, accountId, account, kind, detail);
+    return status;
+  });
 }

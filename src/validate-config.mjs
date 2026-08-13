@@ -3,6 +3,7 @@ import { validateTimeString } from './lib/schedule.mjs';
 
 function merged(config, account, key) { return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) }; }
 function positive(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) <= 0)) errors.push(`${id}: ${label} must be a positive number`); }
+function nonNegative(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < 0)) errors.push(`${id}: ${label} must be a non-negative number`); }
 function range(errors, id, label, value, min, max) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max)) errors.push(`${id}: ${label} must be ${min}..${max}`); }
 function validTimeZone(value) {
   if (!value || typeof value !== 'string') return false;
@@ -20,8 +21,9 @@ export function validateConfig(config) {
   const videoSeconds = new Set([4, 8, 12]);
   const qaDetails = new Set(['low', 'high', 'auto']);
   for (const [id, account] of Object.entries(config.accounts || {})) {
+    const mode = account.mode ?? config.defaults?.mode ?? 'pause';
     if (!platforms.has(account.platform)) errors.push(`${id}: invalid platform "${account.platform}"`);
-    if (!modes.has(account.mode || 'pause')) errors.push(`${id}: invalid mode "${account.mode}"`);
+    if (!modes.has(mode)) errors.push(`${id}: invalid mode "${mode}"`);
     for (const time of account.schedule?.times || []) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
     for (const time of account.schedule?.adaptiveCandidateTimes || []) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
     for (const day of account.schedule?.days || []) if (!dayNames.has(day)) errors.push(`${id}: invalid schedule day "${day}"`);
@@ -54,9 +56,11 @@ export function validateConfig(config) {
     positive(errors, id, 'resilience.cooldownMinutes', resilience.cooldownMinutes);
 
     const budgets = merged(config, account, 'budgets');
-    if (budgets.enabled !== false) for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay']) positive(errors, id, `budgets.${key}`, budgets[key]);
+    if (budgets.enabled !== false) for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay']) nonNegative(errors, id, `budgets.${key}`, budgets[key]);
 
     const safety = merged(config, account, 'safety');
+    nonNegative(errors, id, 'safety.maxPostsPerDay', safety.maxPostsPerDay);
+    nonNegative(errors, id, 'safety.minMinutesBetweenPosts', safety.minMinutesBetweenPosts);
     const brake = safety.anomalyBrake || {};
     if (brake.enabled !== false) {
       positive(errors, id, 'safety.anomalyBrake.matureCheckpointMinutes', brake.matureCheckpointMinutes);
@@ -109,7 +113,7 @@ export function validateConfig(config) {
       if (qa.detail && !qaDetails.has(qa.detail)) errors.push(`${id}: media.qa.detail must be low, high, or auto`);
     }
 
-    if (account.enabled && ['auto', 'approval'].includes(account.mode)) {
+    if (account.enabled && ['auto', 'approval'].includes(mode)) {
       if (!account.schedule?.times?.length) errors.push(`${id}: autonomous mode requires schedule.times`);
       if (account.platform === 'instagram') {
         if (strategy === 'none') errors.push(`${id}: Instagram autonomous mode requires media strategy`);

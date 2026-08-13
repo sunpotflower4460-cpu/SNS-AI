@@ -1,17 +1,18 @@
-import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { writeJsonAtomic } from './json-store.mjs';
+import { readJson, writeJsonAtomic } from './json-store.mjs';
 
 const STATE_FILE = fileURLToPath(new URL('../../data/state.json', import.meta.url));
+let mutationQueue = Promise.resolve();
+
+function serializeMutation(task) {
+  const run = mutationQueue.then(task, task);
+  mutationQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 export async function loadState() {
-  try {
-    const parsed = JSON.parse(await readFile(STATE_FILE, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : { slots: {} };
-  } catch (error) {
-    if (error.code === 'ENOENT') return { slots: {} };
-    throw error;
-  }
+  const parsed = await readJson(STATE_FILE, { slots: {} });
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : { slots: {} };
 }
 
 async function saveState(state) {
@@ -32,15 +33,18 @@ export async function getSlot(slotId) {
 }
 
 export async function markSlot(slotId, status, detail = {}) {
-  const state = await loadState();
-  state.slots ||= {};
-  state.slots[slotId] = {
-    status,
-    at: new Date().toISOString(),
-    ...detail
-  };
-  await saveState(state);
-  return state.slots[slotId];
+  return serializeMutation(async () => {
+    const state = await loadState();
+    state.slots ||= {};
+    const next = {
+      status,
+      at: new Date().toISOString(),
+      ...detail
+    };
+    state.slots[slotId] = next;
+    await saveState(state);
+    return next;
+  });
 }
 
 export async function slotHandled(slotId) {
