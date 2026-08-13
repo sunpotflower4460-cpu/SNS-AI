@@ -15,7 +15,7 @@ function providerPostId(result) { return result?.data?.id || result?.postId || r
 export async function publish(payload) {
   const account = await resolveAccount(payload.account);
   const text = String(payload.text || '').trim();
-  if (text) validateDraftText(account, text);
+  validateDraftText(account, text, { requireNonEmpty: false });
   const common = {
     text,
     mediaUrl: payload.mediaUrl || undefined,

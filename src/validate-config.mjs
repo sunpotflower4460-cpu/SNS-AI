@@ -14,8 +14,9 @@ export function validateConfig(config) {
   const videoSeconds = new Set([4, 8, 12]);
   const qaDetails = new Set(['low', 'high', 'auto']);
   for (const [id, account] of Object.entries(config.accounts || {})) {
+    const effectiveMode = account.mode || config.defaults?.mode || 'pause';
     if (!platforms.has(account.platform)) errors.push(`${id}: invalid platform "${account.platform}"`);
-    if (!modes.has(account.mode || 'pause')) errors.push(`${id}: invalid mode "${account.mode}"`);
+    if (!modes.has(effectiveMode)) errors.push(`${id}: invalid mode "${account.mode}"`);
     for (const time of account.schedule?.times || []) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
     for (const time of account.schedule?.adaptiveCandidateTimes || []) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
 
@@ -97,7 +98,7 @@ export function validateConfig(config) {
       if (qa.detail && !qaDetails.has(qa.detail)) errors.push(`${id}: media.qa.detail must be low, high, or auto`);
     }
 
-    if (account.enabled && ['auto', 'approval'].includes(account.mode)) {
+    if (account.enabled && ['auto', 'approval'].includes(effectiveMode)) {
       if (!account.schedule?.times?.length) errors.push(`${id}: autonomous mode requires schedule.times`);
       if (account.platform === 'instagram') {
         if (strategy === 'none') errors.push(`${id}: Instagram autonomous mode requires media strategy`);
