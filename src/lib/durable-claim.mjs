@@ -126,16 +126,20 @@ async function readRemote(slotId) {
     memory.set(slotId, claim);
     return claim;
   } catch (error) {
-    if (error.status === 404) return null;
+    if (error.status === 404) {
+      shaMemory.delete(slotId);
+      memory.delete(slotId);
+      return null;
+    }
     throw error;
   }
 }
 
-async function writeRemote(slotId, claim) {
+async function writeRemote(slotId, claim, { refreshShaIfMissing = true } = {}) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
   let sha = shaMemory.get(slotId) || null;
-  if (!sha) {
+  if (!sha && refreshShaIfMissing) {
     await readRemote(slotId);
     sha = shaMemory.get(slotId) || null;
   }
@@ -152,6 +156,19 @@ async function writeRemote(slotId, claim) {
   if (result?.content?.sha) shaMemory.set(slotId, result.content.sha);
   memory.set(slotId, claim);
   return claim;
+}
+
+function remoteWriteConflict(error) {
+  return [409, 422].includes(Number(error?.status));
+}
+
+async function reconcileBeginConflict(slotId, originalError) {
+  if (!remoteWriteConflict(originalError)) throw originalError;
+  const raced = await readRemote(slotId);
+  if (!raced) throw originalError;
+  const check = assertClaimCanBegin(slotId, raced);
+  if (check.replay) return { claimed: false, replay: true, claim: raced };
+  throw originalError;
 }
 
 async function readLocal(slotId) {
@@ -219,8 +236,12 @@ export async function beginPublishClaim(slotId, detail = {}) {
     const existing = await getDurableClaim(slotId, { fresh: true });
     const check = assertClaimCanBegin(slotId, existing);
     if (check.replay) return { claimed: false, replay: true, claim: existing };
-    const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail));
-    return { claimed: true, replay: false, claim };
+    try {
+      const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail), { refreshShaIfMissing: false });
+      return { claimed: true, replay: false, claim };
+    } catch (error) {
+      return reconcileBeginConflict(slotId, error);
+    }
   }
   return withLocalLock(slotId, async () => {
     const existing = await readLocal(slotId);
@@ -256,5 +277,6 @@ export const __test = {
   resetForTests,
   processAlive,
   readLockOwner,
-  reclaimStaleLocalLock
+  reclaimStaleLocalLock,
+  remoteWriteConflict
 };

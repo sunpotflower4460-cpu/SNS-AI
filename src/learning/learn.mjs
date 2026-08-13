@@ -57,7 +57,9 @@ export function buildStrategy({ accountId, account, history, snapshots, now = ne
 }
 
 export async function learnAll({ accountFilter } = {}) {
-  const accounts = await loadAccounts(); const history = await readHistory(); const snapshots = await readMetricSnapshots(); const report = [];
+  const accounts = await loadAccounts();
+  if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
+  const history = await readHistory(); const snapshots = await readMetricSnapshots(); const report = [];
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue; if (account.learning?.enabled === false) continue;
     const strategy = buildStrategy({ accountId, account, history, snapshots }); await saveStrategy(accountId, strategy);

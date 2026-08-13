@@ -113,7 +113,7 @@ test('autopilot dry-run exercises the full decision path without calling a publi
   }
 });
 
-test('approval mode creates the approval label and issue and marks the slot pending', async () => {
+test('approval mode creates one trusted approval issue and force retry recovers it without regenerating', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('OPENAI_API_KEY', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
@@ -124,19 +124,36 @@ test('approval mode creates the approval label and issue and marks the slot pend
     process.env.GITHUB_TOKEN = 'test-github-token';
     process.env.GITHUB_REPOSITORY = 'owner/repo';
     const calls = [];
+    let createdIssue = null;
+    let generationCalls = 0;
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url); calls.push({ target, options });
-      if (target === 'https://api.openai.com/v1/responses') return jsonResponse(generationResponse());
+      if (target === 'https://api.openai.com/v1/responses') {
+        generationCalls += 1;
+        return jsonResponse(generationResponse());
+      }
+      if (target.startsWith('https://api.github.com/repos/owner/repo/issues?state=open') && !options.method) {
+        return jsonResponse(createdIssue ? [createdIssue] : []);
+      }
       if (target === 'https://api.github.com/repos/owner/repo/labels/approved' && !options.method) return jsonResponse({ message: 'Not Found' }, 404);
       if (target === 'https://api.github.com/repos/owner/repo/labels' && options.method === 'POST') return jsonResponse({ name: 'approved' }, 201);
-      if (target === 'https://api.github.com/repos/owner/repo/issues' && options.method === 'POST') return jsonResponse({ number: 42 }, 201);
+      if (target === 'https://api.github.com/repos/owner/repo/issues' && options.method === 'POST') {
+        const request = JSON.parse(options.body);
+        createdIssue = { number: 42, title: request.title, body: request.body, user: { login: 'github-actions[bot]' } };
+        return jsonResponse(createdIssue, 201);
+      }
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
-    const report = await runAutopilot({ accountFilter: 'branch-x', force: true, dryRun: false, now: new Date('2026-08-13T00:00:00+09:00') });
-    assert.equal(report[0].status, 'approval-pending');
-    assert.equal(report[0].issue, 42);
-    assert.equal(calls.some((row) => row.target.endsWith('/labels') && row.options.method === 'POST'), true);
-    assert.equal(calls.some((row) => row.target.endsWith('/issues') && row.options.method === 'POST'), true);
+    const now = new Date('2026-08-13T00:00:00+09:00');
+    const first = await runAutopilot({ accountFilter: 'branch-x', force: true, dryRun: false, now });
+    assert.equal(first[0].status, 'approval-pending');
+    assert.equal(first[0].issue, 42);
+
+    const second = await runAutopilot({ accountFilter: 'branch-x', force: true, dryRun: false, now });
+    assert.equal(second[0].status, 'approval-pending-recovered');
+    assert.equal(second[0].issue, 42);
+    assert.equal(generationCalls, 1);
+    assert.equal(calls.filter((row) => row.target.endsWith('/issues') && row.options.method === 'POST').length, 1);
   } finally {
     globalThis.fetch = previousFetch; restoreEnv(env); await restoreFiles(files);
   }

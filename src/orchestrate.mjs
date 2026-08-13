@@ -21,6 +21,7 @@ function bool(value) { return value === true || String(value).toLowerCase() === 
 
 export async function runAutopilot({ now = new Date(), accountFilter, force = false, dryRun = false } = {}) {
   const accounts = await loadAccounts(); const report = [];
+  if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue; if (!account.enabled) continue; if (!['auto', 'approval'].includes(account.mode)) continue;
     const strategy = account.learning?.enabled === false ? null : await loadStrategy(accountId);
@@ -38,7 +39,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         continue;
       }
 
-      if (!dryRun && !force && account.mode === 'approval') {
+      if (!dryRun && account.mode === 'approval') {
         try {
           const existingIssue = await findApprovalIssue(accountId, slot.slotId);
           if (existingIssue) {
@@ -101,7 +102,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 
         if (dryRun) { await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'dry-run', payload }); continue; }
         if (account.mode === 'approval') {
-          const issue = await createApprovalIssue(accountId, slot.slotId, payload, { skipLookup: true }); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
+          const issue = await createApprovalIssue(accountId, slot.slotId, payload); await markSlot(slot.slotId, 'approval_pending', { account: accountId, issue: issue.number });
           await recordCircuitSuccess(accountId, 'autopilot', account.resilience); report.push({ account: accountId, slot: slot.slotId, status: 'approval-pending', issue: issue.number, predictedScore: draft.predictedScore }); continue;
         }
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);

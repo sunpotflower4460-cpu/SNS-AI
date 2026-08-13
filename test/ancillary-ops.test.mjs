@@ -112,19 +112,25 @@ test('maintenance compacts duplicates, archives expired rows, and quarantines ma
   } finally { restoreEnv(env); }
 });
 
-test('stale approval maintenance closes only expired approval issues', async () => {
+test('stale approval maintenance closes only expired trusted approval issues', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   process.env.GH_TOKEN = 'gh-test-token'; delete process.env.GITHUB_TOKEN; process.env.GITHUB_REPOSITORY = 'owner/repo';
   try {
+    const trustedBody = (slotId) => JSON.stringify({
+      account: 'example-x', slotId,
+      _snsAi: { kind: 'sns-ai-approval', version: 1, account: 'example-x', slotId }
+    });
     const calls = [];
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url); calls.push({ target, method: options.method || 'GET' });
       if (target.includes('/issues?state=open')) return new Response(JSON.stringify([
-        { number: 5, title: '[approval] example-x old', created_at: '2020-01-01T00:00:00.000Z' },
-        { number: 6, title: '[approval] example-x fresh', created_at: new Date().toISOString() },
-        { number: 7, title: '[approval] pr-shaped', created_at: '2020-01-01T00:00:00.000Z', pull_request: {} },
-        { number: 8, title: 'ordinary issue', created_at: '2020-01-01T00:00:00.000Z' }
+        { number: 5, title: '[approval] example-x old', body: trustedBody('old'), user: { login: 'github-actions[bot]' }, created_at: '2020-01-01T00:00:00.000Z' },
+        { number: 6, title: '[approval] example-x fresh', body: trustedBody('fresh'), user: { login: 'github-actions[bot]' }, created_at: new Date().toISOString() },
+        { number: 7, title: '[approval] example-x forged', body: trustedBody('forged'), user: { login: 'someone-else' }, created_at: '2020-01-01T00:00:00.000Z' },
+        { number: 8, title: '[approval] example-x malformed', body: '{}', user: { login: 'github-actions[bot]' }, created_at: '2020-01-01T00:00:00.000Z' },
+        { number: 9, title: '[approval] example-x pr-shaped', body: trustedBody('pr-shaped'), user: { login: 'github-actions[bot]' }, created_at: '2020-01-01T00:00:00.000Z', pull_request: {} },
+        { number: 10, title: 'ordinary issue', created_at: '2020-01-01T00:00:00.000Z' }
       ]), { status: 200, headers: { 'content-type': 'application/json' } });
       if (target.endsWith('/issues/5/comments')) return new Response(JSON.stringify({ id: 1 }), { status: 201, headers: { 'content-type': 'application/json' } });
       if (target.endsWith('/issues/5')) return new Response(JSON.stringify({ number: 5, state: 'closed' }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -135,6 +141,8 @@ test('stale approval maintenance closes only expired approval issues', async () 
     assert.deepEqual(result.closed, [5]);
     assert.equal(calls.some((x) => x.target.endsWith('/issues/5/comments') && x.method === 'POST'), true);
     assert.equal(calls.some((x) => x.target.endsWith('/issues/5') && x.method === 'PATCH'), true);
+    assert.equal(calls.some((x) => /\/issues\/(7|8|9|10)(?:\/|$)/.test(x.target) && x.method !== 'GET'), false);
+    await assert.rejects(expireStaleApprovals({ maxAgeDays: Number.NaN }), /positive number/);
   } finally { globalThis.fetch = previousFetch; restoreEnv(env); }
 });
 

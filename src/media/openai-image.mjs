@@ -13,9 +13,9 @@ function digest(value) { return createHash('sha256').update(String(value)).diges
 async function generateImage(accountId, account, prompt) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('Built-in image generation requires OPENAI_API_KEY.');
-  await consumeUsage(accountId, account, 'image', { model: account.media?.imageModel || 'gpt-image-1' });
+  await consumeUsage(accountId, account, 'image', { model: account.media?.imageModel || 'gpt-image-2' });
   const body = {
-    model: account.media?.imageModel || 'gpt-image-1',
+    model: account.media?.imageModel || 'gpt-image-2',
     prompt,
     size: account.media?.imageSize || '1024x1024',
     quality: account.media?.imageQuality || 'medium',
@@ -63,7 +63,7 @@ export async function generateAndHostImageDetailed(accountId, account, slotId, d
   let prompt = originalPrompt;
   let lastQa = null;
 
-  const model = account.media?.imageModel || 'gpt-image-1';
+  const model = account.media?.imageModel || 'gpt-image-2';
   const size = account.media?.imageSize || '1024x1024';
   const quality = account.media?.imageQuality || 'medium';
   for (let attempt = 0; attempt <= maxRegenerations; attempt += 1) {

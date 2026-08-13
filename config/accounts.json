@@ -85,7 +85,7 @@
       "strategy": "none",
       "internalImageGeneration": true,
       "internalVideoGeneration": true,
-      "imageModel": "gpt-image-1",
+      "imageModel": "gpt-image-2",
       "imageSize": "1024x1024",
       "imageQuality": "medium",
       "videoModel": "sora-2",

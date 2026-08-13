@@ -44,7 +44,7 @@ function requiredModels(account) {
     models.add(account.research?.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5');
   }
   const kind = builtInMediaKind(account);
-  if (kind === 'image') models.add(account.media?.imageModel || 'gpt-image-1');
+  if (kind === 'image') models.add(account.media?.imageModel || 'gpt-image-2');
   if (kind === 'video') models.add(account.media?.videoModel || 'sora-2');
   if (kind && account.media?.qa?.enabled !== false) models.add(account.media?.qa?.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5');
   return [...models];

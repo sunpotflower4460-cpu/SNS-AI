@@ -23,6 +23,7 @@ async function evaluateBrakeSafely(accountId, account, snapshots, report) {
 
 export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
   const accounts = await loadAccounts();
+  if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   const history = await readHistory();
   const existing = await readMetricSnapshots();
   const report = [];
