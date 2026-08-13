@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export async function readJson(path, fallback = null) {
@@ -8,9 +9,13 @@ export async function readJson(path, fallback = null) {
 
 export async function writeJsonAtomic(path, value) {
   await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await rename(temp, path);
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true }).catch(() => {});
+  }
 }
 
 export async function readJsonl(path) {
