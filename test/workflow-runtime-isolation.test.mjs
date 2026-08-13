@@ -29,3 +29,10 @@ test('Autopilot and Publish persistence only follows an attempted runtime action
   assert.match(publish, /id:\s*publish_run/);
   assert.match(publish, /steps\.publish_run\.outcome\s*!=\s*'skipped'/);
 });
+
+test('Metrics does not refresh report timestamps when there is no due runtime work', async () => {
+  const metrics = await readFile(join(WORKFLOWS, 'metrics.yml'), 'utf8');
+  assert.match(metrics, /did_work=false/);
+  assert.match(metrics, /did_work=true/);
+  assert.match(metrics, /steps\.metrics_run\.outputs\.did_work\s*==\s*'true'/);
+});

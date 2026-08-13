@@ -39,6 +39,7 @@ jobs:
         id: metrics_run
         shell: bash
         run: |
+          echo "did_work=false" >> "$GITHUB_OUTPUT"
           if [[ ! -s data/history.jsonl ]]; then
             echo "No published post history yet; nothing to collect."
             exit 0
@@ -49,15 +50,20 @@ jobs:
           fi
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
-          node src/analytics/collector.mjs "${args[@]}"
+          node src/analytics/collector.mjs "${args[@]}" | tee metrics-result.json
+          if jq -e 'length > 0' metrics-result.json >/dev/null; then
+            echo "did_work=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No due metrics or runtime events; skipping report refresh."
+          fi
       - name: Refresh readable report
-        id: metrics_report
-        if: always() && steps.metrics_run.outcome != 'skipped'
+        if: steps.metrics_run.outcome == 'success' && steps.metrics_run.outputs.did_work == 'true'
         run: node src/reports/generate.mjs
       - name: Persist metrics/report
         if: always() && steps.metrics_run.outcome != 'skipped'
         shell: bash
         run: |
+          rm -f metrics-result.json
           if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
