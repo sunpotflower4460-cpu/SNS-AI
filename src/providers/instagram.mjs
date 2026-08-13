@@ -63,36 +63,52 @@ export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image
 
   const base = `https://graph.instagram.com/${apiVersion}`;
   const createUrl = `${base}/${credential.igUserId}/media`;
-  const created = await fetchJson(createUrl, {
-    method: 'POST',
-    headers: authHeaders(credential.accessToken),
-    body: mediaContainerForm({ text, mediaUrl, mediaType })
-  });
-  const containerId = created?.id;
-  if (!containerId) throw new Error(`Instagram returned no container id: ${JSON.stringify(created)}`);
+  let containerId;
+  try {
+    const created = await fetchJson(createUrl, {
+      method: 'POST',
+      headers: authHeaders(credential.accessToken),
+      body: mediaContainerForm({ text, mediaUrl, mediaType })
+    });
+    containerId = created?.id;
+    if (!containerId) throw new Error(`Instagram returned no container id: ${JSON.stringify(created)}`);
+  } catch (error) {
+    error.publishStage ||= 'media-container';
+    throw error;
+  }
 
-  await waitForContainer({
-    base,
-    containerId,
-    accessToken: credential.accessToken,
-    timeoutMinutes: credential.containerTimeoutMinutes ?? 5,
-    pollSeconds: credential.containerPollSeconds ?? 3
-  });
+  try {
+    await waitForContainer({
+      base,
+      containerId,
+      accessToken: credential.accessToken,
+      timeoutMinutes: credential.containerTimeoutMinutes ?? 5,
+      pollSeconds: credential.containerPollSeconds ?? 3
+    });
+  } catch (error) {
+    error.publishStage ||= 'media-processing';
+    throw error;
+  }
 
   const publishUrl = `${base}/${credential.igUserId}/media_publish`;
-  const published = await fetchJson(publishUrl, {
-    method: 'POST',
-    headers: authHeaders(credential.accessToken),
-    body: publishContainerForm(containerId)
-  });
+  try {
+    const published = await fetchJson(publishUrl, {
+      method: 'POST',
+      headers: authHeaders(credential.accessToken),
+      body: publishContainerForm(containerId)
+    });
 
-  return {
-    platform: 'instagram',
-    postId: published?.id,
-    containerId,
-    mediaType,
-    raw: published
-  };
+    return {
+      platform: 'instagram',
+      postId: published?.id,
+      containerId,
+      mediaType,
+      raw: published
+    };
+  } catch (error) {
+    error.publishStage ||= 'publish';
+    throw error;
+  }
 }
 
 export const __test = { mediaContainerForm, publishContainerForm };
