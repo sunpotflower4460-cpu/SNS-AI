@@ -63,16 +63,6 @@ export function usesBuiltInVideoGeneration(account) {
   return (account.media?.type || 'image') === 'reel' && usesBuiltInMedia(account);
 }
 
-// A STRICT subset of usesBuiltInVideoGeneration above: true only when built-in video generation is
-// UNCONDITIONALLY reached (strategy: 'generate'), never merely possible ('auto', where the AI might
-// instead pick 'library'/'none' and still succeed without ever calling the Videos API). Callers that
-// need to skip a real, paid call ahead of time - not just warn about it - must gate on this stricter
-// check: gating on the broader usesBuiltInVideoGeneration would incorrectly block 'auto' accounts that
-// could still have published successfully via a non-video path.
-export function alwaysUsesBuiltInVideoGeneration(account) {
-  return (account.media?.type || 'image') === 'reel' && (account.media?.strategy || 'none') === 'generate' && usesBuiltInMedia(account);
-}
-
 function usesOpenAI(account) {
   return ['auto', 'approval'].includes(account.mode)
     || account.research?.webSearch === true

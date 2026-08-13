@@ -3,17 +3,26 @@ import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runAutopilot } from '../src/orchestrate.mjs';
-import { VIDEOS_API_DEPRECATION_DATE } from '../src/media/openai-video.mjs';
 
 // Regression coverage for: once the confirmed OpenAI Videos API shutdown date passes, an account whose
-// Reel strategy UNCONDITIONALLY reaches built-in video generation (media.strategy: 'generate') was
-// still paying for a full generatePost() call on every scheduled run before failing at
-// PROVIDER_DEPRECATED deep inside media generation. Because autopilot.yml runs every 10 minutes and
-// PROVIDER_DEPRECATED is excluded from the resilience circuit (by design - it must not open a real
-// outage circuit for a permanent shutdown), nothing ever stopped this: the same due slot (and every
-// future day's slot) would keep re-paying for text generation with zero chance of ever publishing.
-// This test fails on the pre-fix code (generatePost is still called) and passes on the fix (the account
-// fails fast at zero cost, before any OpenAI call).
+// Reel strategy unconditionally reaches built-in video generation (media.strategy: 'generate') hits a
+// permanent PROVIDER_DEPRECATED failure deep inside media generation - a failure that is, by design,
+// excluded from the resilience circuit (a permanent shutdown must not look like a transient provider
+// outage). With nothing else to stop it, the same due slot would keep re-paying for a full
+// generatePost() call on every subsequent poll within its scheduling window (autopilot.yml runs every
+// 10 minutes) with zero chance of ever publishing.
+//
+// An earlier version of this fix added an orchestrate-level guard that skipped generatePost() entirely
+// ahead of time - but that also silently broke two other things: (a) dry-run previews, which must still
+// exercise the full decision path even for a permanently-deprecated backend (documented design), and
+// (b) the media-generation cache-hit path, since the cache key depends on the AI-generated mediaPrompt
+// that only exists AFTER generatePost() has run - an early guard made an already-cached, QA-approved
+// video permanently unreachable through the normal autopilot entrypoint. The actual fix instead lets
+// the (single) live failure happen normally and then persists a terminal 'skipped' state for the slot,
+// bounding the waste to at most one paid attempt per slot per scheduling window.
+//
+// This test fails on the pre-fix code (the second poll within the same window re-attempts generation)
+// and passes on the fix (the second poll sees 'already-handled' and never calls generatePost again).
 
 const CONFIG_FILE = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
 const DURABLE_DIR = fileURLToPath(new URL('../data/durable-claims/', import.meta.url));
@@ -45,6 +54,9 @@ async function restoreFiles(saved) {
     if (bytes === null) await rm(path, { force: true }); else await writeFile(path, bytes);
   }
 }
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+}
 
 function account(strategy) {
   return {
@@ -66,30 +78,55 @@ async function installAccount(strategy) {
   await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
-const AFTER_SHUTDOWN = new Date(Date.parse(VIDEOS_API_DEPRECATION_DATE) + 86_400_000);
+function generationResponse(mediaDecision) {
+  return jsonResponse({ output_text: JSON.stringify({ candidates: [{
+    text: 'A post needing a Reel.', mediaPrompt: 'a scene', rationale: 'deprecated-media-skip coverage', spreadPotential: 55, noveltyPotential: 52,
+    features: { topic: 'test', angle: 'a', hook: 'statement', emotion: 'neutral', format: 'short', cta: 'none', mediaDecision, trendUsed: false }
+  }] }) });
+}
 
-test('an account whose Reel strategy unconditionally reaches built-in video generation fails fast at zero cost once the Videos API shutdown date has passed', async () => {
+// A local date/time whose UTC instant is past the confirmed shutdown date, but whose Asia/Tokyo local
+// time still falls inside the account's 08:00-08:30 schedule window - so the SAME slotId is due at both
+// FIRST_POLL and SECOND_POLL, exactly like two real autopilot.yml runs 10 minutes apart would see.
+const FIRST_POLL = new Date('2026-09-24T23:15:00Z'); // 2026-09-25 08:15 JST
+const SECOND_POLL = new Date('2026-09-24T23:25:00Z'); // 2026-09-25 08:25 JST
+
+test('a live PROVIDER_DEPRECATED failure marks the slot skipped, so the next poll within the same window does not re-pay for generation', async () => {
   const previousFetch = globalThis.fetch;
-  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_REF_NAME');
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     for (const path of DATA_FILES) await rm(path, { force: true });
     await rm(DURABLE_DIR, { recursive: true, force: true });
     await installAccount('generate');
     process.env.OPENAI_API_KEY = 'test-openai-key';
-    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
-      'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' }
-    });
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
+    process.env.GH_TOKEN = 'test-gh-token';
+    delete process.env.GITHUB_TOKEN;
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.GITHUB_REF_NAME = 'main';
 
-    let anyCallMade = false;
+    let generateCalls = 0;
+    let videosApiCalls = 0;
     globalThis.fetch = async (url) => {
-      anyCallMade = true;
-      throw new Error(`No OpenAI/provider call should have been made, but one was attempted: ${String(url)}`);
+      const target = String(url);
+      if (target === 'https://api.openai.com/v1/responses') { generateCalls += 1; return generationResponse('generate'); }
+      if (target === 'https://api.github.com/repos/owner/repo') return jsonResponse({ private: false });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/tags/sns-ai-media') return jsonResponse({ id: 7, assets: [] });
+      if (target === 'https://api.github.com/repos/owner/repo/releases/7/assets?per_page=100&page=1') return jsonResponse([]);
+      if (target.startsWith('https://api.openai.com/v1/videos')) { videosApiCalls += 1; throw new Error(`No OpenAI Videos API call should ever succeed past the shutdown date: ${target}`); }
+      if (target.startsWith('https://api.github.com/repos/owner/repo/contents/data/durable-claims/')) return jsonResponse({ message: 'Not Found' }, 404);
+      throw new Error(`Unexpected mocked URL: ${target}`);
     };
 
-    const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', force: true, dryRun: false, now: AFTER_SHUTDOWN });
-    assert.equal(report[0].status, 'provider-deprecated', `expected an immediate provider-deprecated failure, got: ${JSON.stringify(report[0])}`);
-    assert.equal(anyCallMade, false, 'the account must fail before ever calling generatePost() - zero paid API calls, not a failure deep inside generation');
+    const firstReport = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: FIRST_POLL });
+    assert.equal(firstReport[0].status, 'provider-deprecated', `expected the first poll to fail with provider-deprecated, got: ${JSON.stringify(firstReport[0])}`);
+    assert.equal(generateCalls, 1, 'the first poll must still attempt generation once (dry-run/cache-reuse must not be broken by an early guard)');
+    assert.equal(videosApiCalls, 0, 'the Videos API itself must never actually be called, only OpenAI billed for the text generation');
+
+    const secondReport = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: false, now: SECOND_POLL });
+    assert.equal(secondReport[0].status, 'already-handled', `expected the second poll (same due window) to see the slot already handled, got: ${JSON.stringify(secondReport[0])}`);
+    assert.equal(generateCalls, 1, 'the second poll within the same scheduling window must NOT pay for a second generatePost() call');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
@@ -98,7 +135,7 @@ test('an account whose Reel strategy unconditionally reaches built-in video gene
   }
 });
 
-test('an "auto" strategy Reel account is NOT pre-emptively blocked - it may still succeed via a non-video mediaDecision', async () => {
+test('an "auto" strategy Reel account may still succeed via a non-video mediaDecision, even past the shutdown date', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
@@ -107,31 +144,20 @@ test('an "auto" strategy Reel account is NOT pre-emptively blocked - it may stil
     await rm(DURABLE_DIR, { recursive: true, force: true });
     await installAccount('auto');
     process.env.OPENAI_API_KEY = 'test-openai-key';
-    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
-      'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' }
-    });
+    process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'deprecated-media-ig': { accessToken: 'at', igUserId: 'ig' } });
 
-    // The AI-chosen candidate picks mediaDecision: 'none', so this run never even attempts built-in
-    // video generation - an 'auto' account must still be given the chance to reach this outcome
-    // instead of being hard-blocked purely because the strategy COULD have chosen 'generate'.
     let generateCalls = 0;
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
-      if (target === 'https://api.openai.com/v1/responses') {
-        generateCalls += 1;
-        return new Response(JSON.stringify({ output_text: JSON.stringify({ candidates: [{
-          text: 'A post with no media.', mediaPrompt: '', rationale: 'auto strategy without video', spreadPotential: 55, noveltyPotential: 52,
-          features: { topic: 'test', angle: 'a', hook: 'statement', emotion: 'neutral', format: 'short', cta: 'none', mediaDecision: 'none', trendUsed: false }
-        }] }) }), { status: 200, headers: { 'content-type': 'application/json' } });
-      }
+      if (target === 'https://api.openai.com/v1/responses') { generateCalls += 1; return generationResponse('none'); }
       if (target.startsWith('https://graph.instagram.com/') || target.startsWith('https://graph.facebook.com/')) {
         throw new Error(`Unexpected publish-path call for a text-only mediaDecision: ${target}`);
       }
       throw new Error(`Unexpected mocked URL: ${target} ${options.method || 'GET'}`);
     };
 
-    const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', force: true, dryRun: true, now: AFTER_SHUTDOWN });
-    assert.notEqual(report[0].status, 'provider-deprecated', `'auto' must not be hard-blocked ahead of generation, got: ${JSON.stringify(report[0])}`);
+    const report = await runAutopilot({ accountFilter: 'deprecated-media-ig', dryRun: true, now: FIRST_POLL });
+    assert.notEqual(report[0].status, 'provider-deprecated', `an 'auto' account choosing mediaDecision:'none' must not fail as provider-deprecated, got: ${JSON.stringify(report[0])}`);
     assert.equal(generateCalls, 1, 'an auto-strategy account must still be allowed to attempt generation');
   } finally {
     globalThis.fetch = previousFetch;

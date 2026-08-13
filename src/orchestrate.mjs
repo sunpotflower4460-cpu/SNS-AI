@@ -14,8 +14,6 @@ import { loadExperimentState } from './experiments/store.mjs';
 import { assignmentForSlot } from './experiments/engine.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
 import { assertAutonomyBrakeClear } from './ops/brake.mjs';
-import { alwaysUsesBuiltInVideoGeneration } from './ops/doctor.mjs';
-import { assertVideosApiStillAvailable } from './media/openai-video.mjs';
 import { publish } from './publish.mjs';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
@@ -114,24 +112,6 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       }
       if (!rate.ok) { report.push({ account: accountId, slot: slot.slotId, status: 'rate-limited', reason: rate.reason }); continue; }
 
-      // For an account whose Reel strategy UNCONDITIONALLY reaches built-in video generation
-      // ('generate' - see alwaysUsesBuiltInVideoGeneration), the eventual PROVIDER_DEPRECATED failure
-      // inside generateAndHostVideoDetailed is not a maybe - it is certain. Without this early,
-      // zero-cost check, autopilot.yml's every-10-minutes schedule would keep paying for a fresh
-      // generatePost() call for the same due slot (and again for every future day's slot) forever,
-      // with zero chance of ever publishing, since the Videos API shutdown never self-heals. 'auto'
-      // accounts are deliberately NOT gated here - the AI might still pick 'library'/'none' and
-      // publish successfully, so blocking them ahead of time would incorrectly suppress a real chance
-      // to publish; they keep hitting the existing post-generation guard as before.
-      if (alwaysUsesBuiltInVideoGeneration(account)) {
-        try { assertVideosApiStillAvailable(now); }
-        catch (error) {
-          report.push({ account: accountId, slot: slot.slotId, status: autopilotErrorStatus(error), error: error.message });
-          await appendAudit({ account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null, error: String(error.message || error).slice(0, 500), dryRun }).catch(() => {});
-          continue;
-        }
-      }
-
       const experimentAssignment = assignmentForSlot(experimentState?.active, slot.slotId);
       try {
         const history = await recentHistory(accountId, Number(account.generation?.historyWindow ?? 30));
@@ -140,7 +120,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
 
         const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun });
-        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun });
+        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now });
         ensureMediaForPlatform(account, media.url);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
         const experimentApplied = experimentAssignment
@@ -189,7 +169,21 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
           error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
         }).catch(() => {});
-        report.push({ account: accountId, slot: slot.slotId, status: autopilotErrorStatus(error), error: error.message });
+        const status = autopilotErrorStatus(error);
+        // PROVIDER_DEPRECATED and MEDIA_HOSTING_TOO_LARGE are both excluded from the resilience circuit
+        // (see nonCircuitCodes above) precisely because they are config/lifecycle problems, not transient
+        // outages - but that also means nothing else stops the SAME due slot from re-paying for a full
+        // generatePost() call on every subsequent poll within its scheduling window (autopilot.yml runs
+        // every 10 minutes). Persisting a terminal 'skipped' state bounds that waste to at most one paid
+        // attempt per slot per window, without an early pre-generation guard: an early guard here would
+        // (a) also block legitimate dry-run previews, which must still exercise the full decision path per
+        // the documented preview-fidelity design, and (b) make the cache-hit-before-deprecation-guard path
+        // inside generateAndHostVideoDetailed unreachable, since the cache key depends on the AI-generated
+        // mediaPrompt that only exists after generatePost() has already run.
+        if (!dryRun && (status === 'provider-deprecated' || status === 'media-too-large')) {
+          await markSlot(slot.slotId, 'skipped', { account: accountId, reason: status, error: error.message }).catch(() => {});
+        }
+        report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
       }
     }
   }

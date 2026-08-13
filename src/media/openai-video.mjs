@@ -13,10 +13,13 @@ function digest(value) { return createHash('sha256').update(String(value)).diges
 // outage: it must not count toward the resilience circuit breaker (which would pause the WHOLE
 // account, including plain text posts, after a few oversize hits) any more than a media QA failure
 // does - see MEDIA_QA_FAILED/MEDIA_QA_INPUT_TOO_LARGE in src/media/qa.mjs and the nonCircuitCodes list
-// in src/orchestrate.mjs.
-function oversizeError(variant, maxBytes) {
+// in src/orchestrate.mjs. The CODE itself is which knob an operator needs to tune, though, and those are
+// two genuinely different knobs: an oversized QA preview (spritesheet/thumbnail) means
+// media.qa.maxInputBytes is too small, while an oversized final MP4 means maxHostedVideoBytes is too
+// small - raising the wrong one would not fix the failure.
+function oversizeError(variant, maxBytes, code = 'MEDIA_HOSTING_TOO_LARGE') {
   const error = new Error(`Generated ${variant || 'video'} exceeds limit (${maxBytes} bytes).`);
-  error.code = 'MEDIA_HOSTING_TOO_LARGE';
+  error.code = code;
   return error;
 }
 function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new Error('Built-in video generation requires OPENAI_API_KEY.'); return key; }
@@ -146,7 +149,7 @@ async function waitForVideo(video, account) {
   throw new Error(`OpenAI video generation did not complete within ${timeoutMinutes} minute(s).`);
 }
 
-async function downloadAsset(videoId, variant, maxBytes) {
+async function downloadAsset(videoId, variant, maxBytes, oversizeCode = 'MEDIA_HOSTING_TOO_LARGE') {
   const suffix = variant && variant !== 'video' ? `?variant=${encodeURIComponent(variant)}` : '';
   const response = await fetch(`${OPENAI_VIDEOS_URL}/${encodeURIComponent(videoId)}/content${suffix}`, { headers: authHeaders() });
   if (!response.ok) {
@@ -158,17 +161,19 @@ async function downloadAsset(videoId, variant, maxBytes) {
   const fallbackType = variant && variant !== 'video' ? 'image/jpeg' : 'video/mp4';
   const contentType = (response.headers.get('content-type') || fallbackType).split(';')[0];
   const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw oversizeError(variant, maxBytes);
+  if (declared > maxBytes) throw oversizeError(variant, maxBytes, oversizeCode);
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.byteLength > maxBytes) throw oversizeError(variant, maxBytes);
+  if (bytes.byteLength > maxBytes) throw oversizeError(variant, maxBytes, oversizeCode);
   return { bytes, contentType };
 }
 
 async function downloadQaPreview(videoId, maxBytes) {
+  // maxBytes here is media.qa.maxInputBytes, not the hosting limit - an oversized preview must be coded
+  // as a QA input failure so an operator is pointed at the right config knob (see oversizeError above).
   try {
-    return { ...(await downloadAsset(videoId, 'spritesheet', maxBytes)), variant: 'spritesheet' };
+    return { ...(await downloadAsset(videoId, 'spritesheet', maxBytes, 'MEDIA_QA_INPUT_TOO_LARGE')), variant: 'spritesheet' };
   } catch {
-    return { ...(await downloadAsset(videoId, 'thumbnail', maxBytes)), variant: 'thumbnail' };
+    return { ...(await downloadAsset(videoId, 'thumbnail', maxBytes, 'MEDIA_QA_INPUT_TOO_LARGE')), variant: 'thumbnail' };
   }
 }
 

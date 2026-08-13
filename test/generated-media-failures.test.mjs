@@ -563,6 +563,50 @@ test('video hosting rejects an oversized MP4 after a valid QA preview', async ()
   }
 });
 
+test('an oversized QA preview (spritesheet/thumbnail) is coded as a QA input failure, not a hosting-limit failure', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = mediaEnv();
+  const files = await snapshotFiles(USAGE_FILES);
+  try {
+    for (const path of USAGE_FILES) await rm(path, { force: true });
+    let deletes = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const release = releaseLookup(target);
+      if (release) return release;
+      if (target === 'https://api.openai.com/v1/videos?limit=100') return jsonResponse({ data: [] });
+      if (target === 'https://api.openai.com/v1/videos' && options.method === 'POST') return jsonResponse({ id: 'video-qa-oversize', status: 'completed' });
+      // Both the spritesheet AND thumbnail previews exceed media.qa.maxInputBytes below - the failure
+      // must be coded as a QA input problem (fix: raise qa.maxInputBytes), not a hosting problem
+      // (raising maxHostedVideoBytes would do nothing here, since the final MP4 is never even reached).
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize/content?variant=spritesheet') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize/content?variant=thumbnail') {
+        return new Response(new Uint8Array(50), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      if (target === 'https://api.openai.com/v1/videos/video-qa-oversize' && options.method === 'DELETE') { deletes += 1; return new Response(null, { status: 204 }); }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const rejection = await generateAndHostVideoDetailed('video-qa-oversize', {
+      media: {
+        videoModel: 'sora-2', videoSize: '720x1280', videoSeconds: 8,
+        maxHostedVideoBytes: 10 * 1024 * 1024,
+        qa: { enabled: true, maxInputBytes: 10, maxRegenerations: 0 }
+      },
+      budgets: { enabled: false }
+    }, 'slot-video-qa-oversize', { mediaPrompt: 'a scene' }, PRE_DEPRECATION_NOW).then(() => null, (error) => error);
+
+    assert.equal(rejection.code, 'MEDIA_QA_INPUT_TOO_LARGE', 'must point the operator at qa.maxInputBytes, not the unrelated hosting limit');
+    assert.equal(deletes, 1, 'the OpenAI-side job must still be cleaned up even on a QA-input oversize rejection');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await restoreFiles(files);
+  }
+});
+
 test('generated-media cleanup removes only expired release assets and public hosting refuses private repositories', async () => {
   const previousFetch = globalThis.fetch;
   const env = mediaEnv();
