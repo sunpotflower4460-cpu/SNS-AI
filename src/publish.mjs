@@ -14,8 +14,38 @@ function boolValue(value) { return value === true || ['true', '1', 'yes', 'on'].
 async function loadPayload(args) { if (args.file) return JSON.parse(await readFile(args.file, 'utf8')); if (args.json) return JSON.parse(args.json); return { account: args.account, text: args.text || '', mediaUrl: args['media-url'], mediaType: args['media-type'] || 'image', mediaAltText: args['media-alt-text'] || '', dryRun: boolValue(args['dry-run']), source: args.source || 'manual', slotId: args['slot-id'] }; }
 function providerPostId(result) { return result?.data?.id || result?.postId || result?.id || result?.mediaId || result?.media_id || result?.creationId || null; }
 
+function validationError(message) {
+  const error = new Error(message);
+  error.code = 'PUBLISH_VALIDATION';
+  error.publishStage = 'preflight';
+  return error;
+}
+
+function validateProviderPayload(account, common) {
+  if (account.platform === 'x') {
+    if (!common.text && !common.mediaUrl) throw validationError('X requires text or mediaUrl.');
+    if (!common.mediaUrl) {
+      for (const key of ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret']) {
+        if (!common.credential?.[key]) throw validationError(`X credential is missing "${key}".`);
+      }
+    } else if (!common.credential?.oauth2AccessToken && !common.credential?.oauth2RefreshToken) {
+      throw validationError('X media publishing requires OAuth2 access or refresh credentials.');
+    }
+    return;
+  }
+  if (account.platform === 'instagram') {
+    if (!common.mediaUrl) throw validationError('Instagram publishing requires mediaUrl.');
+    if (!/^https:\/\//i.test(common.mediaUrl)) throw validationError('Instagram mediaUrl must be a public https:// URL.');
+    if (!['image', 'reel'].includes(common.mediaType)) throw validationError('Instagram mediaType must be "image" or "reel".');
+    if (!common.credential?.accessToken) throw validationError('Instagram credential is missing "accessToken".');
+    if (!common.credential?.igUserId) throw validationError('Instagram credential is missing "igUserId".');
+    return;
+  }
+  throw validationError(`Unsupported platform: ${account.platform}`);
+}
+
 function definitiveProviderFailure(error) {
-  if (['media', 'media-container', 'media-processing'].includes(error?.publishStage)) return true;
+  if (['preflight', 'media', 'media-container', 'media-processing'].includes(error?.publishStage)) return true;
   const status = Number(error?.status);
   if (!Number.isFinite(status)) return false;
   return status >= 400 && status < 500 && ![408, 409, 425].includes(status);
@@ -42,6 +72,7 @@ export async function publish(payload) {
     credential: account.credential,
     dryRun
   };
+  validateProviderPayload(account, common);
   if (!dryRun) await assertCircuitClosed(payload.account, 'publish', account.resilience);
 
   let durable = null;
@@ -72,7 +103,7 @@ export async function publish(payload) {
   try {
     if (account.platform === 'x') result = await publishX(common);
     else if (account.platform === 'instagram') result = await publishInstagram({ ...common, apiVersion: account.apiVersion || 'v25.0' });
-    else throw new Error(`Unsupported platform: ${account.platform}`);
+    else throw validationError(`Unsupported platform: ${account.platform}`);
   } catch (error) {
     const failureWarnings = [];
     if (!dryRun && payload.slotId) {
@@ -139,4 +170,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   catch (error) { console.error(JSON.stringify({ ok: false, error: error.message, status: error.status, code: error.code, detail: error.body, bookkeepingWarnings: error.bookkeepingWarnings || [] }, null, 2)); process.exitCode = 1; }
 }
 
-export const __test = { providerPostId, definitiveProviderFailure, boolValue };
+export const __test = { providerPostId, definitiveProviderFailure, boolValue, validateProviderPayload };
