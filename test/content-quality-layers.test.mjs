@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import { naturalizationSettings, __test as naturalizeTest } from '../src/content/naturalize.mjs';
+import { naturalizationSettings, naturalizeDraft, __test as naturalizeTest } from '../src/content/naturalize.mjs';
 import { __test as httpTest } from '../src/lib/http.mjs';
 import { __test as qaTest } from '../src/media/qa.mjs';
 
@@ -23,6 +23,29 @@ test('naturalization settings fail safe to bounded defaults instead of producing
   assert.equal(settings.maxAiPatternRisk, 45);
   assert.equal(settings.minVoiceFit, 68);
   assert.equal(settings.maxIssues, 6);
+  assert.equal(settings.deepReview, false);
+});
+
+test('AI-like local text is flagged for ChatGPT review without making a second API call by default', async () => {
+  const previousFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('unexpected network call'); };
+  try {
+    const result = await naturalizeDraft('example-x', {
+      platform: 'x',
+      generation: { maxChars: 280, duplicateThreshold: 0.72, naturalization: { enabled: true, deepReview: false, maxAiPatternRisk: 10 } },
+      safety: { maxLinks: 4, maxHashtags: 4 }
+    }, {
+      text: '結論から言うと、重要なのはAIを活用することです。ぜひ試してみてください。',
+      features: {}
+    }, { history: [] });
+    assert.equal(fetchCalls, 0);
+    assert.equal(result.text.includes('結論から言うと'), true);
+    assert.equal(result.naturalization.applied, false);
+    assert.equal(result.naturalization.chatReviewRecommended, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test('visual QA score threshold is retained as a soft target with bounded config', () => {
@@ -47,9 +70,11 @@ test('DNS target validation accepts a hostname only when every returned address 
   assert.equal(parsed.hostname, 'media.example.com');
 });
 
-test('built-in video generation is paused by default while image generation remains enabled', async () => {
+test('repository defaults prefer ChatGPT review, keep images enabled, and pause video generation', async () => {
   const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
   assert.equal(config.defaults.media.internalImageGeneration, true);
   assert.equal(config.defaults.media.internalVideoGeneration, false);
   assert.equal(config.defaults.generation.naturalization.enabled, true);
+  assert.equal(config.defaults.generation.naturalization.deepReview, false);
+  assert.equal(config.defaults.media.qa.selectedSemanticReview, false);
 });
