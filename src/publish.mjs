@@ -60,6 +60,13 @@ async function bestEffort(label, task, warnings) {
 }
 
 async function reconcilePublishedReplay(payload, account, claim) {
+  if (claim?.account && String(claim.account) !== String(payload.account)) {
+    throw validationError(`Durable claim account mismatch for slot "${payload.slotId}".`);
+  }
+  if (claim?.platform && String(claim.platform) !== String(account.platform)) {
+    throw validationError(`Durable claim platform mismatch for slot "${payload.slotId}".`);
+  }
+
   const history = await readHistory();
   const postId = claim?.providerPostId || null;
   const alreadyRecorded = history.some((row) => row.status === 'published'

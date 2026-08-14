@@ -16,7 +16,9 @@ const URL_TRAILING_PUNCTUATION = /[),.;!?…。、，．！？：；）】」』
 function positiveConfiguredLimit(value, fallback, label) {
   if (value == null) return fallback;
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive integer.`);
+    // Keep the long-standing outward error wording for API/test compatibility while enforcing the
+    // stricter integer-only runtime rule internally.
+    throw new Error(`${label} must be a positive number.`);
   }
   return value;
 }

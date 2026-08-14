@@ -30,7 +30,7 @@ function validHttps(value) {
   if (typeof value !== 'string' || !/^https:\/\//i.test(value)) return false;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' && Boolean(url.hostname);
+    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
   } catch {
     return false;
   }
@@ -83,8 +83,14 @@ export function validateStrictConfig(config) {
     if (['fixed', 'external'].includes(strategy) && media.url != null && media.url !== '' && !validHttps(media.url)) {
       errors.push(`${id}: media.url must be a valid HTTPS URL for ${strategy}`);
     }
-    for (const [index, url] of (media.urls || media.libraryUrls || []).entries()) {
-      if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid HTTPS URL`);
+
+    const configuredUrls = media.urls ?? media.libraryUrls ?? [];
+    if (!Array.isArray(configuredUrls)) {
+      errors.push(`${id}: media.urls must be an array`);
+    } else {
+      for (const [index, url] of configuredUrls.entries()) {
+        if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid HTTPS URL`);
+      }
     }
   }
   return [...new Set(errors)];
