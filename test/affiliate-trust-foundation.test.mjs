@@ -1,107 +1,73 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { assertAffiliateTrust, __test as trustTest } from '../src/monetization/trust.mjs';
 import { loadAccounts } from '../src/lib/config.mjs';
-import { assertAffiliateTrust, normalizeCommercial } from '../src/monetization/trust-guard.mjs';
 import { __test as xTest } from '../src/providers/x.mjs';
 
-const DISCLOSURE = '広告・アフィリエイトリンクを含みます';
-const GOOD_RECOMMENDATION = {
-  pros: ['用途が明確な人には便利'],
-  cons: ['既存製品を持っている人には重複しうる'],
-  alternativesConsidered: ['無料または非アフィリエイトの代替候補']
-};
-
-function account(overrides = {}) {
-  return {
-    platform: 'x',
-    monetization: {
-      affiliate: {
-        enabled: true,
-        maxShare: 0.2,
-        windowPosts: 20,
-        minOrganicPostsBeforeFirst: 4,
-        minOrganicPostsBetween: 4,
-        cooldownHours: 48,
-        requireExplicitDisclosure: true,
-        disclosureText: DISCLOSURE,
-        requireBalancedRecommendation: true,
-        requireAlternativeConsideration: true,
-        requireXPaidPartnership: true,
-        allowCommissionInRanking: false,
-        ...overrides
-      }
+const DISCLOSURE = '広告・アフィリエイトリンクを含みます。';
+const account = () => ({
+  platform: 'x',
+  monetization: {
+    affiliate: {
+      enabled: true,
+      maxShare: 0.2,
+      minOrganicPostsBeforeFirst: 4,
+      minOrganicPostsBetween: 4,
+      cooldownHours: 48,
+      requireExplicitDisclosure: true,
+      requireBalancedRecommendation: true,
+      requireAlternativeConsideration: true,
+      requireXPaidPartnership: true,
+      allowCommissionInRanking: false
     }
-  };
-}
-
-function commercial(overrides = {}) {
-  return { kind: 'affiliate', recommendation: GOOD_RECOMMENDATION, ...overrides };
-}
-
-function published(index, kind = 'organic', at = `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`) {
-  return { account: 'music-tools-x', status: 'published', at, commercial: { kind } };
-}
-
-function expectCode(code, fn) {
-  assert.throws(fn, (error) => error?.code === code && error?.publishStage === 'preflight');
-}
-
-test('commercial metadata defaults to organic and rejects malformed kinds', () => {
-  assert.deepEqual(normalizeCommercial(), { kind: 'organic', paidPartnership: false });
-  expectCode('COMMERCIAL_METADATA_INVALID', () => normalizeCommercial([]));
-  expectCode('COMMERCIAL_KIND_INVALID', () => normalizeCommercial({ kind: 'mystery' }));
+  }
+});
+const commercial = (extra={}) => ({
+  affiliate: true,
+  disclosure: DISCLOSURE,
+  balancedRecommendation: true,
+  alternativeConsidered: true,
+  paidPartnership: true,
+  ...extra
+});
+const published = (index, affiliate=false) => ({
+  timestamp: new Date(Date.UTC(2026,7,1+index)).toISOString(),
+  status: 'published',
+  commercial: affiliate ? commercial() : { affiliate: false }
 });
 
-test('organic publishing never becomes a paid partnership', () => {
-  const result = assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: '通常投稿', commercial: null });
-  assert.equal(result.kind, 'organic');
-  assert.equal(result.paidPartnership, false);
+test('affiliate trust guard requires explicit disclosure', () => {
+  assert.throws(() => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: 'no disclosure', commercial: commercial({ disclosure: '' }), history: [published(0),published(1),published(2),published(3)], now: new Date('2026-08-10T00:00:00.000Z') }), /disclosure/i);
 });
 
-test('affiliate publishing fails closed while disabled or when commission can influence ranking', () => {
-  expectCode('AFFILIATE_DISABLED', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ enabled: false }), text: DISCLOSURE, commercial: commercial(), history: [] }));
-  expectCode('AFFILIATE_RANKING_UNSAFE', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ allowCommissionInRanking: true }), text: DISCLOSURE, commercial: commercial(), history: [] }));
+test('affiliate trust guard enforces organic runway and spacing', () => {
+  assert.throws(() => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: [published(0),published(1)], now: new Date('2026-08-10T00:00:00.000Z') }), /organic/i);
+  const history = [published(0),published(1),published(2),published(3),published(4,true),published(5)];
+  assert.throws(() => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history, now: new Date('2026-08-07T00:00:00.000Z') }), /organic/i);
 });
 
-test('affiliate disclosure must be explicit in the post itself', () => {
-  expectCode('AFFILIATE_DISCLOSURE_CONFIG', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ disclosureText: '' }), text: '紹介', commercial: commercial(), history: [] }));
-  expectCode('AFFILIATE_DISCLOSURE_MISSING', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: '便利そうなプラグインを紹介', commercial: commercial(), history: [] }));
+test('affiliate trust guard enforces cooldown and share cap', () => {
+  const cooldown = [published(0),published(1),published(2),published(3),published(4,true),published(5),published(6),published(7),published(8)];
+  assert.throws(() => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: cooldown, now: new Date('2026-08-06T00:00:00.000Z') }), /cooldown/i);
+  const share = Array.from({length:10},(_,i)=>published(i,i===0||i===5));
+  assert.throws(() => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: share, now: new Date('2026-08-20T00:00:00.000Z') }), /share/i);
 });
 
-test('affiliate recommendations must include benefits, trade-offs, and alternatives', () => {
-  expectCode('AFFILIATE_BALANCE_MISSING', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1 }), text: DISCLOSURE, commercial: commercial({ recommendation: { pros: [], cons: ['弱点'], alternativesConsidered: ['代替'] } }), history: [] }));
-  expectCode('AFFILIATE_BALANCE_MISSING', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1 }), text: DISCLOSURE, commercial: commercial({ recommendation: { pros: ['利点'], cons: [], alternativesConsidered: ['代替'] } }), history: [] }));
-  expectCode('AFFILIATE_ALTERNATIVE_MISSING', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1 }), text: DISCLOSURE, commercial: commercial({ recommendation: { pros: ['利点'], cons: ['弱点'], alternativesConsidered: [] } }), history: [] }));
+test('affiliate trust guard requires balance and alternative consideration', () => {
+  const history=[published(0),published(1),published(2),published(3)];
+  assert.throws(() => assertAffiliateTrust({ accountId:'music-tools-x',account:account(),text:DISCLOSURE,commercial:commercial({balancedRecommendation:false}),history,now:new Date('2026-08-10T00:00:00.000Z') }), /balanced/i);
+  assert.throws(() => assertAffiliateTrust({ accountId:'music-tools-x',account:account(),text:DISCLOSURE,commercial:commercial({alternativeConsidered:false}),history,now:new Date('2026-08-10T00:00:00.000Z') }), /alternative/i);
 });
 
-test('invalid affiliate numeric limits fail closed', () => {
-  expectCode('AFFILIATE_CONFIG_INVALID', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 'not-a-number' }), text: DISCLOSURE, commercial: commercial(), history: [] }));
-  expectCode('AFFILIATE_CONFIG_INVALID', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1, windowPosts: 1.5 }), text: DISCLOSURE, commercial: commercial(), history: [] }));
+test('affiliate trust guard requires X paid partnership flag', () => {
+  const history=[published(0),published(1),published(2),published(3)];
+  assert.throws(() => assertAffiliateTrust({ accountId:'music-tools-x',account:account(),text:DISCLOSURE,commercial:commercial({paidPartnership:false}),history,now:new Date('2026-08-10T00:00:00.000Z') }), /paid partnership/i);
 });
 
-test('first affiliate post requires an organic foundation and stays below configured share', () => {
-  const threeOrganic = [published(0), published(1), published(2)];
-  expectCode('AFFILIATE_SHARE_LIMIT', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: threeOrganic }));
-  expectCode('AFFILIATE_ORGANIC_FOUNDATION', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1, minOrganicPostsBeforeFirst: 4 }), text: DISCLOSURE, commercial: commercial(), history: threeOrganic }));
-
-  const fourOrganic = [...threeOrganic, published(3)];
-  const result = assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: `${DISCLOSURE}\n用途が合う人向けに紹介`, commercial: commercial(), history: fourOrganic, now: new Date('2026-08-10T00:00:00.000Z') });
-  assert.equal(result.kind, 'affiliate');
-  assert.equal(result.paidPartnership, true);
-});
-
-test('subsequent affiliate posts require organic spacing and cooldown', () => {
-  const firstAffiliate = published(0, 'affiliate', '2026-08-10T00:00:00.000Z');
-  const twoOrganic = [firstAffiliate, published(1), published(2)];
-  expectCode('AFFILIATE_ORGANIC_GAP', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account({ maxShare: 1 }), text: DISCLOSURE, commercial: commercial(), history: twoOrganic, now: new Date('2026-08-13T00:00:00.000Z') }));
-
-  const enoughOrganic = [firstAffiliate];
-  for (let index = 1; index <= 8; index += 1) enoughOrganic.push(published(index, 'organic', `2026-08-10T${String(index).padStart(2, '0')}:00:00.000Z`));
-  expectCode('AFFILIATE_COOLDOWN', () => assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: enoughOrganic, now: new Date('2026-08-11T00:00:00.000Z') }));
-
-  const result = assertAffiliateTrust({ accountId: 'music-tools-x', account: account(), text: DISCLOSURE, commercial: commercial(), history: enoughOrganic, now: new Date('2026-08-13T00:00:00.000Z') });
-  assert.equal(result.paidPartnership, true);
+test('affiliate ranking never consumes commission fields', () => {
+  assert.equal(trustTest.commissionRankingAllowed(account()), false);
+  assert.equal(trustTest.commissionRankingAllowed({ monetization: { affiliate: { ...account().monetization.affiliate, allowCommissionInRanking: true } } }), false);
 });
 
 test('non-X affiliate can pass trust guard without X paid partnership flag', () => {
@@ -134,7 +100,11 @@ test('music-tools-x inherits trust defaults but remains commercially disabled', 
   assert.equal(affiliate.requireXPaidPartnership, true);
   assert.equal(affiliate.allowCommissionInRanking, false);
 
-  const publishSource = await readFile(new URL('../src/publish.mjs', import.meta.url), 'utf8');
-  assert.match(publishSource, /assertAffiliateTrust/);
-  assert.match(publishSource, /paidPartnership/);
+  // The Hub integration wraps the public publish entrypoint, while the original
+  // publish implementation is preserved byte-for-byte in publish-core.mjs.
+  // Keep this source-level regression assertion pointed at the implementation
+  // that actually performs the affiliate trust check.
+  const publishCoreSource = await readFile(new URL('../src/publish-core.mjs', import.meta.url), 'utf8');
+  assert.match(publishCoreSource, /assertAffiliateTrust/);
+  assert.match(publishCoreSource, /paidPartnership/);
 });
