@@ -9,6 +9,7 @@ const dryRunUrl = (decision, mediaType = 'image') => `https://dry-run.invalid/${
 
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpoint = account.media?.endpoint;
+  if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('Media generation/search requires an HTTPS media.endpoint.');
   const endpointUrl = assertPublicHttpsUrl(endpoint, 'media.endpoint');
   await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
@@ -24,6 +25,7 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   });
   const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error || `Media endpoint failed with HTTP ${response.status}`);
   const returned = body.url || body.mediaUrl;
+  if (!/^https:\/\//i.test(returned || '')) throw new Error('Media endpoint must return { "url": "https://..." }.');
   const url = assertPublicHttpsUrl(returned, 'Media endpoint URL').toString();
   return { url, altText: String(body.altText || '').slice(0, 1000), qa: body.qa || null };
 }
