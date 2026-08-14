@@ -155,7 +155,7 @@ async function recoverHandledClaimFromHistory(payload, account, claim) {
     textHash: evidence.textHash || claim.textHash || textHash(evidence.text || ''),
     mediaUrl: evidence.mediaUrl ?? claim.mediaUrl ?? payload.mediaUrl ?? null,
     mediaType: evidence.mediaType ?? claim.mediaType ?? payload.mediaType ?? null,
-    mediaAltText: evidence.mediaAltText ?? claim.mediaAltText ?? String(payload.mediaAltText || '').slice(0, 1000) || null,
+    mediaAltText: evidence.mediaAltText ?? claim.mediaAltText ?? (String(payload.mediaAltText || '').slice(0, 1000) || null),
     recoveredFromHistory: true
   };
 
