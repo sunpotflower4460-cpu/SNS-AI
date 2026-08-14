@@ -69,9 +69,10 @@ async function githubRequest(config,path,{fetchImpl=fetch,method='GET',body,allo
   const response=await fetchImpl(`https://api.github.com/repos/${config.repository}${path}`,{method,headers:githubHeaders(config.token),body:body===undefined?undefined:JSON.stringify(body)});
   const data=await responseJson(response);
   if(allow404 && response.status===404) return null;
-  if(!response.ok) throw hubError(`SNS-HUB GitHub request failed (${response.status}): ${data?.message||'unknown error'}`,'HUB_GITHUB');
+  if(!response.ok){const error=hubError(`SNS-HUB GitHub request failed (${response.status}): ${data?.message||'unknown error'}`,'HUB_GITHUB');error.status=response.status;throw error}
   return data;
 }
+function retryableWriteConflict(error){return [409,422].includes(Number(error?.status))}
 function decodeContent(data,label){ if(!data || data.type==='dir' || typeof data.content!=='string') throw hubError(`${label} did not return a GitHub file payload.`,'HUB_GITHUB'); return Buffer.from(data.content.replace(/\n/g,''),data.encoding||'base64').toString('utf8'); }
 async function readJsonFile(config,path,ref,{fetchImpl=fetch,allow404=false}={}){
   const data=await githubRequest(config,`/contents/${path}?ref=${encodeURIComponent(ref)}`,{fetchImpl,allow404});
@@ -85,15 +86,20 @@ export async function readHubProduct(productId,{env=process.env,fetchImpl=fetch,
 }
 async function writeHubProduct(product,{env=process.env,fetchImpl=fetch,message='hub: update canonical product'}={}){
   const config=hubConfig(env),path=`data/products/${product.productId}.json`;
-  const current=await readJsonFile(config,path,config.branch,{fetchImpl,allow404:true});
-  const merged=mergeCanonicalProduct(current?.data||null,product);
-  if(current && stableStringify(current.data)===stableStringify(merged)) return {changed:false,product:merged,ref:config.branch,blobSha:current.sha};
-  const body={message,content:Buffer.from(`${JSON.stringify(merged,null,2)}\n`,'utf8').toString('base64'),branch:config.branch};
-  if(current?.sha) body.sha=current.sha;
-  const result=await githubRequest(config,`/contents/${path}`,{fetchImpl,method:'PUT',body});
-  const commitSha=result?.commit?.sha;
-  if(!commitSha) throw hubError('SNS-HUB write succeeded without a commit SHA.','HUB_GITHUB');
-  return {changed:true,product:merged,ref:commitSha,commitSha,blobSha:result?.content?.sha||null};
+  for(let attempt=1;attempt<=3;attempt+=1){
+    const current=await readJsonFile(config,path,config.branch,{fetchImpl,allow404:true});
+    const merged=mergeCanonicalProduct(current?.data||null,product);
+    if(current && stableStringify(current.data)===stableStringify(merged)) return {changed:false,product:merged,ref:config.branch,blobSha:current.sha};
+    const body={message,content:Buffer.from(`${JSON.stringify(merged,null,2)}\n`,'utf8').toString('base64'),branch:config.branch};
+    if(current?.sha) body.sha=current.sha;
+    try{
+      const result=await githubRequest(config,`/contents/${path}`,{fetchImpl,method:'PUT',body});
+      const commitSha=result?.commit?.sha;
+      if(!commitSha) throw hubError('SNS-HUB write succeeded without a commit SHA.','HUB_GITHUB');
+      return {changed:true,product:merged,ref:commitSha,commitSha,blobSha:result?.content?.sha||null};
+    }catch(error){if(attempt<3&&retryableWriteConflict(error))continue;throw error}
+  }
+  throw hubError('SNS-HUB write conflict retry exhausted.','HUB_GITHUB');
 }
 async function readSnapshot(config,ref,{fetchImpl=fetch}={}){
   const [cats,probs,list]=await Promise.all([
@@ -150,13 +156,19 @@ export function attachBacklinkToProduct(product,backlink,updatedAt=new Date().to
   return {changed:true,product:{...clone(product),social:mergeByKey(product.social||[],[clone(backlink)],(x)=>`${x.platform}:${x.postId}`),publication:{...clone(product.publication),status:transition?'published':product.publication.status,firstPublishedAt:transition?(product.publication.firstPublishedAt??backlink.publishedAt):product.publication.firstPublishedAt,updatedAt}}};
 }
 export async function attachHubSocialBacklink({productId,platform,postId,url,publishedAt},{env=process.env,fetchImpl=fetch,updatedAt=new Date().toISOString()}={}){
-  const config=hubConfig(env),path=`data/products/${productId}.json`,current=await readJsonFile(config,path,config.branch,{fetchImpl,allow404:true});
-  if(!current) throw hubError(`SNS-HUB product ${productId} does not exist.`,'HUB_STATE');
-  const result=attachBacklinkToProduct(current.data,{platform,postId,url,publishedAt},updatedAt);
-  if(!result.changed) return {changed:false,product:result.product,ref:config.branch};
-  const body={message:`hub: attach ${platform} ${productId}`,content:Buffer.from(`${JSON.stringify(result.product,null,2)}\n`,'utf8').toString('base64'),branch:config.branch,sha:current.sha};
-  const written=await githubRequest(config,`/contents/${path}`,{fetchImpl,method:'PUT',body});
-  if(!written?.commit?.sha) throw hubError('SNS-HUB backlink write succeeded without a commit SHA.','HUB_GITHUB');
-  return {changed:true,product:result.product,ref:written.commit.sha,commitSha:written.commit.sha};
+  const config=hubConfig(env),path=`data/products/${productId}.json`;
+  for(let attempt=1;attempt<=3;attempt+=1){
+    const current=await readJsonFile(config,path,config.branch,{fetchImpl,allow404:true});
+    if(!current) throw hubError(`SNS-HUB product ${productId} does not exist.`,'HUB_STATE');
+    const result=attachBacklinkToProduct(current.data,{platform,postId,url,publishedAt},updatedAt);
+    if(!result.changed) return {changed:false,product:result.product,ref:config.branch};
+    const body={message:`hub: attach ${platform} ${productId}`,content:Buffer.from(`${JSON.stringify(result.product,null,2)}\n`,'utf8').toString('base64'),branch:config.branch,sha:current.sha};
+    try{
+      const written=await githubRequest(config,`/contents/${path}`,{fetchImpl,method:'PUT',body});
+      if(!written?.commit?.sha) throw hubError('SNS-HUB backlink write succeeded without a commit SHA.','HUB_GITHUB');
+      return {changed:true,product:result.product,ref:written.commit.sha,commitSha:written.commit.sha};
+    }catch(error){if(attempt<3&&retryableWriteConflict(error))continue;throw error}
+  }
+  throw hubError('SNS-HUB backlink write conflict retry exhausted.','HUB_GITHUB');
 }
-export const __test={canonicalize,mergeByKey,reconcileStatus,validateProductShape,assertNoSecretMaterial,safeHealthUrl,readSnapshot};
+export const __test={canonicalize,mergeByKey,reconcileStatus,validateProductShape,assertNoSecretMaterial,safeHealthUrl,readSnapshot,retryableWriteConflict};
