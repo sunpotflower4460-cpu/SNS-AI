@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { __test as configTest } from '../src/lib/config.mjs';
 import { assertPublicHttpsUrl, __test as httpTest } from '../src/lib/http.mjs';
 import { __test as publishTest } from '../src/publish.mjs';
 import { validateStrictConfig } from '../src/validate-strict-config.mjs';
@@ -43,6 +44,22 @@ test('published history can prove a stuck durable claim was already posted witho
   ];
   assert.equal(publishTest.publishedHistoryEvidence(payload, account, history)?.providerPostId, 'latest');
   assert.equal(publishTest.publishedHistoryEvidence({ ...payload, slotId: 'missing' }, account, history), null);
+});
+
+test('partial nested account overrides preserve hard safety and quality defaults', () => {
+  const defaults = {
+    safety: { anomalyBrake: { enabled: true, cooldownHours: 12 } },
+    generation: { naturalization: { enabled: true, deepReview: false, maxAiPatternRisk: 45 } },
+    media: { qa: { enabled: true, selectedSemanticReview: false, minScore: 75 } }
+  };
+  const account = {
+    safety: { anomalyBrake: { cooldownHours: 24 } },
+    generation: { naturalization: { maxAiPatternRisk: 35 } },
+    media: { qa: { minScore: 82 } }
+  };
+  assert.deepEqual(configTest.mergeSection(defaults, account, 'safety').anomalyBrake, { enabled: true, cooldownHours: 24 });
+  assert.deepEqual(configTest.mergeSection(defaults, account, 'generation').naturalization, { enabled: true, deepReview: false, maxAiPatternRisk: 35 });
+  assert.deepEqual(configTest.mergeSection(defaults, account, 'media').qa, { enabled: true, selectedSemanticReview: false, minScore: 82 });
 });
 
 test('strict config validates new naturalization and selected-image semantic review settings', () => {
