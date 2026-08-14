@@ -26,6 +26,28 @@ export async function readJsonl(path) {
   } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
 }
 
+export async function readJsonlStrict(path, label = path) {
+  try {
+    const lines = (await readFile(path, 'utf8')).split('\n');
+    const rows = [];
+    for (const [index, line] of lines.entries()) {
+      if (!line) continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        const error = new Error(`${label} is malformed at line ${index + 1}; refusing to continue with incomplete safety data.`);
+        error.code = 'JSONL_CORRUPT';
+        error.line = index + 1;
+        throw error;
+      }
+    }
+    return rows;
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 export async function appendJsonl(path, value) {
   await mkdir(dirname(path), { recursive: true });
   await appendFile(path, `${JSON.stringify(value)}\n`, 'utf8');
