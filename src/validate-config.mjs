@@ -5,6 +5,14 @@ function merged(config, account, key) { return { ...(config.defaults?.[key] || {
 function positive(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) <= 0)) errors.push(`${id}: ${label} must be a positive number`); }
 function nonNegative(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < 0)) errors.push(`${id}: ${label} must be a non-negative number`); }
 function range(errors, id, label, value, min, max) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max)) errors.push(`${id}: ${label} must be ${min}..${max}`); }
+function arrayField(errors, id, label, value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    errors.push(`${id}: ${label} must be an array`);
+    return [];
+  }
+  return value;
+}
 function validTimeZone(value) {
   if (!value || typeof value !== 'string') return false;
   try { new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date(0)); return true; }
@@ -21,6 +29,10 @@ export function validateConfig(config) {
   const videoSeconds = new Set([4, 8, 12]);
   const qaDetails = new Set(['low', 'high', 'auto']);
   for (const [id, account] of Object.entries(config.accounts || {})) {
+    if (!account || typeof account !== 'object' || Array.isArray(account)) {
+      errors.push(`${id}: account config must be an object`);
+      continue;
+    }
     // "::dry-run-preview" is a reserved suffix openai.mjs appends to accountId to isolate dry-run
     // preview usage from an account's live budget counter (see src/lib/openai.mjs). Account IDs are
     // free-form strings used directly as budget-state object keys, so a real account literally named
@@ -29,9 +41,12 @@ export function validateConfig(config) {
     const mode = account.mode ?? config.defaults?.mode ?? 'pause';
     if (!platforms.has(account.platform)) errors.push(`${id}: invalid platform "${account.platform}"`);
     if (!modes.has(mode)) errors.push(`${id}: invalid mode "${mode}"`);
-    for (const time of account.schedule?.times || []) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
-    for (const time of account.schedule?.adaptiveCandidateTimes || []) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
-    for (const day of account.schedule?.days || []) if (!dayNames.has(day)) errors.push(`${id}: invalid schedule day "${day}"`);
+    const scheduleTimes = arrayField(errors, id, 'schedule.times', account.schedule?.times);
+    const adaptiveTimes = arrayField(errors, id, 'schedule.adaptiveCandidateTimes', account.schedule?.adaptiveCandidateTimes);
+    const scheduleDays = arrayField(errors, id, 'schedule.days', account.schedule?.days);
+    for (const time of scheduleTimes) if (!validateTimeString(time)) errors.push(`${id}: invalid schedule time "${time}"`);
+    for (const time of adaptiveTimes) if (!validateTimeString(time)) errors.push(`${id}: invalid adaptive candidate time "${time}"`);
+    for (const day of scheduleDays) if (!dayNames.has(day)) errors.push(`${id}: invalid schedule day "${day}"`);
     if (account.schedule) {
       const timeZone = account.schedule.timezone || config.defaults?.timezone || 'Asia/Tokyo';
       if (!validTimeZone(timeZone)) errors.push(`${id}: invalid schedule timezone "${timeZone}"`);
@@ -53,7 +68,7 @@ export function validateConfig(config) {
     positive(errors, id, 'learning.fullConfidencePosts', learning.fullConfidencePosts);
 
     const analytics = merged(config, account, 'analytics');
-    const checkpoints = analytics.checkpointsMinutes || [];
+    const checkpoints = arrayField(errors, id, 'analytics.checkpointsMinutes', analytics.checkpointsMinutes);
     if (checkpoints.some((v) => !Number.isFinite(Number(v)) || Number(v) <= 0)) errors.push(`${id}: analytics.checkpointsMinutes must contain positive numbers`);
 
     const resilience = merged(config, account, 'resilience');
@@ -82,7 +97,8 @@ export function validateConfig(config) {
     }
 
     const experiments = merged(config, account, 'experiments');
-    for (const dimension of experiments.dimensions || []) if (!experimentDimensions.has(dimension)) errors.push(`${id}: unsupported experiment dimension "${dimension}"`);
+    const experimentDims = arrayField(errors, id, 'experiments.dimensions', experiments.dimensions);
+    for (const dimension of experimentDims) if (!experimentDimensions.has(dimension)) errors.push(`${id}: unsupported experiment dimension "${dimension}"`);
     positive(errors, id, 'experiments.minSamplesPerVariant', experiments.minSamplesPerVariant);
     positive(errors, id, 'experiments.maxDays', experiments.maxDays);
     positive(errors, id, 'experiments.minimumStrategySamples', experiments.minimumStrategySamples);
@@ -93,7 +109,8 @@ export function validateConfig(config) {
     const media = merged(config, account, 'media');
     const mediaType = media.type || 'image';
     const strategy = media.strategy || 'none';
-    const hasLibrary = (media.urls || []).filter(Boolean).length > 0;
+    const mediaUrls = arrayField(errors, id, 'media.urls', media.urls ?? media.libraryUrls);
+    const hasLibrary = mediaUrls.filter(Boolean).length > 0;
     const hasEndpoint = /^https:\/\//i.test(media.endpoint || '');
     const canGenerateInternally = mediaType === 'image'
       ? media.internalImageGeneration !== false
@@ -119,7 +136,7 @@ export function validateConfig(config) {
     }
 
     if (account.enabled && ['auto', 'approval'].includes(mode)) {
-      if (!account.schedule?.times?.length) errors.push(`${id}: autonomous mode requires schedule.times`);
+      if (!scheduleTimes.length) errors.push(`${id}: autonomous mode requires schedule.times`);
       if (account.platform === 'instagram') {
         if (strategy === 'none') errors.push(`${id}: Instagram autonomous mode requires media strategy`);
         if (strategy === 'pool' && !hasLibrary) errors.push(`${id}: Instagram media pool is empty`);

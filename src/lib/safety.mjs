@@ -8,11 +8,16 @@ const X_WEIGHT_ONE_RANGES = [
   [8242, 8247]
 ];
 const X_EMOJI_CLUSTER = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u;
+const X_INVALID_CHARS = /[\uFFFE\uFEFF\uFFFF]/u;
 const X_GRAPHEMES = new Intl.Segmenter('en', { granularity: 'grapheme' });
+const URL_CANDIDATE = /(?:https?:\/\/[^\s<>]+|(?:(?:www\.)?(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:[\p{L}]{2,63}|xn--[\p{L}\p{N}-]{2,59})(?::\d{1,5})?(?:\/[^\s<>]*)?))/giu;
+const URL_TRAILING_PUNCTUATION = /[),.;!?…。、，．！？：；）】」』〉》\]}]+$/u;
 
 function positiveConfiguredLimit(value, fallback, label) {
   if (value == null) return fallback;
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    // Keep the long-standing outward error wording for API/test compatibility while enforcing the
+    // stricter integer-only runtime rule internally.
     throw new Error(`${label} must be a positive number.`);
   }
   return value;
@@ -31,22 +36,37 @@ export function platformTextLimit(account) {
   return positiveConfiguredLimit(account.generation?.maxChars, fallback, 'generation.maxChars');
 }
 
+function urlEntities(text) {
+  const value = String(text || '');
+  const entities = [];
+  for (const match of value.matchAll(URL_CANDIDATE)) {
+    const raw = match[0];
+    const hasScheme = /^https?:\/\//i.test(raw);
+    const previous = match.index > 0 ? value[match.index - 1] : '';
+    // twitter-text does not interpret the domain portion of an email/identifier as a URL.
+    if (!hasScheme && previous && /[\p{L}\p{M}\p{N}_@&]/u.test(previous)) continue;
+    const urlText = raw.replace(URL_TRAILING_PUNCTUATION, '');
+    if (!urlText) continue;
+    const normalized = hasScheme ? urlText : `https://${urlText}`;
+    let url;
+    try { url = new URL(normalized); } catch { continue; }
+    if (!url.hostname || !url.hostname.includes('.')) continue;
+    entities.push({
+      start: match.index,
+      end: match.index + urlText.length,
+      text: urlText,
+      url
+    });
+  }
+  return entities;
+}
+
 function urlsIn(text) {
-  return [...String(text || '').matchAll(/https?:\/\/[^\s<>]+/gi)].map((match) => {
-    try { return new URL(match[0].replace(/[),.;!?]+$/, '')); } catch { return null; }
-  }).filter(Boolean);
+  return urlEntities(text).map((entity) => entity.url);
 }
 
 function xUrlSpans(text) {
-  const spans = [];
-  for (const match of text.matchAll(/https?:\/\/[^\s<>]+/gi)) {
-    const raw = match[0];
-    const urlText = raw.replace(/[),.;!?]+$/, '');
-    if (!urlText) continue;
-    try { new URL(urlText); } catch { continue; }
-    spans.push({ start: match.index, end: match.index + urlText.length });
-  }
-  return spans;
+  return urlEntities(text).map(({ start, end }) => ({ start, end }));
 }
 
 function xCodePointWeight(codePoint) {
@@ -83,11 +103,19 @@ function platformTextLength(account, value) {
   return account.platform === 'x' ? xWeightedLength(value) : value.length;
 }
 
+function hashtagsIn(text) {
+  const pattern = /(^|[^\p{L}\p{M}\p{N}_&])([#＃])([\p{L}\p{M}\p{N}_]*[\p{L}\p{M}_][\p{L}\p{M}\p{N}_]*)/gu;
+  return [...String(text || '').matchAll(pattern)];
+}
+
 export function validateDraftText(account, text, { requireNonEmpty = true } = {}) {
   const value = String(text || '').trim();
   if (!value) {
     if (requireNonEmpty) throw new Error('AI generated an empty post.');
   } else {
+    if (account.platform === 'x' && X_INVALID_CHARS.test(value)) {
+      throw new Error('Generated X text contains a character that X does not accept.');
+    }
     const limit = platformTextLimit(account);
     const length = platformTextLength(account, value);
     if (length > limit) {
@@ -110,7 +138,7 @@ export function validateDraftText(account, text, { requireNonEmpty = true } = {}
     throw new Error(`Generated text must contain at least one required disclosure/phrase: ${requiredAny.join(' | ')}`);
   }
 
-  const hashtags = value.match(/(^|\s)#[\p{L}\p{N}_]+/gu) || [];
+  const hashtags = hashtagsIn(value);
   const maxHashtags = optionalNonNegativeInteger(safety.maxHashtags, 'safety.maxHashtags');
   if (maxHashtags != null && hashtags.length > maxHashtags) {
     throw new Error(`Generated text has ${hashtags.length} hashtags, over configured maximum ${maxHashtags}.`);
@@ -120,8 +148,8 @@ export function validateDraftText(account, text, { requireNonEmpty = true } = {}
   const maxLinks = optionalNonNegativeInteger(safety.maxLinks, 'safety.maxLinks');
   if (maxLinks != null && urls.length > maxLinks) throw new Error(`Generated text has ${urls.length} links, over configured maximum ${maxLinks}.`);
 
-  const blockedDomains = new Set((safety.blockedDomains || []).map((x) => String(x).toLowerCase()));
-  const allowedDomains = new Set((safety.allowedDomains || []).map((x) => String(x).toLowerCase()));
+  const blockedDomains = new Set((safety.blockedDomains || []).map((x) => String(x).toLowerCase().replace(/^www\./, '')));
+  const allowedDomains = new Set((safety.allowedDomains || []).map((x) => String(x).toLowerCase().replace(/^www\./, '')));
   for (const url of urls) {
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
     if ([...blockedDomains].some((domain) => host === domain || host.endsWith(`.${domain}`))) throw new Error(`Generated text links to blocked domain: ${host}`);
@@ -130,25 +158,15 @@ export function validateDraftText(account, text, { requireNonEmpty = true } = {}
   return value;
 }
 
-// A non-finite safety knob (a typo, a bad merge, or any config that bypassed npm run validate) must
-// never silently disable the guardrail it configures: `n >= NaN` and `n < NaN` are both always false,
-// so `Number(garbage)` compared directly would fail OPEN (unlimited posting) instead of falling back
-// to the safe default. A negative maxPostsPerDay is left as-is: `today.length(>=0) >= negative` is
-// already always true, i.e. it already fails closed (blocks every post) on its own. A negative
-// minMinutesBetweenPosts has no equivalent natural fail-closed comparison (`elapsed < negative` is
-// always false, disabling the cooldown entirely), so it also falls back to the safe default.
-// `value == null` (unset/explicit null) is checked BEFORE Number() conversion in both: Number(null) is
-// 0, not NaN, so without this check an explicit null would silently become "block every post" /
-// "no cooldown at all" instead of "use the default" - the same class of bug for a different reason.
+// A malformed runtime safety knob must not silently disable posting limits. Standard GitHub Actions
+// also run strict config validation first; these fallbacks are defense in depth for direct invocation.
 function safeMaxPostsPerDay(value, fallback) {
   if (value == null) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 function safeMinMinutesBetweenPosts(value, fallback) {
   if (value == null) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : Number.POSITIVE_INFINITY;
 }
 
 export function checkRateLimits(accountId, account, history, now = new Date()) {
@@ -170,3 +188,5 @@ export function checkRateLimits(accountId, account, history, now = new Date()) {
   }
   return { ok: true };
 }
+
+export const __test = { urlEntities, hashtagsIn };

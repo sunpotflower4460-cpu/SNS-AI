@@ -17,7 +17,7 @@
     "policy-watch": "node src/research/policy-watch.mjs",
     "report": "node src/reports/generate.mjs",
     "weekly-report": "node src/reports/weekly.mjs",
-    "doctor": "node src/ops/doctor.mjs",
+    "doctor": "node src/ops/doctor-strict.mjs",
     "smoke": "node src/ops/smoke.mjs",
     "preflight": "node src/ops/live-preflight.mjs",
     "feedback": "node src/feedback/record.mjs",
