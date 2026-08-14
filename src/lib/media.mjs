@@ -1,6 +1,7 @@
 import { consumeUsage } from '../ops/budget.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
+import { assertPublicHttpsUrl } from './http.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
@@ -8,15 +9,22 @@ const dryRunUrl = (decision, mediaType = 'image') => `https://dry-run.invalid/${
 
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpoint = account.media?.endpoint;
-  if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('Media generation/search requires an HTTPS media.endpoint.');
+  const endpointUrl = assertPublicHttpsUrl(endpoint, 'media.endpoint');
   await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
-  const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({
-    account: accountId, platform: account.platform, slotId, mode, mediaType: account.media?.type || 'image',
-    prompt: draft?.mediaPrompt || '', text: draft?.text || '', features: draft?.features || {}, rationale: draft?.rationale || ''
-  }) });
+  const response = await fetch(endpointUrl, {
+    method: 'POST',
+    headers,
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      account: accountId, platform: account.platform, slotId, mode, mediaType: account.media?.type || 'image',
+      prompt: draft?.mediaPrompt || '', text: draft?.text || '', features: draft?.features || {}, rationale: draft?.rationale || ''
+    })
+  });
   const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error || `Media endpoint failed with HTTP ${response.status}`);
-  const url = body.url || body.mediaUrl; if (!/^https:\/\//i.test(url || '')) throw new Error('Media endpoint must return { "url": "https://..." }.');
+  const returned = body.url || body.mediaUrl;
+  const url = assertPublicHttpsUrl(returned, 'Media endpoint URL').toString();
   return { url, altText: String(body.altText || '').slice(0, 1000), qa: body.qa || null };
 }
 
