@@ -9,7 +9,7 @@
     "test": "node --test --test-concurrency=1",
     "coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-lines=90 --test-coverage-branches=60 --test-coverage-functions=82",
     "check": "node src/ops/check-all.mjs",
-    "validate": "node src/validate-config.mjs",
+    "validate": "node src/validate-strict-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
     "metrics": "node src/analytics/collector.mjs",
     "learn": "node src/learning/learn.mjs",

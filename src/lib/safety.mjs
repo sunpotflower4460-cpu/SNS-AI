@@ -1,8 +1,34 @@
 import { postsToday } from './history.mjs';
 
+const X_TRANSFORMED_URL_LENGTH = 23;
+const X_WEIGHT_ONE_RANGES = [
+  [0, 4351],
+  [8192, 8205],
+  [8208, 8223],
+  [8242, 8247]
+];
+const X_EMOJI_CLUSTER = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u;
+const X_GRAPHEMES = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+function positiveConfiguredLimit(value, fallback, label) {
+  if (value == null) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a positive number.`);
+  }
+  return value;
+}
+
+function optionalNonNegativeInteger(value, label) {
+  if (value == null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return value;
+}
+
 export function platformTextLimit(account) {
-  if (account.generation?.maxChars) return Number(account.generation.maxChars);
-  return account.platform === 'x' ? 280 : 2200;
+  const fallback = account.platform === 'x' ? 280 : 2200;
+  return positiveConfiguredLimit(account.generation?.maxChars, fallback, 'generation.maxChars');
 }
 
 function urlsIn(text) {
@@ -11,13 +37,63 @@ function urlsIn(text) {
   }).filter(Boolean);
 }
 
+function xUrlSpans(text) {
+  const spans = [];
+  for (const match of text.matchAll(/https?:\/\/[^\s<>]+/gi)) {
+    const raw = match[0];
+    const urlText = raw.replace(/[),.;!?]+$/, '');
+    if (!urlText) continue;
+    try { new URL(urlText); } catch { continue; }
+    spans.push({ start: match.index, end: match.index + urlText.length });
+  }
+  return spans;
+}
+
+function xCodePointWeight(codePoint) {
+  return X_WEIGHT_ONE_RANGES.some(([start, end]) => codePoint >= start && codePoint <= end) ? 1 : 2;
+}
+
+function xWeightedNonUrlText(text) {
+  let total = 0;
+  for (const { segment } of X_GRAPHEMES.segment(text)) {
+    if (X_EMOJI_CLUSTER.test(segment)) {
+      total += 2;
+      continue;
+    }
+    for (const character of segment) total += xCodePointWeight(character.codePointAt(0));
+  }
+  return total;
+}
+
+export function xWeightedLength(text) {
+  const normalized = String(text || '').normalize('NFC');
+  const spans = xUrlSpans(normalized);
+  let total = 0;
+  let cursor = 0;
+  for (const span of spans) {
+    total += xWeightedNonUrlText(normalized.slice(cursor, span.start));
+    total += X_TRANSFORMED_URL_LENGTH;
+    cursor = span.end;
+  }
+  total += xWeightedNonUrlText(normalized.slice(cursor));
+  return total;
+}
+
+function platformTextLength(account, value) {
+  return account.platform === 'x' ? xWeightedLength(value) : value.length;
+}
+
 export function validateDraftText(account, text, { requireNonEmpty = true } = {}) {
   const value = String(text || '').trim();
   if (!value) {
     if (requireNonEmpty) throw new Error('AI generated an empty post.');
   } else {
     const limit = platformTextLimit(account);
-    if (value.length > limit) throw new Error(`Generated text is ${value.length} characters, over configured limit ${limit}.`);
+    const length = platformTextLength(account, value);
+    if (length > limit) {
+      const unit = account.platform === 'x' ? 'weighted characters' : 'characters';
+      throw new Error(`Generated text is ${length} ${unit}, over configured limit ${limit}.`);
+    }
   }
 
   const safety = account.safety || {};
@@ -35,14 +111,14 @@ export function validateDraftText(account, text, { requireNonEmpty = true } = {}
   }
 
   const hashtags = value.match(/(^|\s)#[\p{L}\p{N}_]+/gu) || [];
-  const maxHashtags = Number(safety.maxHashtags);
-  if (Number.isFinite(maxHashtags) && maxHashtags >= 0 && hashtags.length > maxHashtags) {
+  const maxHashtags = optionalNonNegativeInteger(safety.maxHashtags, 'safety.maxHashtags');
+  if (maxHashtags != null && hashtags.length > maxHashtags) {
     throw new Error(`Generated text has ${hashtags.length} hashtags, over configured maximum ${maxHashtags}.`);
   }
 
   const urls = urlsIn(value);
-  const maxLinks = Number(safety.maxLinks);
-  if (Number.isFinite(maxLinks) && maxLinks >= 0 && urls.length > maxLinks) throw new Error(`Generated text has ${urls.length} links, over configured maximum ${maxLinks}.`);
+  const maxLinks = optionalNonNegativeInteger(safety.maxLinks, 'safety.maxLinks');
+  if (maxLinks != null && urls.length > maxLinks) throw new Error(`Generated text has ${urls.length} links, over configured maximum ${maxLinks}.`);
 
   const blockedDomains = new Set((safety.blockedDomains || []).map((x) => String(x).toLowerCase()));
   const allowedDomains = new Set((safety.allowedDomains || []).map((x) => String(x).toLowerCase()));
