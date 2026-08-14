@@ -4,7 +4,8 @@ const ACCOUNTS_FILE = new URL('../../config/accounts.json', import.meta.url);
 const NESTED_SECTION_KEYS = {
   safety: ['anomalyBrake'],
   generation: ['naturalization'],
-  media: ['qa']
+  media: ['qa'],
+  monetization: ['affiliate']
 };
 
 export async function loadConfig() {
@@ -53,6 +54,7 @@ export async function loadAccounts() {
       maintenance: mergeSection(config.defaults, account, 'maintenance'),
       objectives: mergeSection(config.defaults, account, 'objectives'),
       media: mergeSection(config.defaults, account, 'media'),
+      monetization: mergeSection(config.defaults, account, 'monetization'),
       schedule: account.schedule
         ? { timezone: account.schedule.timezone || config.defaults.timezone || 'Asia/Tokyo', ...account.schedule }
         : account.schedule
