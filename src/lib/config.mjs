@@ -23,6 +23,8 @@ export async function loadAccounts() {
       timezone: config.defaults.timezone || 'Asia/Tokyo',
       mode: config.defaults.mode || 'pause',
       ...account,
+      // Treat only literal true as enabled even if a caller deliberately bypasses npm run validate.
+      enabled: account.enabled === true,
       safety: mergeSection(config.defaults, account, 'safety'),
       generation: mergeSection(config.defaults, account, 'generation'),
       analytics: mergeSection(config.defaults, account, 'analytics'),
@@ -58,7 +60,7 @@ export async function resolveAccount(accountId, { allowDisabled = false } = {}) 
   const accounts = await loadAccounts();
   const account = accounts[accountId];
   if (!account) throw new Error(`Unknown account "${accountId}". Add it to config/accounts.json.`);
-  if (!allowDisabled && !account.enabled) throw new Error(`Account "${accountId}" is disabled in config/accounts.json.`);
+  if (!allowDisabled && account.enabled !== true) throw new Error(`Account "${accountId}" is disabled in config/accounts.json.`);
   if (!['x', 'instagram'].includes(account.platform)) {
     throw new Error(`Unsupported platform "${account.platform}" for account "${accountId}".`);
   }

@@ -9,17 +9,18 @@ const HISTORY_FILE = fileURLToPath(new URL('../../data/history.jsonl', import.me
 export async function readHistory() {
   try {
     const raw = await readFile(HISTORY_FILE, 'utf8');
-    return raw
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    const rows = [];
+    for (const [index, line] of raw.split('\n').entries()) {
+      if (!line) continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        const error = new Error(`data/history.jsonl is malformed at line ${index + 1}; refusing to continue with incomplete posting history.`);
+        error.code = 'HISTORY_CORRUPT';
+        throw error;
+      }
+    }
+    return rows;
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
