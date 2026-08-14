@@ -112,5 +112,5 @@ test('strict config rejects private media endpoints and analytics that silently 
   });
   assert.ok(errors.some((error) => error.includes('analytics.checkpointsMinutes must contain at least one')));
   assert.ok(errors.some((error) => error.includes('analytics.maxAgeDays')));
-  assert.ok(errors.some((error) => error.includes('media.endpoint must be a valid public HTTPS URL')));
+  assert.ok(errors.some((error) => error.includes('media.endpoint must be a valid HTTPS URL') && error.includes('public network destination')));
 });
