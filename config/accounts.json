@@ -8,7 +8,15 @@
       "duplicateThreshold": 0.72,
       "maxAttempts": 3,
       "candidateCount": 5,
-      "maxOutputTokens": 3000
+      "maxOutputTokens": 3000,
+      "naturalization": {
+        "enabled": true,
+        "deepReview": false,
+        "minNaturalness": 72,
+        "maxAiPatternRisk": 45,
+        "minVoiceFit": 68,
+        "maxIssues": 6
+      }
     },
     "safety": {
       "moderation": true,
@@ -84,7 +92,7 @@
     "media": {
       "strategy": "none",
       "internalImageGeneration": true,
-      "internalVideoGeneration": true,
+      "internalVideoGeneration": false,
       "imageModel": "gpt-image-2",
       "imageSize": "1024x1024",
       "imageQuality": "medium",
@@ -98,6 +106,7 @@
       "maxHostedVideoBytes": 262144000,
       "qa": {
         "enabled": true,
+        "selectedSemanticReview": false,
         "model": "gpt-5",
         "detail": "high",
         "minScore": 75,

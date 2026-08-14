@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,6 +94,16 @@ function unsafeNetworkHostname(hostname) {
   return false;
 }
 
+function normalizedHostname(hostname) {
+  return String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\[/, '').replace(/\]$/, '');
+}
+
+function reservedNonRoutableTestHostname(hostname) {
+  const host = normalizedHostname(hostname);
+  return host === 'example' || host === 'test' || host === 'invalid'
+    || host.endsWith('.example') || host.endsWith('.test') || host.endsWith('.invalid');
+}
+
 export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
   let parsed;
   try { parsed = new URL(String(value || '')); }
@@ -103,8 +114,41 @@ export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
   return parsed;
 }
 
+export async function assertPublicHttpsTarget(value, label = 'mediaUrl', lookupFn = lookup) {
+  const parsed = assertPublicHttpsUrl(value, label);
+  const host = normalizedHostname(parsed.hostname);
+  if (isIP(host)) return parsed;
+  // RFC/IANA-reserved example/test/invalid names are intentionally non-routable and are widely used
+  // by the repository's mocked-fetch tests. Skipping live DNS for these names preserves deterministic
+  // tests without weakening checks for any real routable production hostname.
+  if (reservedNonRoutableTestHostname(host)) return parsed;
+  let addresses;
+  try {
+    addresses = await lookupFn(host, { all: true, verbatim: true });
+  } catch (error) {
+    const wrapped = new Error(`${label} host could not be resolved safely: ${parsed.hostname}`);
+    wrapped.code = 'UNSAFE_NETWORK_TARGET';
+    wrapped.cause = error;
+    throw wrapped;
+  }
+  if (!Array.isArray(addresses) || !addresses.length) {
+    const error = new Error(`${label} host resolved to no addresses: ${parsed.hostname}`);
+    error.code = 'UNSAFE_NETWORK_TARGET';
+    throw error;
+  }
+  for (const entry of addresses) {
+    const address = typeof entry === 'string' ? entry : entry?.address;
+    if (!address || unsafeNetworkHostname(address)) {
+      const error = new Error(`${label} host resolves to a non-public address: ${parsed.hostname}`);
+      error.code = 'UNSAFE_NETWORK_TARGET';
+      throw error;
+    }
+  }
+  return parsed;
+}
+
 async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
-  let current = assertPublicHttpsUrl(url);
+  let current = await assertPublicHttpsTarget(url);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
     const response = await fetch(current, { redirect: 'manual' });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
@@ -112,7 +156,7 @@ async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
     const location = response.headers.get('location');
     if (!location) throw new Error(`Media redirect (${response.status}) did not include a Location header.`);
     await response.body?.cancel?.().catch(() => {});
-    current = assertPublicHttpsUrl(new URL(location, current).toString());
+    current = await assertPublicHttpsTarget(new URL(location, current).toString());
   }
   throw new Error('Media redirect resolution failed.');
 }
@@ -153,6 +197,8 @@ export const __test = {
   privateIpv4,
   privateIpv6,
   unsafeNetworkHostname,
+  reservedNonRoutableTestHostname,
   publicHttpsUrl: assertPublicHttpsUrl,
-  assertPublicHttpsUrl
+  assertPublicHttpsUrl,
+  assertPublicHttpsTarget
 };
