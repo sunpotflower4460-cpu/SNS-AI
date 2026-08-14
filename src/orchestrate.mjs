@@ -4,6 +4,7 @@ import { findDueSlots } from './lib/schedule.mjs';
 import { slotHandled, markSlot, markSlotIfUnhandled } from './lib/state.mjs';
 import { checkRateLimits } from './lib/safety.mjs';
 import { generatePost } from './lib/openai.mjs';
+import { naturalizeDraft } from './content/naturalize.mjs';
 import { resolveMediaDetailed, ensureMediaForPlatform } from './lib/media.mjs';
 import { createApprovalIssue, findApprovalIssue } from './lib/github.mjs';
 import { appendAudit } from './lib/audit.mjs';
@@ -119,7 +120,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const humanFeedback = await recentHumanFeedback(accountId, Number(account.learning?.humanFeedbackWindow ?? 40));
         await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
 
-        const draft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun });
+        const generatedDraft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun });
+        // Naturalization is a final editorial pass on an already-valid winning candidate. It is
+        // intentionally scoped here rather than inside the generic media resolver so low-level media
+        // operations never acquire an extra AI dependency. When disabled or unavailable it returns the
+        // original draft unchanged; when enabled it also sees recent posts and human feedback.
+        const draft = await naturalizeDraft(accountId, account, generatedDraft, { history, humanFeedback, dryRun });
         const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now });
         ensureMediaForPlatform(account, media.url);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
@@ -136,12 +142,17 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           source: account.mode === 'approval' ? 'approval' : 'auto', slotId: slot.slotId,
           features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment, sources,
           mediaResolution: { decision: media.decision, source: media.source },
-          ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length }
+          ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length, naturalization: draft.naturalization || null }
         };
         await appendAudit({
           account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode,
           features: draft.features, rationale: draft.rationale, mediaResolved: Boolean(media.url), mediaSource: media.source,
-          mediaQa: media.qa ? { pass: media.qa.pass, score: media.qa.score, issues: media.qa.issues?.slice(0, 5) || [] } : null,
+          mediaQa: media.qa ? { pass: media.qa.pass, score: media.qa.score, softWarning: Boolean(media.qa.softWarning), issues: media.qa.issues?.slice(0, 5) || [] } : null,
+          naturalization: draft.naturalization ? {
+            applied: Boolean(draft.naturalization.applied), naturalnessScore: draft.naturalization.naturalnessScore ?? null,
+            aiPatternRisk: draft.naturalization.aiPatternRisk ?? null, voiceFitScore: draft.naturalization.voiceFitScore ?? null,
+            issues: draft.naturalization.issues?.slice(0, 5) || [], fallback: Boolean(draft.naturalization.fallback)
+          } : null,
           experiment, sourceCount: sources.length, dryRun
         });
 
