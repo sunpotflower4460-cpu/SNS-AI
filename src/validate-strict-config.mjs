@@ -39,6 +39,7 @@ function validHttps(value) {
 export function validateStrictConfig(config) {
   const errors = [...validateConfig(config)];
   for (const [id, account] of Object.entries(config.accounts || {})) {
+    if (!account || typeof account !== 'object' || Array.isArray(account)) continue;
     strictBoolean(errors, id, 'enabled', account.enabled);
 
     const generation = merged(config, account, 'generation');
