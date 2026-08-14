@@ -11,6 +11,7 @@
       "maxOutputTokens": 3000,
       "naturalization": {
         "enabled": true,
+        "deepReview": false,
         "minNaturalness": 72,
         "maxAiPatternRisk": 45,
         "minVoiceFit": 68,
@@ -105,6 +106,7 @@
       "maxHostedVideoBytes": 262144000,
       "qa": {
         "enabled": true,
+        "selectedSemanticReview": false,
         "model": "gpt-5",
         "detail": "high",
         "minScore": 75,
