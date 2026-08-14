@@ -13,6 +13,18 @@
   },
   "accounts": [
     {
+      "account": "music-tools-x",
+      "displayName": "Music Tools & Plugin Trends",
+      "platform": "x",
+      "enabled": false,
+      "mode": "approval",
+      "ready": true,
+      "blockers": [],
+      "warnings": [
+        "Account is disabled or paused; live readiness checks are informational only."
+      ]
+    },
+    {
       "account": "example-x",
       "displayName": "Example X account",
       "platform": "x",
