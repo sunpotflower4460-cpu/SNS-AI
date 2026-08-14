@@ -39,7 +39,7 @@ export async function publish(payload,{
 }={}){
   const dryRun=boolValue(payload?.dryRun),slotId=payload?.slotId||null;
   const explicitHub=payload?.hub?.required===true,hasHubProduct=Boolean(payload?.hubProduct);
-  if(!explicitHub&&!hasHubProduct)return core(payload);
+  if(!explicitHub&&!hasHubProduct&&(!slotId||dryRun))return core(payload);
   if(dryRun){
     if(hasHubProduct)validateProduct(payload.hubProduct,{requireReady:true});
     if(explicitHub)hubRequirement(payload,null);
