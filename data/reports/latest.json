@@ -1,10 +1,57 @@
 {
-  "generatedAt": "2026-08-14T03:09:56.132Z",
+  "generatedAt": "2026-08-14T07:59:09.700Z",
   "policies": {
     "x": null,
     "instagram": null
   },
   "accounts": {
+    "music-tools-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "approval",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4
+      },
+      "recentErrors": []
+    },
     "example-x": {
       "platform": "x",
       "enabled": false,
