@@ -1,5 +1,4 @@
 import { consumeUsage } from '../ops/budget.mjs';
-import { naturalizeDraft } from '../content/naturalize.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
 import { reviewVisualUrl } from '../media/qa.mjs';
@@ -129,17 +128,12 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
 }
 
 export async function resolveMediaDetailed(accountId, account, slotId, draft, options = {}) {
-  if (draft && !draft.naturalization) {
-    const polished = await naturalizeDraft(accountId, account, draft, { dryRun: Boolean(options.dryRun) });
-    Object.assign(draft, polished);
-  }
-
   const resolved = await resolveRawMediaDetailed(accountId, account, slotId, draft, options);
   return reviewSelectedImage(accountId, account, slotId, draft, resolved, options);
 }
 
 export async function resolveMedia(accountId, account, slotId, draft, options = {}) {
-  return (await resolveMediaDetailed(accountId, account,slotId, draft, options)).url;
+  return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url;
 }
 
 export function ensureMediaForPlatform(account, mediaUrl) {
