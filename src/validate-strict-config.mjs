@@ -1,4 +1,5 @@
 import { loadConfig } from './lib/config.mjs';
+import { assertPublicHttpsUrl } from './lib/http.mjs';
 import { validateConfig } from './validate-config.mjs';
 
 const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint', 'generate', 'auto']);
@@ -27,10 +28,10 @@ function strictBoolean(errors, id, label, value) {
 }
 
 function validHttps(value) {
-  if (typeof value !== 'string' || !/^https:\/\//i.test(value)) return false;
+  if (typeof value !== 'string') return false;
   try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password;
+    assertPublicHttpsUrl(value);
+    return true;
   } catch {
     return false;
   }
@@ -53,6 +54,14 @@ export function validateStrictConfig(config) {
 
     const analytics = merged(config, account, 'analytics');
     strictBoolean(errors, id, 'analytics.enabled', analytics.enabled);
+    strictPositiveInteger(errors, id, 'analytics.maxAgeDays', analytics.maxAgeDays);
+    if (analytics.enabled !== false) {
+      if (!Array.isArray(analytics.checkpointsMinutes) || analytics.checkpointsMinutes.length === 0) {
+        errors.push(`${id}: analytics.checkpointsMinutes must contain at least one checkpoint when analytics is enabled`);
+      } else {
+        for (const value of analytics.checkpointsMinutes) strictPositiveInteger(errors, id, 'analytics.checkpointsMinutes[]', value);
+      }
+    }
 
     const learning = merged(config, account, 'learning');
     strictBoolean(errors, id, 'learning.enabled', learning.enabled);
@@ -67,6 +76,11 @@ export function validateStrictConfig(config) {
 
     const budgets = merged(config, account, 'budgets');
     strictBoolean(errors, id, 'budgets.enabled', budgets.enabled);
+    if (budgets.enabled !== false) {
+      for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay']) {
+        strictNonNegativeInteger(errors, id, `budgets.${key}`, budgets[key]);
+      }
+    }
 
     const experiments = merged(config, account, 'experiments');
     strictBoolean(errors, id, 'experiments.enabled', experiments.enabled);
@@ -79,10 +93,10 @@ export function validateStrictConfig(config) {
     strictBoolean(errors, id, 'media.qa.enabled', media.qa?.enabled);
 
     if (media.endpoint != null && media.endpoint !== '' && !validHttps(media.endpoint)) {
-      errors.push(`${id}: media.endpoint must be a valid HTTPS URL`);
+      errors.push(`${id}: media.endpoint must be a valid public HTTPS URL`);
     }
     if (['fixed', 'external'].includes(strategy) && media.url != null && media.url !== '' && !validHttps(media.url)) {
-      errors.push(`${id}: media.url must be a valid HTTPS URL for ${strategy}`);
+      errors.push(`${id}: media.url must be a valid public HTTPS URL for ${strategy}`);
     }
 
     const configuredUrls = media.urls ?? media.libraryUrls ?? [];
@@ -90,7 +104,7 @@ export function validateStrictConfig(config) {
       errors.push(`${id}: media.urls must be an array`);
     } else {
       for (const [index, url] of configuredUrls.entries()) {
-        if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid HTTPS URL`);
+        if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid public HTTPS URL`);
       }
     }
   }
