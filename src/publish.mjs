@@ -5,6 +5,7 @@ import { getDurableClaim, writeDurableClaim } from './lib/durable-claim.mjs';
 import { publish as corePublish, __test as coreTest } from './publish-core.mjs';
 import { assertHubBeforeProvider, hubRequirement, syncPublishedHubBacklink } from './hub/publish-hooks.mjs';
 import { prepareHubPublish } from './hub/prepare.mjs';
+import { validateHubProductContract } from './hub/product-contract.mjs';
 
 const HANDLED = new Set(['publishing','publish_unknown','published']);
 const sleep = (ms) => new Promise((resolve)=>setTimeout(resolve,ms));
@@ -33,22 +34,27 @@ export async function publish(payload,{
   resolve=resolveAccount,
   audit=appendAudit,
   sleepImpl=sleep,
-  prepare=prepareHubPublish
+  prepare=prepareHubPublish,
+  validateProduct=validateHubProductContract
 }={}){
   const dryRun=boolValue(payload?.dryRun),slotId=payload?.slotId||null;
   const explicitHub=payload?.hub?.required===true,hasHubProduct=Boolean(payload?.hubProduct);
-  if(!explicitHub&&!hasHubProduct&&(!slotId||dryRun))return core(payload);
+  if(!explicitHub&&!hasHubProduct)return core(payload);
+  if(dryRun){
+    if(hasHubProduct)validateProduct(payload.hubProduct,{requireReady:true});
+    if(explicitHub)hubRequirement(payload,null);
+    return core(withoutHubProduct(payload));
+  }
 
   let claim=slotId?await getClaim(slotId,{fresh:true}):null;
   let effectivePayload=payload;
   let requirement=hubRequirement(payload,claim);
-  if(!requirement&&hasHubProduct&&!dryRun){
+  if(!requirement&&hasHubProduct){
     const prepared=await prepare(payload.hubProduct);
     effectivePayload={...withoutHubProduct(payload),hub:prepared.hub};
     requirement=hubRequirement(effectivePayload,claim);
   }
-  if(!requirement)return core(payload);
-  if(dryRun)return core(withoutHubProduct(payload));
+  if(!requirement)return core(withoutHubProduct(payload));
   if(!slotId){const error=new Error('Hub-dependent live publishing requires slotId for durable recovery.');error.code='HUB_SLOT_REQUIRED';error.publishStage='hub';throw error}
 
   effectivePayload=withoutHubProduct(effectivePayload);
