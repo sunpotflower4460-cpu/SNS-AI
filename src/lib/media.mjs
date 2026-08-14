@@ -15,10 +15,7 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
   const response = await fetch(endpointUrl, {
-    method: 'POST',
-    headers,
-    redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
+    method: 'POST', headers, redirect: 'error', signal: AbortSignal.timeout(30_000),
     body: JSON.stringify({
       account: accountId, platform: account.platform, slotId, mode, mediaType: account.media?.type || 'image',
       prompt: draft?.mediaPrompt || '', text: draft?.text || '', features: draft?.features || {}, rationale: draft?.rationale || ''
@@ -36,18 +33,12 @@ async function generated(accountId, account, slotId, draft, dryRun = false, now 
   if (account.media?.endpoint) return dryRun
     ? { url: dryRunUrl('generate', mediaType), decision: 'generate', source: 'dry-run-endpoint', altText: '', qa: null }
     : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, 'generate')), decision: 'generate', source: 'endpoint' };
-
-  if (mediaType === 'reel' && account.media?.internalVideoGeneration !== false) {
-    return dryRun
-      ? { url: dryRunUrl('generate', 'reel'), decision: 'generate', source: 'dry-run-openai-video', altText: '', qa: null }
-      : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft, { now })), decision: 'generate', source: 'openai-video' };
-  }
-
-  if (mediaType === 'image' && account.media?.internalImageGeneration !== false) {
-    return dryRun
-      ? { url: dryRunUrl('generate', 'image'), decision: 'generate', source: 'dry-run-openai-image', altText: '', qa: null }
-      : { ...(await generateAndHostImageDetailed(accountId, account, slotId, draft)), decision: 'generate', source: 'openai-image' };
-  }
+  if (mediaType === 'reel' && account.media?.internalVideoGeneration !== false) return dryRun
+    ? { url: dryRunUrl('generate', 'reel'), decision: 'generate', source: 'dry-run-openai-video', altText: '', qa: null }
+    : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft, { now })), decision: 'generate', source: 'openai-video' };
+  if (mediaType === 'image' && account.media?.internalImageGeneration !== false) return dryRun
+    ? { url: dryRunUrl('generate', 'image'), decision: 'generate', source: 'dry-run-openai-image', altText: '', qa: null }
+    : { ...(await generateAndHostImageDetailed(accountId, account, slotId, draft)), decision: 'generate', source: 'openai-image' };
   return { url: null, decision: 'none', source: null, altText: '', qa: null };
 }
 
@@ -55,14 +46,10 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
   const media = account.media || {}; const strategy = media.strategy || 'none'; const mediaType = media.type || 'image';
   if (strategy === 'none') return { url: null, decision: 'none', source: null, altText: '', qa: null };
   if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy, altText: String(media.altText || '').slice(0, 1000), qa: null };
-  if (strategy === 'pool') {
-    const url = poolUrl(media, slotId);
-    return { url, decision: url ? 'library' : 'none', source: 'pool', altText: '', qa: null };
-  }
+  if (strategy === 'pool') { const url = poolUrl(media, slotId); return { url, decision: url ? 'library' : 'none', source: 'pool', altText: '', qa: null }; }
   if (strategy === 'endpoint') {
     const decision = ['search', 'generate'].includes(draft?.features?.mediaDecision) ? draft.features.mediaDecision : 'generate';
-    return dryRun
-      ? { url: dryRunUrl(decision, mediaType), decision, source: 'dry-run-endpoint', altText: '', qa: null }
+    return dryRun ? { url: dryRunUrl(decision, mediaType), decision, source: 'dry-run-endpoint', altText: '', qa: null }
       : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, decision)), decision, source: 'endpoint' };
   }
   if (strategy === 'generate') return generated(accountId, account, slotId, draft, dryRun, now);
@@ -76,8 +63,7 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
       return generated(accountId, account, slotId, draft, dryRun, now);
     }
     if (decision === 'search') {
-      if (media.endpoint) return dryRun
-        ? { url: dryRunUrl('search', mediaType), decision: 'search', source: 'dry-run-endpoint', altText: '', qa: null }
+      if (media.endpoint) return dryRun ? { url: dryRunUrl('search', mediaType), decision: 'search', source: 'dry-run-endpoint', altText: '', qa: null }
         : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, 'search')), decision: 'search', source: 'endpoint' };
       const fallback = poolUrl(media, slotId);
       if (fallback) return { url: fallback, decision: 'library', source: 'pool-fallback', altText: '', qa: null };
@@ -90,54 +76,31 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
 
 async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
   const mediaType = account.media?.type || 'image';
-  // Built-in generated images have already been reviewed over their raw bytes before hosting.
-  // External endpoints may supply their own qa field, but it is advisory only and never bypasses our review.
-  if (dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
-
+  // Suitability review is opt-in at the merged account level. Repository defaults enable it for real
+  // accounts; partial low-level media callers remain free of an unexpected OpenAI dependency.
+  if (account.media?.qa?.enabled !== true || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
   const qa = await reviewVisualUrl(accountId, account, resolved.url, {
-    mediaType: 'image',
-    prompt: draft?.mediaPrompt || '',
-    postText: draft?.text || ''
+    mediaType: 'image', prompt: draft?.mediaPrompt || '', postText: draft?.text || ''
   });
-  if (qa.pass) {
-    return { ...resolved, qa, altText: qa.altText || resolved.altText || '', suitabilityReviewed: true };
-  }
-
-  if (account.platform === 'x') {
-    return {
-      url: null,
-      decision: 'none',
-      source: `${resolved.source || 'media'}-qa-omitted`,
-      altText: '',
-      qa,
-      endpointQa: resolved.endpointQa || null,
-      suitabilityReviewed: true,
-      omittedUnsafeVisual: true
-    };
-  }
-
+  if (qa.pass) return { ...resolved, qa, altText: qa.altText || resolved.altText || '', suitabilityReviewed: true };
+  if (account.platform === 'x') return {
+    url: null, decision: 'none', source: `${resolved.source || 'media'}-qa-omitted`, altText: '', qa,
+    endpointQa: resolved.endpointQa || null, suitabilityReviewed: true, omittedUnsafeVisual: true
+  };
   if (account.platform === 'instagram' && resolved.decision !== 'generate' && account.media?.internalImageGeneration !== false) {
     const fallback = await generated(accountId, account, slotId, draft, false, now);
     if (fallback.url) return { ...fallback, fallbackFrom: resolved.source || resolved.decision, priorQa: qa };
   }
-
   const error = new Error('Selected image failed hard pre-publish visual QA.');
-  error.code = 'MEDIA_QA_FAILED';
-  error.qa = qa;
-  throw error;
+  error.code = 'MEDIA_QA_FAILED'; error.qa = qa; throw error;
 }
 
 export async function resolveMediaDetailed(accountId, account, slotId, draft, options = {}) {
   const resolved = await resolveRawMediaDetailed(accountId, account, slotId, draft, options);
   return reviewSelectedImage(accountId, account, slotId, draft, resolved, options);
 }
-
-export async function resolveMedia(accountId, account, slotId, draft, options = {}) {
-  return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url;
-}
-
+export async function resolveMedia(accountId, account, slotId, draft, options = {}) { return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url; }
 export function ensureMediaForPlatform(account, mediaUrl) {
   if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image generation is supported on public repositories.');
 }
-
 export const __test = { reviewSelectedImage, resolveRawMediaDetailed };
