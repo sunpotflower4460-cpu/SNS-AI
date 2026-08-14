@@ -22,6 +22,14 @@ function publishedForAccount(history, accountId) {
   return (Array.isArray(history) ? history : []).filter((row) => row?.status === 'published' && row?.account === accountId);
 }
 
+function configNumber(value, fallback, label, { min = 0, max = Number.POSITIVE_INFINITY, integer = false } = {}) {
+  const number = Number(value ?? fallback);
+  if (!Number.isFinite(number) || number < min || number > max || (integer && !Number.isInteger(number))) {
+    trustError('AFFILIATE_CONFIG_INVALID', `Invalid affiliate configuration for ${label}.`);
+  }
+  return number;
+}
+
 export function normalizeCommercial(value) {
   if (value == null) return { kind: ORGANIC, paidPartnership: false };
   if (typeof value !== 'object' || Array.isArray(value)) trustError('COMMERCIAL_METADATA_INVALID', 'commercial metadata must be an object.');
@@ -58,8 +66,8 @@ export function assertAffiliateTrust({ accountId, account, text, commercial, his
   }
 
   const rows = publishedForAccount(history, accountId);
-  const maxShare = Number(config.maxShare ?? 0.2);
-  const windowPosts = Math.max(1, Number(config.windowPosts ?? 20));
+  const maxShare = configNumber(config.maxShare, 0.2, 'maxShare', { min: 0.01, max: 1 });
+  const windowPosts = configNumber(config.windowPosts, 20, 'windowPosts', { min: 1, integer: true });
   const recent = rows.slice(-windowPosts);
   const affiliateCount = recent.filter((row) => kindOf(row) === AFFILIATE).length;
   const prospectiveShare = (affiliateCount + 1) / (recent.length + 1);
@@ -73,15 +81,15 @@ export function assertAffiliateTrust({ accountId, account, text, commercial, his
   }
 
   if (lastAffiliateIndex < 0) {
-    const minimum = Math.max(0, Number(config.minOrganicPostsBeforeFirst ?? config.minOrganicPostsBetween ?? 4));
+    const minimum = configNumber(config.minOrganicPostsBeforeFirst ?? config.minOrganicPostsBetween, 4, 'minOrganicPostsBeforeFirst', { min: 0, integer: true });
     const organicCount = rows.filter((row) => kindOf(row) === ORGANIC).length;
     if (organicCount < minimum) trustError('AFFILIATE_ORGANIC_FOUNDATION', `At least ${minimum} organic published posts are required before the first affiliate post.`);
   } else {
-    const minimum = Math.max(0, Number(config.minOrganicPostsBetween ?? 4));
+    const minimum = configNumber(config.minOrganicPostsBetween, 4, 'minOrganicPostsBetween', { min: 0, integer: true });
     const organicSince = rows.slice(lastAffiliateIndex + 1).filter((row) => kindOf(row) === ORGANIC).length;
     if (organicSince < minimum) trustError('AFFILIATE_ORGANIC_GAP', `At least ${minimum} organic published posts are required between affiliate posts.`);
 
-    const cooldownHours = Math.max(0, Number(config.cooldownHours ?? 48));
+    const cooldownHours = configNumber(config.cooldownHours, 48, 'cooldownHours', { min: 0 });
     const lastAt = Date.parse(rows[lastAffiliateIndex]?.at || '');
     const current = now instanceof Date ? now.getTime() : new Date(now).getTime();
     if (cooldownHours > 0 && Number.isFinite(lastAt) && Number.isFinite(current) && current - lastAt < cooldownHours * 60 * 60 * 1000) {
@@ -95,4 +103,4 @@ export function assertAffiliateTrust({ accountId, account, text, commercial, his
   };
 }
 
-export const __test = { kindOf, nonEmptyList, publishedForAccount };
+export const __test = { kindOf, nonEmptyList, publishedForAccount, configNumber };
