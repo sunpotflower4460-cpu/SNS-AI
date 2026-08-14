@@ -3,7 +3,7 @@ import { naturalizeDraft } from '../content/naturalize.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
 import { reviewVisualUrl } from '../media/qa.mjs';
-import { assertPublicHttpsUrl } from './http.mjs';
+import { assertPublicHttpsTarget, assertPublicHttpsUrl } from './http.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
@@ -12,7 +12,7 @@ const dryRunUrl = (decision, mediaType = 'image') => `https://dry-run.invalid/${
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpoint = account.media?.endpoint;
   if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('Media generation/search requires an HTTPS media.endpoint.');
-  const endpointUrl = assertPublicHttpsUrl(endpoint, 'media.endpoint');
+  const endpointUrl = await assertPublicHttpsTarget(endpoint, 'media.endpoint');
   await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
   const response = await fetch(endpointUrl, {
@@ -102,8 +102,6 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
     return { ...resolved, qa, altText: qa.altText || resolved.altText || '', suitabilityReviewed: true };
   }
 
-  // X can safely continue as a text-only post. A hard visual failure should never make a perfectly
-  // good X post disappear just because its optional image was bad.
   if (account.platform === 'x') {
     return {
       url: null,
@@ -116,9 +114,6 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
     };
   }
 
-  // Instagram requires media. If a selected/library image has a genuine hard defect, prefer one
-  // controlled generated fallback instead of blocking the whole slot. Generated images already pass
-  // through the hard visual QA in openai-image.mjs.
   if (account.platform === 'instagram' && resolved.decision !== 'generate' && account.media?.internalImageGeneration !== false) {
     const fallback = await generated(accountId, account, slotId, draft, false, now);
     if (fallback.url) return { ...fallback, fallbackFrom: resolved.source || resolved.decision, priorQa: qa };
@@ -131,9 +126,6 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
 }
 
 export async function resolveMediaDetailed(accountId, account, slotId, draft, options = {}) {
-  // Run the writing-naturalness editor immediately before visual selection so image relevance is
-  // judged against the exact text that will be published. The editor is soft/fallback-safe and mutates
-  // only this in-memory draft; it does not alter features, experiments, or stored human feedback.
   if (draft && !draft.naturalization) {
     const polished = await naturalizeDraft(accountId, account, draft, { dryRun: Boolean(options.dryRun) });
     Object.assign(draft, polished);
