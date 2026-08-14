@@ -35,8 +35,8 @@ function strictRange(errors, id, label, value, min, max) {
 }
 
 function strictObject(errors, id, label, value) {
-  if (value == null) return true;
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     errors.push(`${id}: ${label} must be an object`);
     return false;
   }
@@ -80,6 +80,7 @@ export function validateStrictConfig(config) {
     strictNonNegativeInteger(errors, id, 'safety.maxLinks', safety.maxLinks);
     strictNonNegativeInteger(errors, id, 'safety.maxHashtags', safety.maxHashtags);
     strictBoolean(errors, id, 'safety.moderation', safety.moderation);
+    strictObject(errors, id, 'safety.anomalyBrake', safety.anomalyBrake);
     strictBoolean(errors, id, 'safety.anomalyBrake.enabled', safety.anomalyBrake?.enabled);
 
     const analytics = merged(config, account, 'analytics');
