@@ -1,6 +1,11 @@
 import { readFile } from 'node:fs/promises';
 
 const ACCOUNTS_FILE = new URL('../../config/accounts.json', import.meta.url);
+const NESTED_SECTION_KEYS = {
+  safety: ['anomalyBrake'],
+  generation: ['naturalization'],
+  media: ['qa']
+};
 
 export async function loadConfig() {
   const raw = await readFile(ACCOUNTS_FILE, 'utf8');
@@ -11,8 +16,20 @@ export async function loadConfig() {
   return { defaults: parsed.defaults || {}, accounts: parsed.accounts };
 }
 
+function plainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
 function mergeSection(defaults, account, key) {
-  return { ...(defaults?.[key] || {}), ...(account?.[key] || {}) };
+  const base = defaults?.[key] || {};
+  const override = account?.[key] || {};
+  const result = { ...base, ...override };
+  for (const nestedKey of NESTED_SECTION_KEYS[key] || []) {
+    if (plainObject(base[nestedKey]) && plainObject(override[nestedKey])) {
+      result[nestedKey] = { ...base[nestedKey], ...override[nestedKey] };
+    }
+  }
+  return result;
 }
 
 export async function loadAccounts() {
@@ -73,3 +90,5 @@ export async function resolveAccount(accountId, { allowDisabled = false } = {}) 
     : credential;
   return { id: accountId, ...account, credential: resolvedCredential };
 }
+
+export const __test = { mergeSection, plainObject };
