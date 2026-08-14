@@ -1,10 +1,10 @@
 import { fileURLToPath } from 'node:url';
-import { appendJsonl, readJsonl } from '../lib/json-store.mjs';
+import { appendJsonl, readJsonlStrict } from '../lib/json-store.mjs';
 
 const METRICS_FILE = fileURLToPath(new URL('../../data/metrics.jsonl', import.meta.url));
 
 export async function readMetricSnapshots() {
-  return readJsonl(METRICS_FILE);
+  return readJsonlStrict(METRICS_FILE, 'data/metrics.jsonl');
 }
 
 export async function appendMetricSnapshot(snapshot) {
