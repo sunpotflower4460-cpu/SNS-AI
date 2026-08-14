@@ -39,10 +39,6 @@ jobs:
       MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
-      CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
-      CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
-      CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
-      CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_FORCE: ${{ inputs.force }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
@@ -65,6 +61,11 @@ jobs:
       - name: Run autopilot
         id: autopilot_run
         shell: bash
+        env:
+          CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
+          CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
+          CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
+          CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
