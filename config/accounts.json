@@ -89,6 +89,22 @@
     "objectives": {
       "weights": {}
     },
+    "monetization": {
+      "affiliate": {
+        "enabled": false,
+        "maxShare": 0.2,
+        "windowPosts": 20,
+        "minOrganicPostsBeforeFirst": 4,
+        "minOrganicPostsBetween": 4,
+        "cooldownHours": 48,
+        "requireExplicitDisclosure": true,
+        "disclosureText": "広告・アフィリエイトリンクを含みます",
+        "requireBalancedRecommendation": true,
+        "requireAlternativeConsideration": true,
+        "requireXPaidPartnership": true,
+        "allowCommissionInRanking": false
+      }
+    },
     "media": {
       "strategy": "none",
       "internalImageGeneration": true,
@@ -192,6 +208,11 @@
           "誰でも必ず",
           "確実に上達"
         ]
+      },
+      "monetization": {
+        "affiliate": {
+          "enabled": false
+        }
       },
       "media": {
         "strategy": "none"
