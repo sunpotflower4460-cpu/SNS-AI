@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "inboundOnly": true,
+  "autoReply": false,
+  "autoDmReply": false,
+  "approvalRequired": true,
+  "oneAutomatedResponsePerInteraction": true,
+  "maxAutomatedRepliesPerDay": 12,
+  "maxAutomatedDmRepliesPerDay": 12,
+  "replyCooldownMinutes": 30,
+  "dmCooldownMinutes": 30,
+  "prohibitedGrowthAutomation": [
+    "auto_follow",
+    "auto_unfollow",
+    "cold_keyword_reply",
+    "unsolicited_bulk_dm",
+    "duplicate_cross_account_post"
+  ],
+  "humanRequiredCategories": [
+    "legal",
+    "medical",
+    "financial_dispute",
+    "harassment_or_threat",
+    "privacy_or_personal_data",
+    "refund_or_payment_dispute",
+    "account_security",
+    "user_requests_human"
+  ]
+}
