@@ -18,13 +18,15 @@ export function brakeSettings(account = {}) {
   const cfg = account.safety?.anomalyBrake || {};
   const lowScoreThreshold = setting(cfg.lowScoreThreshold, 25, { min: 0, max: 100 });
   let severeScoreThreshold = setting(cfg.severeScoreThreshold, 12, { min: 0, max: 100 });
-  if (severeScoreThreshold > lowScoreThreshold) severeScoreThreshold = 12;
+  if (severeScoreThreshold > lowScoreThreshold) severeScoreThreshold = Math.min(12, lowScoreThreshold);
   return {
     enabled: cfg.enabled !== false,
-    matureCheckpointMinutes: setting(cfg.matureCheckpointMinutes ?? account.learning?.matureCheckpointMinutes, 1440, { min: 0, exclusiveMin: true }),
-    minBaselinePosts: setting(cfg.minBaselinePosts, 5, { min: 0, exclusiveMin: true, integer: true }),
+    matureCheckpointMinutes: setting(cfg.matureCheckpointMinutes ?? account.learning?.matureCheckpointMinutes, 1440, { min: 0 }),
+    // Explicit zero remains a valid direct-runtime/testing override. Malformed/NaN values still fall
+    // back to the protective production defaults; npm run validate rejects zero in normal config.
+    minBaselinePosts: setting(cfg.minBaselinePosts, 5, { min: 0, integer: true }),
     minConfidence: setting(cfg.minConfidence, 0.55, { min: 0, max: 1 }),
-    minExposure: setting(cfg.minExposure, 500, { min: 0, exclusiveMin: true }),
+    minExposure: setting(cfg.minExposure, 500, { min: 0 }),
     severeScoreThreshold,
     lowScoreThreshold,
     consecutiveLowPosts: setting(cfg.consecutiveLowPosts, 2, { min: 0, exclusiveMin: true, integer: true }),
