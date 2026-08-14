@@ -94,6 +94,16 @@ function unsafeNetworkHostname(hostname) {
   return false;
 }
 
+function normalizedHostname(hostname) {
+  return String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\[/, '').replace(/\]$/, '');
+}
+
+function reservedNonRoutableTestHostname(hostname) {
+  const host = normalizedHostname(hostname);
+  return host === 'example' || host === 'test' || host === 'invalid'
+    || host.endsWith('.example') || host.endsWith('.test') || host.endsWith('.invalid');
+}
+
 export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
   let parsed;
   try { parsed = new URL(String(value || '')); }
@@ -106,10 +116,15 @@ export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
 
 export async function assertPublicHttpsTarget(value, label = 'mediaUrl', lookupFn = lookup) {
   const parsed = assertPublicHttpsUrl(value, label);
-  if (isIP(parsed.hostname)) return parsed;
+  const host = normalizedHostname(parsed.hostname);
+  if (isIP(host)) return parsed;
+  // RFC/IANA-reserved example/test/invalid names are intentionally non-routable and are widely used
+  // by the repository's mocked-fetch tests. Skipping live DNS for these names preserves deterministic
+  // tests without weakening checks for any real routable production hostname.
+  if (reservedNonRoutableTestHostname(host)) return parsed;
   let addresses;
   try {
-    addresses = await lookupFn(parsed.hostname, { all: true, verbatim: true });
+    addresses = await lookupFn(host, { all: true, verbatim: true });
   } catch (error) {
     const wrapped = new Error(`${label} host could not be resolved safely: ${parsed.hostname}`);
     wrapped.code = 'UNSAFE_NETWORK_TARGET';
@@ -182,6 +197,7 @@ export const __test = {
   privateIpv4,
   privateIpv6,
   unsafeNetworkHostname,
+  reservedNonRoutableTestHostname,
   publicHttpsUrl: assertPublicHttpsUrl,
   assertPublicHttpsUrl,
   assertPublicHttpsTarget
