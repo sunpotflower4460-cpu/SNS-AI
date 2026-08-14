@@ -12,6 +12,7 @@ const CONFIG = fileURLToPath(new URL('../config/accounts.json', import.meta.url)
 const USAGE = fileURLToPath(new URL('../data/usage.jsonl', import.meta.url));
 const USAGE_STATE = fileURLToPath(new URL('../data/usage-state.json', import.meta.url));
 const X_OAUTH2_STATE = fileURLToPath(new URL('../data/x-oauth2-state.json', import.meta.url));
+const qaOff = { enabled: false };
 
 function jsonResponse(value, status = 200, headers = {}) {
   return new Response(JSON.stringify(value), {
@@ -60,20 +61,20 @@ test('media resolver covers fixed, pool, endpoint, auto fallbacks, usage account
       await rm(USAGE_STATE, { force: true });
 
       const fixed = await resolveMediaDetailed('fixed', {
-        platform: 'x', media: { strategy: 'fixed', url: 'https://cdn.example/fixed.png', altText: 'a'.repeat(1200) }
+        platform: 'x', media: { strategy: 'fixed', url: 'https://cdn.example/fixed.png', altText: 'a'.repeat(1200), qa: qaOff }
       }, 'slot-fixed', {});
       assert.equal(fixed.url, 'https://cdn.example/fixed.png');
       assert.equal(fixed.decision, 'library');
       assert.equal(fixed.source, 'fixed');
       assert.equal(fixed.altText.length, 1000);
-      assert.equal(await resolveMedia('fixed', { platform: 'x', media: { strategy: 'external', url: 'https://cdn.example/external.png' } }, 'slot-external', {}), 'https://cdn.example/external.png');
+      assert.equal(await resolveMedia('fixed', { platform: 'x', media: { strategy: 'external', url: 'https://cdn.example/external.png', qa: qaOff } }, 'slot-external', {}), 'https://cdn.example/external.png');
 
-      const poolAccount = { platform: 'x', media: { strategy: 'pool', urls: ['https://cdn.example/a.png', 'https://cdn.example/b.png'] } };
+      const poolAccount = { platform: 'x', media: { strategy: 'pool', urls: ['https://cdn.example/a.png', 'https://cdn.example/b.png'], qa: qaOff } };
       const pooledA = await resolveMediaDetailed('pool', poolAccount, 'stable-slot', {});
       const pooledB = await resolveMediaDetailed('pool', poolAccount, 'stable-slot', {});
       assert.equal(pooledA.url, pooledB.url, 'pool selection must be deterministic for a slot');
       assert.equal(pooledA.source, 'pool');
-      assert.equal((await resolveMediaDetailed('pool-empty', { platform: 'x', media: { strategy: 'pool', urls: [] } }, 'slot', {})).decision, 'none');
+      assert.equal((await resolveMediaDetailed('pool-empty', { platform: 'x', media: { strategy: 'pool', urls: [], qa: qaOff } }, 'slot', {})).decision, 'none');
 
       process.env.MEDIA_SERVICE_TOKEN = 'media-service-test-token';
       let endpointBody = null;
@@ -88,7 +89,7 @@ test('media resolver covers fixed, pool, endpoint, auto fallbacks, usage account
         platform: 'instagram',
         schedule: { timezone: 'UTC' },
         budgets: { enabled: false },
-        media: { strategy: 'endpoint', type: 'image', endpoint: 'https://media.example/api' }
+        media: { strategy: 'endpoint', type: 'image', endpoint: 'https://media.example/api', qa: qaOff }
       }, 'slot-endpoint', {
         text: 'caption', mediaPrompt: 'clean diagram', rationale: 'visual explanation', features: { mediaDecision: 'search', topic: 'testing' }
       });
@@ -104,29 +105,29 @@ test('media resolver covers fixed, pool, endpoint, auto fallbacks, usage account
 
       globalThis.fetch = async () => { throw new Error('network should not be needed for pool fallback'); };
       const searchFallback = await resolveMediaDetailed('auto-search', {
-        platform: 'x', media: { strategy: 'auto', type: 'image', urls: ['https://cdn.example/library.png'] }
+        platform: 'x', media: { strategy: 'auto', type: 'image', urls: ['https://cdn.example/library.png'], qa: qaOff }
       }, 'slot-search', { features: { mediaDecision: 'search' } });
       assert.equal(searchFallback.source, 'pool-fallback');
       assert.equal(searchFallback.decision, 'library');
 
       const libraryFallback = await resolveMediaDetailed('auto-library', {
-        platform: 'x', media: { strategy: 'auto', type: 'image', urls: [], internalImageGeneration: true }
+        platform: 'x', media: { strategy: 'auto', type: 'image', urls: [], internalImageGeneration: true, qa: qaOff }
       }, 'slot-library', { features: { mediaDecision: 'library' } }, { dryRun: true });
       assert.equal(libraryFallback.source, 'dry-run-openai-image');
       assert.match(libraryFallback.url, /\.png$/);
 
       const instagramDefault = await resolveMediaDetailed('ig-default', {
-        platform: 'instagram', media: { strategy: 'auto', type: 'image', defaultInstagramDecision: 'generate', internalImageGeneration: true }
+        platform: 'instagram', media: { strategy: 'auto', type: 'image', defaultInstagramDecision: 'generate', internalImageGeneration: true, qa: qaOff }
       }, 'slot-instagram', { features: { mediaDecision: 'none' } }, { dryRun: true });
       assert.equal(instagramDefault.decision, 'generate');
       assert.equal(instagramDefault.source, 'dry-run-openai-image');
 
       await assert.rejects(
-        resolveMediaDetailed('bad-endpoint', { platform: 'x', media: { strategy: 'endpoint', endpoint: 'http://insecure.example' } }, 'slot', { features: { mediaDecision: 'generate' } }),
+        resolveMediaDetailed('bad-endpoint', { platform: 'x', media: { strategy: 'endpoint', endpoint: 'http://insecure.example', qa: qaOff } }, 'slot', { features: { mediaDecision: 'generate' } }),
         /HTTPS media\.endpoint/
       );
       await assert.rejects(
-        resolveMediaDetailed('unsupported', { platform: 'x', media: { strategy: 'mystery' } }, 'slot', {}),
+        resolveMediaDetailed('unsupported', { platform: 'x', media: { strategy: 'mystery', qa: qaOff } }, 'slot', {}),
         /Unsupported media strategy/
       );
       assert.throws(() => ensureMediaForPlatform({ platform: 'instagram' }, null), /Instagram requires media/);

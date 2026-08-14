@@ -29,6 +29,7 @@ async function restoreFiles(saved) {
 const draft = (mediaDecision = 'none') => ({
   text: 'post text', mediaPrompt: 'visual prompt', rationale: 'test', features: { mediaDecision }
 });
+const qaOff = { enabled: false };
 
 test('media resolver covers fixed, pool, endpoint, generate, auto fallbacks, and platform requirements', async () => {
   const previousFetch = globalThis.fetch;
@@ -37,27 +38,27 @@ test('media resolver covers fixed, pool, endpoint, generate, auto fallbacks, and
   try {
     for (const path of USAGE_FILES) await rm(path, { force: true });
 
-    assert.deepEqual(await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'none' } }, 's', draft()), {
+    assert.deepEqual(await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'none', qa: qaOff } }, 's', draft()), {
       url: null, decision: 'none', source: null, altText: '', qa: null
     });
 
-    const fixed = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'fixed', url: 'https://media.example/fixed.png', altText: 'x'.repeat(1100) } }, 's', draft());
+    const fixed = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'fixed', url: 'https://media.example/fixed.png', altText: 'x'.repeat(1100), qa: qaOff } }, 's', draft());
     assert.equal(fixed.url, 'https://media.example/fixed.png');
     assert.equal(fixed.decision, 'library');
     assert.equal(fixed.source, 'fixed');
     assert.equal(fixed.altText.length, 1000);
-    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'external' } }, 's', draft())).decision, 'none');
+    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'external', qa: qaOff } }, 's', draft())).decision, 'none');
 
-    const poolAccount = { platform: 'x', media: { strategy: 'pool', urls: ['https://media.example/a.png', 'https://media.example/b.png'] } };
+    const poolAccount = { platform: 'x', media: { strategy: 'pool', urls: ['https://media.example/a.png', 'https://media.example/b.png'], qa: qaOff } };
     const pool1 = await resolveMediaDetailed('a', poolAccount, 'stable-slot', draft());
     const pool2 = await resolveMediaDetailed('a', poolAccount, 'stable-slot', draft());
     assert.equal(pool1.url, pool2.url);
     assert.equal(pool1.decision, 'library');
-    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'pool', urls: [] } }, 's', draft())).decision, 'none');
+    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'pool', urls: [], qa: qaOff } }, 's', draft())).decision, 'none');
 
     const endpointBase = {
       platform: 'x', budgets: { enabled: false },
-      media: { strategy: 'endpoint', type: 'image', endpoint: 'https://media-service.example/generate' }
+      media: { strategy: 'endpoint', type: 'image', endpoint: 'https://media-service.example/generate', qa: qaOff }
     };
     const drySearch = await resolveMediaDetailed('a', endpointBase, 's', draft('search'), { dryRun: true });
     assert.equal(drySearch.url, 'https://dry-run.invalid/search.png');
@@ -87,43 +88,43 @@ test('media resolver covers fixed, pool, endpoint, generate, auto fallbacks, and
     await assert.rejects(resolveMediaDetailed('a', endpointBase, 'slot-real', draft('search')), /provider down/);
     endpointMode = 'bad-url';
     await assert.rejects(resolveMediaDetailed('a', endpointBase, 'slot-real', draft('search')), /must return/);
-    await assert.rejects(resolveMediaDetailed('a', { platform: 'x', budgets: { enabled: false }, media: { strategy: 'endpoint', endpoint: 'http://bad.example' } }, 'slot-real', draft()), /HTTPS media\.endpoint/);
+    await assert.rejects(resolveMediaDetailed('a', { platform: 'x', budgets: { enabled: false }, media: { strategy: 'endpoint', endpoint: 'http://bad.example', qa: qaOff } }, 'slot-real', draft()), /HTTPS media\.endpoint/);
 
     const endpointGenerate = await resolveMediaDetailed('a', { ...endpointBase, media: { ...endpointBase.media, strategy: 'generate' } }, 's', draft('generate'), { dryRun: true });
     assert.equal(endpointGenerate.source, 'dry-run-endpoint');
 
-    const generatedImage = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'image' } }, 's', draft('generate'), { dryRun: true });
+    const generatedImage = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'image', qa: qaOff } }, 's', draft('generate'), { dryRun: true });
     assert.equal(generatedImage.url, 'https://dry-run.invalid/generate.png');
     assert.equal(generatedImage.source, 'dry-run-openai-image');
-    const generatedVideo = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'reel' } }, 's', draft('generate'), { dryRun: true });
+    const generatedVideo = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'reel', qa: qaOff } }, 's', draft('generate'), { dryRun: true });
     assert.equal(generatedVideo.url, 'https://dry-run.invalid/generate.mp4');
     assert.equal(generatedVideo.source, 'dry-run-openai-video');
-    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'image', internalImageGeneration: false } }, 's', draft())).decision, 'none');
-    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'reel', internalVideoGeneration: false } }, 's', draft())).decision, 'none');
+    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'image', internalImageGeneration: false, qa: qaOff } }, 's', draft())).decision, 'none');
+    assert.equal((await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'generate', type: 'reel', internalVideoGeneration: false, qa: qaOff } }, 's', draft())).decision, 'none');
 
-    const autoNone = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto' } }, 's', draft('none'), { dryRun: true });
+    const autoNone = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', qa: qaOff } }, 's', draft('none'), { dryRun: true });
     assert.equal(autoNone.decision, 'none');
-    const autoInstagram = await resolveMediaDetailed('a', { platform: 'instagram', media: { strategy: 'auto', type: 'image' } }, 's', draft('none'), { dryRun: true });
+    const autoInstagram = await resolveMediaDetailed('a', { platform: 'instagram', media: { strategy: 'auto', type: 'image', qa: qaOff } }, 's', draft('none'), { dryRun: true });
     assert.equal(autoInstagram.decision, 'generate');
     assert.equal(autoInstagram.source, 'dry-run-openai-image');
 
-    const autoLibrary = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', urls: ['https://media.example/library.png'] } }, 's', draft('library'), { dryRun: true });
+    const autoLibrary = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', urls: ['https://media.example/library.png'], qa: qaOff } }, 's', draft('library'), { dryRun: true });
     assert.equal(autoLibrary.source, 'pool');
-    const autoLibraryFallback = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'image', urls: [] } }, 's', draft('library'), { dryRun: true });
+    const autoLibraryFallback = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'image', urls: [], qa: qaOff } }, 's', draft('library'), { dryRun: true });
     assert.equal(autoLibraryFallback.source, 'dry-run-openai-image');
 
-    const autoSearchEndpoint = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'reel', endpoint: 'https://media-service.example/generate' } }, 's', draft('search'), { dryRun: true });
+    const autoSearchEndpoint = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'reel', endpoint: 'https://media-service.example/generate', qa: qaOff } }, 's', draft('search'), { dryRun: true });
     assert.equal(autoSearchEndpoint.url, 'https://dry-run.invalid/search.mp4');
-    const autoSearchPool = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', urls: ['https://media.example/fallback.png'] } }, 's', draft('search'), { dryRun: true });
+    const autoSearchPool = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', urls: ['https://media.example/fallback.png'], qa: qaOff } }, 's', draft('search'), { dryRun: true });
     assert.equal(autoSearchPool.source, 'pool-fallback');
     assert.equal(autoSearchPool.decision, 'library');
-    const autoSearchGenerate = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'image' } }, 's', draft('search'), { dryRun: true });
+    const autoSearchGenerate = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'image', qa: qaOff } }, 's', draft('search'), { dryRun: true });
     assert.equal(autoSearchGenerate.source, 'dry-run-openai-image');
-    const autoGenerate = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'reel' } }, 's', draft('generate'), { dryRun: true });
+    const autoGenerate = await resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'auto', type: 'reel', qa: qaOff } }, 's', draft('generate'), { dryRun: true });
     assert.equal(autoGenerate.source, 'dry-run-openai-video');
 
-    assert.equal(await resolveMedia('a', { platform: 'x', media: { strategy: 'fixed', url: 'https://media.example/wrapper.png' } }, 's', draft()), 'https://media.example/wrapper.png');
-    await assert.rejects(resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'unknown' } }, 's', draft()), /Unsupported media strategy/);
+    assert.equal(await resolveMedia('a', { platform: 'x', media: { strategy: 'fixed', url: 'https://media.example/wrapper.png', qa: qaOff } }, 's', draft()), 'https://media.example/wrapper.png');
+    await assert.rejects(resolveMediaDetailed('a', { platform: 'x', media: { strategy: 'unknown', qa: qaOff } }, 's', draft()), /Unsupported media strategy/);
 
     assert.doesNotThrow(() => ensureMediaForPlatform({ platform: 'x' }, null));
     assert.doesNotThrow(() => ensureMediaForPlatform({ platform: 'instagram' }, 'https://media.example/ok.png'));

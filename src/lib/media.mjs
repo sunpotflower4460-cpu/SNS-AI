@@ -2,7 +2,7 @@ import { consumeUsage } from '../ops/budget.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
 import { reviewVisualUrl } from '../media/qa.mjs';
-import { assertPublicHttpsTarget, assertPublicHttpsUrl } from './http.mjs';
+import { assertPublicHttpsTarget, assertPublicHttpsUrl, fetchPublicHttps } from './http.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
@@ -14,13 +14,13 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const endpointUrl = await assertPublicHttpsTarget(endpoint, 'media.endpoint');
   await consumeUsage(accountId, account, 'media', { mode, slotId });
   const headers = { 'Content-Type': 'application/json' }; if (process.env.MEDIA_SERVICE_TOKEN) headers.Authorization = `Bearer ${process.env.MEDIA_SERVICE_TOKEN}`;
-  const response = await fetch(endpointUrl, {
+  const response = await fetchPublicHttps(endpointUrl, {
     method: 'POST', headers, redirect: 'error', signal: AbortSignal.timeout(30_000),
     body: JSON.stringify({
       account: accountId, platform: account.platform, slotId, mode, mediaType: account.media?.type || 'image',
       prompt: draft?.mediaPrompt || '', text: draft?.text || '', features: draft?.features || {}, rationale: draft?.rationale || ''
     })
-  });
+  }, 'media.endpoint');
   const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body?.error || `Media endpoint failed with HTTP ${response.status}`);
   const returned = body.url || body.mediaUrl;
   if (!/^https:\/\//i.test(returned || '')) throw new Error('Media endpoint must return { "url": "https://..." }.');
@@ -77,9 +77,13 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
 
+function mediaQaEnabled(account = {}) {
+  return account.media?.qa?.enabled !== false;
+}
+
 async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
   const mediaType = account.media?.type || 'image';
-  if (account.media?.qa?.enabled !== true || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
+  if (!mediaQaEnabled(account) || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
 
   // Selected/library images get hard moderation here, while subjective relevance/"does this really
   // fit the post?" is deliberately left to ChatGPT/editorial review by default. Auto accounts may opt
@@ -119,4 +123,4 @@ export async function resolveMedia(accountId, account, slotId, draft, options = 
 export function ensureMediaForPlatform(account, mediaUrl) {
   if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image generation is supported on public repositories.');
 }
-export const __test = { reviewSelectedImage, resolveRawMediaDetailed };
+export const __test = { reviewSelectedImage, resolveRawMediaDetailed, mediaQaEnabled };
