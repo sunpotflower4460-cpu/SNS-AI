@@ -29,7 +29,7 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const returned = body.url || body.mediaUrl;
   if (!/^https:\/\//i.test(returned || '')) throw new Error('Media endpoint must return { "url": "https://..." }.');
   const url = assertPublicHttpsUrl(returned, 'Media endpoint URL').toString();
-  return { url, altText: String(body.altText || '').slice(0, 1000), qa: body.qa || null };
+  return { url, altText: String(body.altText || '').slice(0, 1000), qa: null, endpointQa: body.qa || null };
 }
 
 async function generated(accountId, account, slotId, draft, dryRun = false, now = new Date()) {
@@ -91,7 +91,9 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
 
 async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
   const mediaType = account.media?.type || 'image';
-  if (dryRun || mediaType !== 'image' || !resolved.url || resolved.qa) return resolved;
+  // Built-in generated images have already been reviewed over their raw bytes before hosting.
+  // External endpoints may supply their own qa field, but it is advisory only and never bypasses our review.
+  if (dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
 
   const qa = await reviewVisualUrl(accountId, account, resolved.url, {
     mediaType: 'image',
@@ -109,6 +111,7 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
       source: `${resolved.source || 'media'}-qa-omitted`,
       altText: '',
       qa,
+      endpointQa: resolved.endpointQa || null,
       suitabilityReviewed: true,
       omittedUnsafeVisual: true
     };
@@ -136,7 +139,7 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, op
 }
 
 export async function resolveMedia(accountId, account, slotId, draft, options = {}) {
-  return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url;
+  return (await resolveMediaDetailed(accountId, account,slotId, draft, options)).url;
 }
 
 export function ensureMediaForPlatform(account, mediaUrl) {
