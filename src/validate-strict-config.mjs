@@ -93,10 +93,10 @@ export function validateStrictConfig(config) {
     strictBoolean(errors, id, 'media.qa.enabled', media.qa?.enabled);
 
     if (media.endpoint != null && media.endpoint !== '' && !validHttps(media.endpoint)) {
-      errors.push(`${id}: media.endpoint must be a valid public HTTPS URL`);
+      errors.push(`${id}: media.endpoint must be a valid HTTPS URL to a public network destination`);
     }
     if (['fixed', 'external'].includes(strategy) && media.url != null && media.url !== '' && !validHttps(media.url)) {
-      errors.push(`${id}: media.url must be a valid public HTTPS URL for ${strategy}`);
+      errors.push(`${id}: media.url must be a valid HTTPS URL to a public network destination for ${strategy}`);
     }
 
     const configuredUrls = media.urls ?? media.libraryUrls ?? [];
@@ -104,7 +104,7 @@ export function validateStrictConfig(config) {
       errors.push(`${id}: media.urls must be an array`);
     } else {
       for (const [index, url] of configuredUrls.entries()) {
-        if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid public HTTPS URL`);
+        if (url && !validHttps(url)) errors.push(`${id}: media.urls[${index}] must be a valid HTTPS URL to a public network destination`);
       }
     }
   }
