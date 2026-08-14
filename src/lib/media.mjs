@@ -1,6 +1,8 @@
 import { consumeUsage } from '../ops/budget.mjs';
+import { naturalizeDraft } from '../content/naturalize.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
+import { reviewVisualUrl } from '../media/qa.mjs';
 import { assertPublicHttpsUrl } from './http.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
@@ -50,7 +52,7 @@ async function generated(accountId, account, slotId, draft, dryRun = false, now 
   return { url: null, decision: 'none', source: null, altText: '', qa: null };
 }
 
-export async function resolveMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date() } = {}) {
+async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date() } = {}) {
   const media = account.media || {}; const strategy = media.strategy || 'none'; const mediaType = media.type || 'image';
   if (strategy === 'none') return { url: null, decision: 'none', source: null, altText: '', qa: null };
   if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy, altText: String(media.altText || '').slice(0, 1000), qa: null };
@@ -87,10 +89,66 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, { 
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
 
+async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
+  const mediaType = account.media?.type || 'image';
+  if (dryRun || mediaType !== 'image' || !resolved.url || resolved.qa) return resolved;
+
+  const qa = await reviewVisualUrl(accountId, account, resolved.url, {
+    mediaType: 'image',
+    prompt: draft?.mediaPrompt || '',
+    postText: draft?.text || ''
+  });
+  if (qa.pass) {
+    return { ...resolved, qa, altText: qa.altText || resolved.altText || '', suitabilityReviewed: true };
+  }
+
+  // X can safely continue as a text-only post. A hard visual failure should never make a perfectly
+  // good X post disappear just because its optional image was bad.
+  if (account.platform === 'x') {
+    return {
+      url: null,
+      decision: 'none',
+      source: `${resolved.source || 'media'}-qa-omitted`,
+      altText: '',
+      qa,
+      suitabilityReviewed: true,
+      omittedUnsafeVisual: true
+    };
+  }
+
+  // Instagram requires media. If a selected/library image has a genuine hard defect, prefer one
+  // controlled generated fallback instead of blocking the whole slot. Generated images already pass
+  // through the hard visual QA in openai-image.mjs.
+  if (account.platform === 'instagram' && resolved.decision !== 'generate' && account.media?.internalImageGeneration !== false) {
+    const fallback = await generated(accountId, account, slotId, draft, false, now);
+    if (fallback.url) return { ...fallback, fallbackFrom: resolved.source || resolved.decision, priorQa: qa };
+  }
+
+  const error = new Error('Selected image failed hard pre-publish visual QA.');
+  error.code = 'MEDIA_QA_FAILED';
+  error.qa = qa;
+  throw error;
+}
+
+export async function resolveMediaDetailed(accountId, account, slotId, draft, options = {}) {
+  // Run the writing-naturalness editor immediately before visual selection so image relevance is
+  // judged against the exact text that will be published. The editor is soft/fallback-safe and mutates
+  // only this in-memory draft; it does not alter features, experiments, or stored human feedback.
+  if (draft && !draft.naturalization) {
+    const polished = await naturalizeDraft(accountId, account, draft, { dryRun: Boolean(options.dryRun) });
+    Object.assign(draft, polished);
+  }
+
+  const resolved = await resolveRawMediaDetailed(accountId, account, slotId, draft, options);
+  return reviewSelectedImage(accountId, account, slotId, draft, resolved, options);
+}
+
 export async function resolveMedia(accountId, account, slotId, draft, options = {}) {
   return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url;
 }
 
 export function ensureMediaForPlatform(account, mediaUrl) {
-  if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image and Reel generation are supported on public repositories.');
+  if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image generation is supported on public repositories.');
 }
+
+export const __test = { reviewSelectedImage, resolveRawMediaDetailed };
