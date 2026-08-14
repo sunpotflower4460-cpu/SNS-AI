@@ -13,6 +13,7 @@ function parseArgs(argv){const args={};for(let i=0;i<argv.length;i+=1){const tok
 async function loadPayload(args){if(args.file)return JSON.parse(await readFile(args.file,'utf8'));if(args.json)return JSON.parse(args.json);return{account:args.account,text:args.text||'',mediaUrl:args['media-url'],mediaType:args['media-type']||'image',mediaAltText:args['media-alt-text']||'',dryRun:boolValue(args['dry-run']),source:args.source||'manual',slotId:args['slot-id']}}
 function pendingError(error,result){const wrapped=new Error(`Social post succeeded but SNS-HUB backlink reconciliation is pending: ${error?.message||error}`);wrapped.code='HUB_BACKLINK_PENDING';wrapped.publishStage='hub-backlink';wrapped.providerResult=result;wrapped.cause=error;wrapped.bookkeepingWarnings=[...(result?.bookkeepingWarnings||[]),{label:'hub-social-backlink',error:String(error?.message||error).slice(0,500)}];return wrapped}
 async function syncWithRetry(context,{sync=syncPublishedHubBacklink,attempts=3,sleepImpl=sleep}={}){let last;for(let attempt=1;attempt<=attempts;attempt+=1){try{return await sync(context)}catch(error){last=error;if(attempt<attempts)await sleepImpl(attempt*250)}}throw last}
+function withoutHubProduct(payload){if(!payload||typeof payload!=='object'||!Object.hasOwn(payload,'hubProduct'))return payload;const {hubProduct:_hubProduct,...rest}=payload;return rest}
 
 export async function publish(payload,{
   core=corePublish,
@@ -26,18 +27,22 @@ export async function publish(payload,{
   prepare=prepareHubPublish
 }={}){
   const dryRun=boolValue(payload?.dryRun),slotId=payload?.slotId||null;
+  const explicitHub=payload?.hub?.required===true,hasHubProduct=Boolean(payload?.hubProduct);
+  if(!explicitHub&&!hasHubProduct&&(!slotId||dryRun))return core(payload);
+
   let claim=slotId?await getClaim(slotId,{fresh:true}):null;
   let effectivePayload=payload;
   let requirement=hubRequirement(payload,claim);
-  if(!requirement&&payload?.hubProduct&&!dryRun){
+  if(!requirement&&hasHubProduct&&!dryRun){
     const prepared=await prepare(payload.hubProduct);
-    effectivePayload={...payload,hub:prepared.hub};
+    effectivePayload={...withoutHubProduct(payload),hub:prepared.hub};
     requirement=hubRequirement(effectivePayload,claim);
   }
   if(!requirement)return core(payload);
-  if(dryRun)return core(payload);
+  if(dryRun)return core(withoutHubProduct(payload));
   if(!slotId){const error=new Error('Hub-dependent live publishing requires slotId for durable recovery.');error.code='HUB_SLOT_REQUIRED';error.publishStage='hub';throw error}
 
+  effectivePayload=withoutHubProduct(effectivePayload);
   if(!HANDLED.has(claim?.status)){
     await assertBefore(effectivePayload,{claim});
     const preparedStatus=claim?.status||'hub_ready';
@@ -69,4 +74,4 @@ if(import.meta.url===`file://${process.argv[1]}`){
   try{const payload=await loadPayload(parseArgs(process.argv.slice(2)));const result=await publish(payload);console.log(JSON.stringify({ok:true,account:payload.account,result},null,2))}
   catch(error){console.error(JSON.stringify({ok:false,error:error.message,status:error.status,code:error.code,bookkeepingWarnings:error.bookkeepingWarnings||[]},null,2));process.exitCode=1}
 }
-export const __test={...coreTest,boolValue,parseArgs,pendingError,syncWithRetry};
+export const __test={...coreTest,boolValue,parseArgs,pendingError,syncWithRetry,withoutHubProduct};
