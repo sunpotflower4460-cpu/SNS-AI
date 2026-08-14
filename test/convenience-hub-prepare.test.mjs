@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { prepareHubPublish } from '../src/hub/prepare.mjs';
+import { publish } from '../src/publish.mjs';
+
+test('prepare stages canonical product then waits for exact deploy version',async()=>{const order=[];const result=await prepareHubPublish({productId:'p1'},{stage:async()=>{order.push('stage');return{expectedContentVersion:'aaaaaaaaaaaaaaaaaaaa',commitSha:'abc'}},waitReady:async(input)=>{order.push('wait');assert.equal(input.expectedContentVersion,'aaaaaaaaaaaaaaaaaaaa');return{ready:true}}});assert.deepEqual(order,['stage','wait']);assert.deepEqual(result.hub,{required:true,integration:'convenience-discovery-v1',productId:'p1',expectedContentVersion:'aaaaaaaaaaaaaaaaaaaa'});assert.equal(result.readiness.ready,true)});
+
+test('canonical hubProduct auto-stages before readiness gate and provider core',async()=>{const order=[];let claim=null;const hub={required:true,integration:'convenience-discovery-v1',productId:'p1',expectedContentVersion:'aaaaaaaaaaaaaaaaaaaa'};const result=await publish({account:'c',slotId:'s',hubProduct:{productId:'p1'}},{getClaim:async()=>claim,prepare:async()=>{order.push('prepare');return{hub}},assertBefore:async()=>{order.push('ready')},writeClaim:async(_s,status,detail)=>{claim={status,hub:detail.hub};order.push('claim');return claim},core:async()=>{order.push('core');claim={...claim,status:'published',providerPostId:'x1',publishedAt:'2026-08-14T00:00:00Z'};return{postId:'x1'}},resolve:async()=>({platform:'x'}),syncBacklink:async()=>{order.push('sync');return{sync:{changed:true}}},audit:async()=>{}});assert.deepEqual(order,['prepare','ready','claim','core','sync']);assert.equal(result.hub.synced,true)});
+
+test('dry-run hubProduct never mutates SNS-HUB',async()=>{let prepareCalls=0;const result=await publish({account:'c',slotId:'s',hubProduct:{productId:'p1'},dryRun:true},{getClaim:async()=>null,prepare:async()=>{prepareCalls++;throw new Error('must not stage')},core:async()=>({dryRun:true})});assert.equal(result.dryRun,true);assert.equal(prepareCalls,0)});
