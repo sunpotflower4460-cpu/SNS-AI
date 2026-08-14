@@ -3,6 +3,23 @@ import { moderateText, openaiRequest } from '../lib/openai.mjs';
 import { validateDraftText } from '../lib/safety.mjs';
 
 const NATURALIZATION_VERSION = 'naturalize-v1';
+const AIISH_PATTERNS = [
+  /結論から(?:言う|いう)と/gu,
+  /(?:ポイント|理由|コツ)は[0-9０-９一二三四五六七八九十]+つ/gu,
+  /大切なのは/gu,
+  /重要なのは/gu,
+  /実は[、,]/gu,
+  /つまり[、,]/gu,
+  /要するに[、,]/gu,
+  /〜だけではありません/gu,
+  /だけではありません/gu,
+  /いかがでしたか/gu,
+  /ぜひ(?:試して|活用して|チェックして)みてください/gu,
+  /(?:一緒に|まずは).{0,12}していきましょう/gu,
+  /(?:圧倒的|革命的|劇的)に/gu,
+  /^(?:Here'?s|Let'?s dive|In today'?s|The key is)\b/gimu,
+  /\b(?:game[- ]changer|unlock the power|in conclusion|it'?s important to note)\b/gimu
+];
 
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -23,9 +40,7 @@ function outputText(response) {
   if (typeof response?.output_text === 'string') return response.output_text;
   for (const item of response?.output || []) {
     if (item.type !== 'message') continue;
-    for (const part of item.content || []) {
-      if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
-    }
+    for (const part of item.content || []) if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
   }
   return '';
 }
@@ -33,8 +48,7 @@ function outputText(response) {
 function parseJson(text) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try { return JSON.parse(cleaned); } catch {
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
+    const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');
     if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
     throw new Error('Naturalization review was not valid JSON.');
   }
@@ -48,10 +62,8 @@ function finiteSetting(value, fallback, { min = 0, max = 100 } = {}) {
 export function naturalizationSettings(account = {}) {
   const cfg = account.generation?.naturalization || {};
   return {
-    // Opt in explicitly at the merged config level. The repository defaults do this for real
-    // accounts, while minimal low-level callers/tests that construct partial account objects do not
-    // unexpectedly trigger another paid Responses call.
     enabled: cfg.enabled === true,
+    alwaysReview: cfg.alwaysReview === true,
     model: cfg.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5',
     minNaturalness: finiteSetting(cfg.minNaturalness, 72),
     maxAiPatternRisk: finiteSetting(cfg.maxAiPatternRisk, 45),
@@ -63,6 +75,33 @@ export function naturalizationSettings(account = {}) {
 function safeScore(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0;
+}
+
+export function localNaturalnessAudit(text) {
+  const value = String(text || '').trim();
+  if (!value) return { aiPatternRisk: 100, naturalnessScore: 0, issues: ['empty text'] };
+  const issues = [];
+  let risk = 0;
+  for (const pattern of AIISH_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = [...value.matchAll(pattern)];
+    if (!matches.length) continue;
+    risk += Math.min(24, 12 * matches.length);
+    issues.push(`formulaic phrase: ${matches[0][0]}`);
+  }
+  const nonEmptyLines = value.split('\n').map((line) => line.trim()).filter(Boolean);
+  const labelLines = nonEmptyLines.filter((line) => /^(?:[0-9０-９]+[.)、]|[-・●■✓✅]|#{1,3}\s)/u.test(line)).length;
+  if (nonEmptyLines.length >= 6 && labelLines / nonEmptyLines.length >= 0.65) {
+    risk += 12;
+    issues.push('highly templated list rhythm');
+  }
+  const rhetorical = (value.match(/[?？]/gu) || []).length;
+  if (rhetorical >= 3) {
+    risk += 8;
+    issues.push('repetitive rhetorical-question rhythm');
+  }
+  const normalizedRisk = Math.max(0, Math.min(100, risk));
+  return { aiPatternRisk: normalizedRisk, naturalnessScore: Math.max(0, 100 - normalizedRisk), issues: issues.slice(0, 8) };
 }
 
 function protectedTokens(text) {
@@ -95,15 +134,12 @@ async function requestReview(accountId, account, draft, context, settings, dryRu
     profile: account.profile || {},
     accountInstructions: account.instructions || '',
     originalText: draft.text,
-    features: draft.features || {},
-    rationale: draft.rationale || '',
-    recentPosts,
+    localAudit: localNaturalnessAudit(draft.text),
+    features: draft.features || {}, rationale: draft.rationale || '', recentPosts,
     newestHumanFeedback: (context.humanFeedback || []).slice(0, 12)
   }, null, 2);
   const body = {
-    model: settings.model,
-    store: false,
-    max_output_tokens: 1200,
+    model: settings.model, store: false, max_output_tokens: 1200,
     input: [
       { role: 'system', content: [{ type: 'input_text', text: system }] },
       { role: 'user', content: [{ type: 'input_text', text: user }] }
@@ -112,12 +148,10 @@ async function requestReview(accountId, account, draft, context, settings, dryRu
   };
   const meta = { accountId, account, operation: 'post-naturalization', retries: 1, dryRun };
   let response;
-  try {
-    response = await openaiRequest('/responses', body, meta);
-  } catch (error) {
+  try { response = await openaiRequest('/responses', body, meta); }
+  catch (error) {
     if (Number(error.status) !== 400) throw error;
-    const fallback = structuredClone(body);
-    delete fallback.text;
+    const fallback = structuredClone(body); delete fallback.text;
     fallback.input[0].content[0].text += '\nReturn only one JSON object matching the requested review fields.';
     response = await openaiRequest('/responses', fallback, { ...meta, operation: 'post-naturalization-fallback' });
   }
@@ -126,25 +160,31 @@ async function requestReview(accountId, account, draft, context, settings, dryRu
 
 export async function naturalizeDraft(accountId, account, draft, context = {}) {
   const settings = naturalizationSettings(account);
-  // Disabled means truly zero additional work/cost. Do this before validation so generic media-only
-  // callers with no post text are unaffected by the optional editor.
-  if (!settings.enabled) {
-    return { ...draft, naturalization: { skipped: true, applied: false, version: NATURALIZATION_VERSION } };
-  }
+  if (!settings.enabled) return { ...draft, naturalization: { skipped: true, applied: false, version: NATURALIZATION_VERSION, reason: 'disabled' } };
 
   const original = validateDraftText(account, draft?.text || '');
-  let review;
-  try {
-    review = await requestReview(accountId, account, { ...draft, text: original }, context, settings, Boolean(context.dryRun));
-  } catch (error) {
+  const local = localNaturalnessAudit(original);
+  if (!settings.alwaysReview && local.aiPatternRisk <= settings.maxAiPatternRisk) {
     return {
       ...draft,
       text: original,
       naturalization: {
-        version: NATURALIZATION_VERSION,
-        applied: false,
-        fallback: true,
-        reason: `review unavailable: ${String(error?.message || error).slice(0, 300)}`
+        version: NATURALIZATION_VERSION, applied: false, action: 'keep', localOnly: true,
+        naturalnessScore: local.naturalnessScore, aiPatternRisk: local.aiPatternRisk, voiceFitScore: null,
+        issues: local.issues, reason: 'Local audit found no strong generic-AI pattern; preserving the authored voice.'
+      }
+    };
+  }
+
+  let review;
+  try { review = await requestReview(accountId, account, { ...draft, text: original }, context, settings, Boolean(context.dryRun)); }
+  catch (error) {
+    return {
+      ...draft, text: original,
+      naturalization: {
+        version: NATURALIZATION_VERSION, applied: false, fallback: true,
+        naturalnessScore: local.naturalnessScore, aiPatternRisk: local.aiPatternRisk, issues: local.issues,
+        reason: `deep review unavailable; original preserved: ${String(error?.message || error).slice(0, 240)}`
       }
     };
   }
@@ -156,48 +196,33 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
   const wantsEdit = review.action === 'light_edit'
     && (naturalnessScore < settings.minNaturalness || aiPatternRisk > settings.maxAiPatternRisk || voiceFitScore < settings.minVoiceFit);
 
-  let finalText = original;
-  let applied = false;
-  let rejectedEditReason = null;
+  let finalText = original; let applied = false; let rejectedEditReason = null;
   if (wantsEdit && String(review.editedText || '').trim()) {
     try {
       const edited = validateDraftText(account, review.editedText);
       if (!preservesProtectedTokens(original, edited)) throw new Error('edit changed or removed a protected URL/hashtag');
       const duplicate = findNearDuplicate(edited, context.history || [], Number(account.generation?.duplicateThreshold ?? 0.72));
       if (duplicate) throw new Error('edit became too similar to recent history');
-      finalText = edited;
-      applied = finalText !== original;
-    } catch (error) {
-      rejectedEditReason = String(error?.message || error).slice(0, 300);
-      finalText = original;
-    }
+      finalText = edited; applied = finalText !== original;
+    } catch (error) { rejectedEditReason = String(error?.message || error).slice(0, 300); finalText = original; }
   }
 
   if (applied && !context.dryRun) {
-    try {
-      await moderateText(finalText, account, accountId);
-    } catch (error) {
+    try { await moderateText(finalText, account, accountId); }
+    catch (error) {
       rejectedEditReason = `edited version failed moderation: ${String(error?.message || error).slice(0, 220)}`;
-      finalText = original;
-      applied = false;
+      finalText = original; applied = false;
     }
   }
 
   return {
-    ...draft,
-    text: finalText,
+    ...draft, text: finalText,
     naturalization: {
-      version: NATURALIZATION_VERSION,
-      applied,
-      action: review.action === 'light_edit' ? 'light_edit' : 'keep',
-      naturalnessScore,
-      aiPatternRisk,
-      voiceFitScore,
-      issues,
-      reason: String(review.reason || '').slice(0, 600),
-      rejectedEditReason
+      version: NATURALIZATION_VERSION, applied, action: review.action === 'light_edit' ? 'light_edit' : 'keep',
+      localOnly: false, naturalnessScore, aiPatternRisk, voiceFitScore, issues,
+      reason: String(review.reason || '').slice(0, 600), rejectedEditReason
     }
   };
 }
 
-export const __test = { protectedTokens, preservesProtectedTokens, safeScore, finiteSetting };
+export const __test = { protectedTokens, preservesProtectedTokens, safeScore, finiteSetting, localNaturalnessAudit };
