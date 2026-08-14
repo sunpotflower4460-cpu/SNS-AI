@@ -25,7 +25,10 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   const returned = body.url || body.mediaUrl;
   if (!/^https:\/\//i.test(returned || '')) throw new Error('Media endpoint must return { "url": "https://..." }.');
   const url = assertPublicHttpsUrl(returned, 'Media endpoint URL').toString();
-  return { url, altText: String(body.altText || '').slice(0, 1000), qa: null, endpointQa: body.qa || null };
+  // Preserve endpoint-provided QA for compatibility/audit, but never use it to bypass SNS-AI's own
+  // hard safety review. endpointQa makes that provenance explicit.
+  const endpointQa = body.qa || null;
+  return { url, altText: String(body.altText || '').slice(0, 1000), qa: endpointQa, endpointQa };
 }
 
 async function generated(accountId, account, slotId, draft, dryRun = false, now = new Date()) {
@@ -76,13 +79,26 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
 
 async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
   const mediaType = account.media?.type || 'image';
-  // Suitability review is opt-in at the merged account level. Repository defaults enable it for real
-  // accounts; partial low-level media callers remain free of an unexpected OpenAI dependency.
   if (account.media?.qa?.enabled !== true || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
+
+  // Selected/library images get hard moderation here, while subjective relevance/"does this really
+  // fit the post?" is deliberately left to ChatGPT/editorial review by default. Auto accounts may opt
+  // back into API semantic review with media.qa.selectedSemanticReview=true.
   const qa = await reviewVisualUrl(accountId, account, resolved.url, {
-    mediaType: 'image', prompt: draft?.mediaPrompt || '', postText: draft?.text || ''
+    mediaType: 'image', prompt: draft?.mediaPrompt || '', postText: draft?.text || '',
+    semanticReview: account.media?.qa?.selectedSemanticReview === true,
+    softOnReviewError: true
   });
-  if (qa.pass) return { ...resolved, qa, altText: qa.altText || resolved.altText || '', suitabilityReviewed: true };
+  if (qa.pass) {
+    return {
+      ...resolved,
+      qa,
+      endpointQa: resolved.endpointQa || (resolved.source === 'endpoint' ? resolved.qa : null),
+      altText: qa.altText || resolved.altText || '',
+      suitabilityReviewed: !qa.moderationOnly,
+      chatReviewRecommended: Boolean(qa.chatReviewRecommended)
+    };
+  }
   if (account.platform === 'x') return {
     url: null, decision: 'none', source: `${resolved.source || 'media'}-qa-omitted`, altText: '', qa,
     endpointQa: resolved.endpointQa || null, suitabilityReviewed: true, omittedUnsafeVisual: true
