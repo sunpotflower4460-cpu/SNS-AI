@@ -22,6 +22,7 @@
     "preflight": "node src/ops/live-preflight.mjs",
     "feedback": "node src/feedback/record.mjs",
     "affiliate-readiness": "node src/monetization/affiliate-readiness.mjs",
+    "hub:stage": "node src/hub/stage.mjs",
     "secret-scan": "node src/ops/secret-scan.mjs",
     "maintenance": "node src/ops/maintenance.mjs",
     "expire-approvals": "node src/ops/stale-approvals.mjs",

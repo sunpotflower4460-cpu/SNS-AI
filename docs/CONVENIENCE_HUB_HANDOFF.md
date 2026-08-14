@@ -1,12 +1,12 @@
 # Convenience Discovery Hub handoff
 
-This document is the durable bridge between SNS-AI and the future separate convenience-discovery Hub repository.
+This document is the durable bridge between SNS-AI and the separate convenience-discovery Hub repository.
 
-## Provisional separate repository
+## Hub repository
 
-`sunpotflower4460-cpu/Convenience-Discovery-Hub`
+`sunpotflower4460-cpu/SNS-HUB`
 
-The repository/public brand name may change later. The architecture boundary should not.
+The public brand name may change later. The repository and architecture boundary should remain stable unless deliberately migrated.
 
 ## Source-of-truth relationship
 
@@ -14,7 +14,7 @@ The account/editorial source of truth remains:
 
 `docs/CONVENIENCE_AFFILIATE_ACCOUNT_RECOVERY.md`
 
-The future Hub repository owns implementation details for the public web Hub.
+SNS-HUB owns implementation details for the public web Hub.
 
 ## Responsibility boundary
 
@@ -47,68 +47,60 @@ The future Hub repository owns implementation details for the public web Hub.
 
 **Never publish a Hub-dependent X/Instagram CTA until the Hub confirms the expected content version is publicly ready.**
 
-Desired high-level flow:
-
 ```text
 SNS-AI
-  discover
-  → verify
-  → score
-  → select
-  → resolve routes
-  → stage/update Hub
+  discover → verify → score → select → resolve routes → stage/update Hub
 
-Hub
-  validate
-  → build/deploy
-  → expose expected contentVersion
-  → HUB_READY
+SNS-HUB
+  validate → build/deploy → expose expected contentVersion → HUB_READY
 
 SNS-AI
-  publish X/Instagram
-  → attach social backlinks to Hub record
+  publish X/Instagram → attach social backlinks to Hub record
 ```
 
-## Recommended MVP implementation
+## Implemented Git-backed runtime
 
-Start Git-backed and audit-friendly before introducing a database/API.
+`src/hub/convenience-hub.mjs` uses a dedicated Hub repository credential and never falls back to generic SNS-AI `GITHUB_TOKEN`.
 
-Suggested Hub content layout:
+`npm run hub:stage -- --file <canonical-product.json> --wait`:
 
-```text
-data/products/<productId>.json
-schemas/product.schema.json
-data/categories.json
-data/problem-tags.json
+1. reads/merges the canonical Hub product;
+2. writes only when content changed;
+3. computes the exact expected `contentVersion` from that Git commit;
+4. optionally waits until the deployed health endpoints expose the exact version;
+5. returns a versioned `hub` envelope for the social publish payload.
+
+The publish envelope is:
+
+```json
+{
+  "required": true,
+  "integration": "convenience-discovery-v1",
+  "productId": "stable-product-id",
+  "expectedContentVersion": "20-char-sha256-prefix"
+}
 ```
 
-The deployed Hub should expose a machine-readable endpoint such as:
+`src/publish.mjs` wraps the unchanged legacy posting core. Unrelated accounts immediately use the existing core path. Hub-dependent live publishing requires a durable `slotId`, verifies HUB_READY before a new provider mutation, and stores the Hub envelope in the durable claim. If the provider succeeds but Hub backlink reconciliation fails, the command reports `HUB_BACKLINK_PENDING`; replay uses the published durable claim and retries the Hub leg without publishing the social post again.
 
-`GET /_health/content-version`
+## Required external configuration later
 
-SNS-AI waits until it sees the version corresponding to the staged product update before changing state to `HUB_READY`.
+Do not place these values in the repository:
 
-Only migrate to a signed ingest API + database if Git-backed deploy latency/update volume becomes a demonstrated bottleneck.
+- `CONVENIENCE_HUB_GITHUB_TOKEN` — narrowly scoped SNS-HUB write credential
+- `CONVENIENCE_HUB_REPOSITORY` — `sunpotflower4460-cpu/SNS-HUB`
+- `CONVENIENCE_HUB_PUBLIC_URL` — deployed HTTPS origin
+- `CONVENIENCE_HUB_BRANCH` — normally `main`
+
+No live convenience account is created or enabled by this document or adapter.
 
 ## Canonical model rule
 
-Keep **Product identity** separate from **Offer/AffiliateRoute identity**.
-
-One product can have Amazon/Rakuten/ASP/direct routes without becoming multiple editorial products.
-
-A failed route may fall back only to another healthy route for the same product. Never silently replace it with a merely similar product.
+Keep **Product identity** separate from **Offer/AffiliateRoute identity**. One product can have Amazon/Rakuten/ASP/direct routes without becoming multiple editorial products. A failed route may fall back only to another healthy route for the same product. Never silently replace it with a merely similar product.
 
 ## Hub lifecycle rule
 
-Old public product URLs should remain stable.
-
-If a product becomes unavailable/discontinued:
-
-- preserve the page/history
-- remove or disable dead routes
-- avoid stale exact pricing
-- show a verified current alternative when appropriate
-- do not rewrite old social traffic to an unrelated product
+Old public product URLs remain stable. If a product becomes unavailable/discontinued, preserve the page/history, remove dead routes, avoid stale exact pricing, show a verified current alternative when appropriate, and never rewrite old social traffic to an unrelated product.
 
 ## Integration states
 
@@ -123,41 +115,8 @@ DISCOVERED
 → PUBLISHED
 ```
 
-All update/retry operations must be idempotent.
+All update/retry operations are idempotent.
 
 ## Secrets
 
-Never commit or paste Hub write credentials, provider credentials, deploy tokens, or signing secrets into chat/repositories.
-
-Use narrowly scoped external secret storage during final setup.
-
-## New-project handoff pack
-
-The prepared handoff pack contains:
-
-1. `00_START_HERE.md`
-2. `01_PRODUCT_AND_UX_SPEC.md`
-3. `02_ARCHITECTURE.md`
-4. `03_DATA_CONTRACT.md`
-5. `04_SNS_AI_INTEGRATION.md`
-6. `05_IMPLEMENTATION_PLAN.md`
-7. `06_SECURITY_AND_OPERATIONS.md`
-8. `07_ACCEPTANCE_TESTS.md`
-9. `08_NEW_CHAT_START_PROMPT.md`
-10. `09_HANDOFF_SUMMARY_FOR_SNS_AI.md`
-
-Copy these into the root/docs of the new Hub repository at bootstrap so that a separate project chat can reconstruct the implementation without the original conversation.
-
-## Future recovery order
-
-When the Hub repository exists, recover in this order:
-
-1. this document
-2. `docs/CONVENIENCE_AFFILIATE_ACCOUNT_RECOVERY.md`
-3. Hub repository `00_START_HERE.md`
-4. Hub architecture/data-contract/integration docs
-5. Hub build/deploy/health state
-6. SNS-AI Affiliate Health Monitor / route status
-7. social + Hub + commercial metrics
-
-The system should remain recoverable from repository state without depending on the original planning chat.
+Never commit or paste Hub write credentials, provider credentials, deploy tokens, or signing secrets into chat/repositories. Use narrowly scoped external secret storage during final setup.
