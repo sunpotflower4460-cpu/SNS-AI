@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+
+const POLICY_FILE = new URL('../../config/engagement-policy.json', import.meta.url);
 const SUPPORTED_KINDS = new Set(['reply', 'dm']);
 
 function engagementError(code, message) {
@@ -5,6 +8,22 @@ function engagementError(code, message) {
   error.code = code;
   error.engagementStage = 'policy';
   throw error;
+}
+
+function plainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+export async function loadEngagementPolicy() {
+  const raw = await readFile(POLICY_FILE, 'utf8');
+  const policy = JSON.parse(raw);
+  if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
+  return policy;
+}
+
+export function effectiveEngagementPolicy(globalPolicy = {}, account = {}) {
+  const accountPolicy = plainObject(account?.engagement) ? account.engagement : {};
+  return { ...globalPolicy, ...accountPolicy };
 }
 
 export function normalizeEngagementEvent(value) {
@@ -23,8 +42,8 @@ export function normalizeEngagementEvent(value) {
   };
 }
 
-export function assertAutomatedEngagementAllowed({ account, event }) {
-  const config = account?.engagement || {};
+export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
+  const config = effectiveEngagementPolicy(globalPolicy, account);
   const normalized = normalizeEngagementEvent(event);
 
   if (config.enabled !== true) engagementError('ENGAGEMENT_DISABLED', 'Automated engagement is disabled for this account.');
@@ -53,4 +72,4 @@ export function prohibitedGrowthAutomation(action) {
   return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
 }
 
-export const __test = { SUPPORTED_KINDS };
+export const __test = { SUPPORTED_KINDS, plainObject };
