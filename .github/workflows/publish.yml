@@ -50,6 +50,10 @@ jobs:
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
       X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
+      CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
+      CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
+      CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
+      CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
 
     steps:
       - name: Authorize command actor
@@ -171,4 +175,4 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ The publishing run failed. The provider may already have accepted the post if the failure happened during response/state persistence, so do not retry blindly. Check the Actions log and durable slot claim first."
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ The publishing run failed or Hub backlink reconciliation is still pending. The provider may already have accepted the post if the failure happened during response/state/Hub persistence, so do not retry blindly. Re-running the same durable slot is safe: SNS-AI will reconcile the published claim and retry only unfinished bookkeeping instead of publishing the provider post again."
