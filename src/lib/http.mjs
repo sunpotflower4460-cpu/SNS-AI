@@ -1,5 +1,7 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import { request as httpsRequest } from 'node:https';
+import { Readable } from 'node:stream';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -70,17 +72,58 @@ function privateIpv4(host) {
     || a >= 224;
 }
 
-function privateIpv6(host) {
-  const value = host.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
-  if (value === '::' || value === '::1') return true;
-  if (/^(?:fc|fd)/.test(value)) return true;
-  if (/^fe[89ab]/.test(value)) return true;
-  if (/^ff/.test(value)) return true;
-  if (/^2001:db8(?::|$)/.test(value)) return true;
-  if (value.startsWith('::ffff:')) {
-    const mapped = value.slice('::ffff:'.length);
-    if (isIP(mapped) === 4) return privateIpv4(mapped);
+function ipv6Words(host) {
+  let value = String(host || '').toLowerCase().replace(/^\[/, '').replace(/\]$/, '').split('%')[0];
+  const dotted = value.match(/(?:^|:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) {
+    const parts = dotted[1].split('.').map(Number);
+    if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+    const hi = ((parts[0] << 8) | parts[1]).toString(16);
+    const lo = ((parts[2] << 8) | parts[3]).toString(16);
+    value = value.slice(0, value.length - dotted[1].length) + `${hi}:${lo}`;
   }
+  const halves = value.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  if (halves.length === 1 && left.length !== 8) return null;
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (halves.length === 2 && missing < 1)) return null;
+  const words = [...left, ...Array(missing).fill('0'), ...right].map((part) => Number.parseInt(part || '0', 16));
+  if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return null;
+  return words;
+}
+
+function ipv4FromWords(high, low) {
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+}
+
+function privateIpv6(host) {
+  const value = String(host || '').toLowerCase().replace(/^\[/, '').replace(/\]$/, '').split('%')[0];
+  const words = ipv6Words(value);
+  if (!words) return true;
+  const allZero = words.every((word) => word === 0);
+  if (allZero) return true;
+  if (words.slice(0, 7).every((word) => word === 0) && words[7] === 1) return true;
+  if ((words[0] & 0xfe00) === 0xfc00) return true;
+  if ((words[0] & 0xffc0) === 0xfe80) return true;
+  if ((words[0] & 0xffc0) === 0xfec0) return true;
+  if ((words[0] & 0xff00) === 0xff00) return true;
+  if (words[0] === 0x2001 && words[1] === 0x0db8) return true;
+  if (words[0] === 0x2001 && words[1] === 0x0000) return true;
+
+  // IPv4-mapped (::ffff:a.b.c.d / ::ffff:hhhh:hhhh) and deprecated IPv4-compatible
+  // (::a.b.c.d / ::hhhh:hhhh) forms must inherit the embedded IPv4 safety classification.
+  const firstFiveZero = words.slice(0, 5).every((word) => word === 0);
+  if (firstFiveZero && words[5] === 0xffff) return privateIpv4(ipv4FromWords(words[6], words[7]));
+  if (words.slice(0, 6).every((word) => word === 0)) return privateIpv4(ipv4FromWords(words[6], words[7]));
+
+  // NAT64 and 6to4 can encode an IPv4 destination inside an otherwise public-looking IPv6 literal.
+  if (words[0] === 0x0064 && words[1] === 0xff9b && words.slice(2, 6).every((word) => word === 0)) {
+    return privateIpv4(ipv4FromWords(words[6], words[7]));
+  }
+  if (words[0] === 0x0064 && words[1] === 0xff9b && words[2] === 0x0001) return true;
+  if (words[0] === 0x2002) return privateIpv4(ipv4FromWords(words[1], words[2]));
   return false;
 }
 
@@ -114,14 +157,15 @@ export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
   return parsed;
 }
 
-export async function assertPublicHttpsTarget(value, label = 'mediaUrl', lookupFn = lookup) {
+async function resolvePublicHttpsTarget(value, label = 'mediaUrl', lookupFn = lookup) {
   const parsed = assertPublicHttpsUrl(value, label);
   const host = normalizedHostname(parsed.hostname);
-  if (isIP(host)) return parsed;
+  const family = isIP(host);
+  if (family) return { parsed, addresses: [{ address: host, family }], reservedTestHost: false };
   // RFC/IANA-reserved example/test/invalid names are intentionally non-routable and are widely used
-  // by the repository's mocked-fetch tests. Skipping live DNS for these names preserves deterministic
-  // tests without weakening checks for any real routable production hostname.
-  if (reservedNonRoutableTestHostname(host)) return parsed;
+  // by the repository's mocked-fetch tests. They may use the mock fetch path, but never the production
+  // DNS-pinned transport below.
+  if (reservedNonRoutableTestHostname(host)) return { parsed, addresses: [], reservedTestHost: true };
   let addresses;
   try {
     addresses = await lookupFn(host, { all: true, verbatim: true });
@@ -136,27 +180,90 @@ export async function assertPublicHttpsTarget(value, label = 'mediaUrl', lookupF
     error.code = 'UNSAFE_NETWORK_TARGET';
     throw error;
   }
-  for (const entry of addresses) {
-    const address = typeof entry === 'string' ? entry : entry?.address;
-    if (!address || unsafeNetworkHostname(address)) {
+  const normalized = addresses.map((entry) => ({
+    address: typeof entry === 'string' ? entry : entry?.address,
+    family: Number(typeof entry === 'string' ? isIP(entry) : entry?.family || isIP(entry?.address || ''))
+  }));
+  for (const entry of normalized) {
+    if (!entry.address || ![4, 6].includes(entry.family) || unsafeNetworkHostname(entry.address)) {
       const error = new Error(`${label} host resolves to a non-public address: ${parsed.hostname}`);
       error.code = 'UNSAFE_NETWORK_TARGET';
       throw error;
     }
   }
-  return parsed;
+  return { parsed, addresses: normalized, reservedTestHost: false };
+}
+
+export async function assertPublicHttpsTarget(value, label = 'mediaUrl', lookupFn = lookup) {
+  return (await resolvePublicHttpsTarget(value, label, lookupFn)).parsed;
+}
+
+function pinnedLookup(addresses) {
+  const frozen = addresses.map((entry) => ({ address: entry.address, family: entry.family }));
+  return (_hostname, options, callback) => {
+    const opts = typeof options === 'object' && options ? options : {};
+    if (opts.all) {
+      callback(null, frozen.map((entry) => ({ ...entry })));
+      return;
+    }
+    const preferred = Number(opts.family);
+    const selected = frozen.find((entry) => !preferred || entry.family === preferred) || frozen[0];
+    callback(null, selected.address, selected.family);
+  };
+}
+
+function responseHeaders(message) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(message.headers || {})) {
+    if (Array.isArray(value)) for (const item of value) headers.append(key, item);
+    else if (value != null) headers.set(key, String(value));
+  }
+  return headers;
+}
+
+function nodeResponse(message, method) {
+  const status = Number(message.statusCode || 500);
+  const noBody = String(method || 'GET').toUpperCase() === 'HEAD' || [204, 205, 304].includes(status);
+  return new Response(noBody ? null : Readable.toWeb(message), {
+    status,
+    statusText: message.statusMessage || '',
+    headers: responseHeaders(message)
+  });
+}
+
+export async function fetchPublicHttps(value, options = {}, label = 'mediaUrl', lookupFn = lookup) {
+  const target = await resolvePublicHttpsTarget(value, label, lookupFn);
+  if (target.reservedTestHost) return fetch(target.parsed, options);
+  const method = String(options.method || 'GET').toUpperCase();
+  return new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = httpsRequest(target.parsed, {
+        method,
+        headers: options.headers,
+        signal: options.signal,
+        lookup: pinnedLookup(target.addresses)
+      }, (message) => resolve(nodeResponse(message, method)));
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    request.on('error', reject);
+    if (options.body != null) request.write(options.body);
+    request.end();
+  });
 }
 
 async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
-  let current = await assertPublicHttpsTarget(url);
+  let current = assertPublicHttpsUrl(url);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
-    const response = await fetch(current, { redirect: 'manual' });
+    const response = await fetchPublicHttps(current, { redirect: 'manual' });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     if (redirect === maxRedirects) throw new Error(`Media redirect limit exceeded (${maxRedirects}).`);
     const location = response.headers.get('location');
     if (!location) throw new Error(`Media redirect (${response.status}) did not include a Location header.`);
     await response.body?.cancel?.().catch(() => {});
-    current = await assertPublicHttpsTarget(new URL(location, current).toString());
+    current = assertPublicHttpsUrl(new URL(location, current).toString());
   }
   throw new Error('Media redirect resolution failed.');
 }
@@ -196,9 +303,12 @@ export async function downloadMedia(url, { maxBytes = 25 * 1024 * 1024 } = {}) {
 export const __test = {
   privateIpv4,
   privateIpv6,
+  ipv6Words,
   unsafeNetworkHostname,
   reservedNonRoutableTestHostname,
   publicHttpsUrl: assertPublicHttpsUrl,
   assertPublicHttpsUrl,
-  assertPublicHttpsTarget
+  assertPublicHttpsTarget,
+  pinnedLookup,
+  resolvePublicHttpsTarget
 };
