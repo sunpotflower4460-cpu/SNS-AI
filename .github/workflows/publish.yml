@@ -176,4 +176,5 @@ jobs:
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ The publishing run failed or Hub backlink reconciliation is still pending. The provider may already have accepted the post if the failure happened during response/state/Hub persistence, so do not retry blindly. Re-running the same durable slot is safe: SNS-AI will reconcile the published claim and retry only unfinished bookkeeping instead of publishing the provider post again."
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ The publishing run failed or Hub backlink reconciliation is still pending. The provider may already have accepted the post if the failure happened during response/state/Hub persistence, so do not retry blindly. Re-running the same durable slot is safe: SNS-AI will reconcile the published claim and retry only unfinished bookkeeping instead of publishing the provider post again."
