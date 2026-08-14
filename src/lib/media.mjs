@@ -77,9 +77,13 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
 
+function mediaQaEnabled(account = {}) {
+  return account.media?.qa?.enabled !== false;
+}
+
 async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
   const mediaType = account.media?.type || 'image';
-  if (account.media?.qa?.enabled !== true || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
+  if (!mediaQaEnabled(account) || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
 
   // Selected/library images get hard moderation here, while subjective relevance/"does this really
   // fit the post?" is deliberately left to ChatGPT/editorial review by default. Auto accounts may opt
@@ -119,4 +123,4 @@ export async function resolveMedia(accountId, account, slotId, draft, options = 
 export function ensureMediaForPlatform(account, mediaUrl) {
   if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image generation is supported on public repositories.');
 }
-export const __test = { reviewSelectedImage, resolveRawMediaDetailed };
+export const __test = { reviewSelectedImage, resolveRawMediaDetailed, mediaQaEnabled };
