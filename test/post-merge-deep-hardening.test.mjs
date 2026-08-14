@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { __test as configTest } from '../src/lib/config.mjs';
 import { assertPublicHttpsUrl, __test as httpTest } from '../src/lib/http.mjs';
+import { __test as mediaTest } from '../src/lib/media.mjs';
 import { __test as publishTest } from '../src/publish.mjs';
 import { validateStrictConfig } from '../src/validate-strict-config.mjs';
 
@@ -62,6 +63,14 @@ test('partial nested account overrides preserve hard safety and quality defaults
   assert.deepEqual(configTest.mergeSection(defaults, account, 'media').qa, { enabled: true, selectedSemanticReview: false, minScore: 82 });
 });
 
+test('selected-image QA is enabled by default and only explicit false disables it', () => {
+  assert.equal(mediaTest.mediaQaEnabled({ media: {} }), true);
+  assert.equal(mediaTest.mediaQaEnabled({ media: { qa: null } }), true);
+  assert.equal(mediaTest.mediaQaEnabled({ media: { qa: { minScore: 82 } } }), true);
+  assert.equal(mediaTest.mediaQaEnabled({ media: { qa: { enabled: true } } }), true);
+  assert.equal(mediaTest.mediaQaEnabled({ media: { qa: { enabled: false } } }), false);
+});
+
 test('strict config validates new naturalization and selected-image semantic review settings', () => {
   const errors = validateStrictConfig({
     defaults: {
@@ -87,4 +96,18 @@ test('strict config validates new naturalization and selected-image semantic rev
     'generation.naturalization.model must be a string',
     'media.qa.selectedSemanticReview must be a boolean'
   ]) assert.ok(errors.some((error) => error.includes(expected)), `missing validation error: ${expected}`);
+});
+
+test('strict config rejects explicit null nested safety and quality objects', () => {
+  const errors = validateStrictConfig({
+    defaults: {
+      mode: 'pause', analytics: { enabled: false }, budgets: { enabled: false },
+      safety: { anomalyBrake: null }, generation: { naturalization: null },
+      media: { strategy: 'none', qa: null }
+    },
+    accounts: { acct: { platform: 'x', enabled: false } }
+  });
+  assert.ok(errors.some((error) => error.includes('safety.anomalyBrake must be an object')));
+  assert.ok(errors.some((error) => error.includes('generation.naturalization must be an object')));
+  assert.ok(errors.some((error) => error.includes('media.qa must be an object')));
 });
