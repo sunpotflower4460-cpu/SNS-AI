@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { validateAffiliateRegistry, matchAffiliatePrograms, programReadiness, registryReadiness } from '../src/monetization/affiliate-registry.mjs';
 import { buildAffiliateReadinessReport } from '../src/monetization/affiliate-readiness.mjs';
 import { buildImpactTrackingLinkRequest } from '../src/monetization/providers/impact.mjs';
-import { assertAutomatedEngagementAllowed, prohibitedGrowthAutomation, normalizeEngagementEvent } from '../src/engagement/policy.mjs';
+import { assertAutomatedEngagementAllowed, prohibitedGrowthAutomation, normalizeEngagementEvent, loadEngagementPolicy, effectiveEngagementPolicy } from '../src/engagement/policy.mjs';
 import { buildXMentionsUrl, buildXDmEventsUrl, buildXReplyPayload, buildXDmPayload, sendXReply, sendXDirectMessage } from '../src/engagement/providers/x.mjs';
 import { buildInstagramCommentsUrl, buildInstagramCommentReplyPayload, buildInstagramPrivateReplyPayload, buildInstagramDmPayload, sendInstagramCommentReply, sendInstagramPrivateReply, sendInstagramDm } from '../src/engagement/providers/instagram.mjs';
 
@@ -59,6 +59,19 @@ test('Impact request builder produces official media-partner deep-link endpoint 
   assert.equal(request.url.includes('super-secret-token'), false);
   assert.match(request.options.headers.Authorization, /^Basic /);
   assert.throws(() => buildImpactTrackingLinkRequest({ accountSid: 'a', authToken: 'b', programId: 'c', deepLink: 'http://example.com' }), /HTTPS/);
+});
+
+test('global engagement policy is fail-closed and can be overridden only explicitly per account', async () => {
+  const globalPolicy = await loadEngagementPolicy();
+  assert.equal(globalPolicy.enabled, false);
+  assert.equal(globalPolicy.inboundOnly, true);
+  assert.equal(globalPolicy.autoReply, false);
+  assert.equal(globalPolicy.autoDmReply, false);
+  const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { enabled: true, autoReply: true } });
+  assert.equal(effective.enabled, true);
+  assert.equal(effective.autoReply, true);
+  assert.equal(effective.autoDmReply, false);
+  assert.equal(effective.inboundOnly, true);
 });
 
 test('engagement guard allows only opted-in inbound interaction when explicitly enabled', () => {
