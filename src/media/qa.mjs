@@ -47,8 +47,6 @@ function qaSettings(account) {
     enabled: account.media?.qa?.enabled !== false,
     model: account.media?.qa?.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5',
     detail: account.media?.qa?.detail || 'high',
-    // This is intentionally a SOFT target. Falling below it suggests improvement but does not by
-    // itself block publication. Only moderation/critical visual defects are hard failures.
     minScore: boundedNumber(account.media?.qa?.minScore, 75, { min: 0, max: 100 }),
     maxInputBytes: boundedNumber(account.media?.qa?.maxInputBytes, 15 * 1024 * 1024, { min: 1 })
   };
@@ -59,7 +57,7 @@ function dataUrl(bytes, contentType) {
 }
 
 async function moderateImage(accountId, account, imageUrl) {
-  if (account.safety?.moderation === false) return { flagged: false, categories: [] };
+  if (account.safety?.moderation === false) return { flagged: false, categories: [], skipped: true };
   const response = await openaiRequest('/moderations', {
     model: account.safety?.moderationModel || 'omni-moderation-latest',
     input: [{ type: 'image_url', image_url: { url: imageUrl } }]
@@ -92,29 +90,34 @@ async function reviewImageUrl(accountId, account, imageUrl, context = {}) {
   const moderation = await moderateImage(accountId, account, imageUrl);
   if (moderation.flagged) {
     return {
-      pass: false,
-      score: 0,
+      pass: false, score: 0,
       issues: [{ type: 'moderation', severity: 'critical', detail: `Image moderation flagged: ${moderation.categories.join(', ') || 'flagged'}` }],
       altText: '',
       correctionPrompt: 'Remove unsafe or policy-sensitive visual content and replace it with a clearly safe visual that preserves the intended communication.',
-      softWarning: false,
-      recommendedAction: 'reject'
+      softWarning: false, recommendedAction: 'reject', chatReviewRecommended: false
+    };
+  }
+
+  // For selected/library images, the normal production preference is: enforce hard safety here,
+  // but leave subjective semantic fit to ChatGPT/editorial review. This avoids paying for a second
+  // GPT judgment on every post and avoids turning taste into a brittle automation gate.
+  if (context.semanticReview === false) {
+    return {
+      pass: true, score: null, issues: [], altText: '', correctionPrompt: '',
+      moderationOnly: true, softWarning: false, recommendedAction: 'use', chatReviewRecommended: true
     };
   }
 
   const body = {
-    model: settings.model,
-    store: false,
-    max_output_tokens: 1200,
+    model: settings.model, store: false, max_output_tokens: 1200,
     input: [{ role: 'user', content: [
       { type: 'input_text', text: [
         'You are the final visual quality and relevance reviewer for an autonomous social-media publisher.',
-        'IMPORTANT: pass=false is a HARD gate. Use it only for problems serious enough that automatic publication would be undesirable: unsafe content, corrupted/broken rendering, severe anatomy/object failure, prominent garbled text, unwanted watermark/logo, severe crop/composition failure, or a clearly deceptive/contradictory mismatch with the post.',
-        'The numeric score is a SOFT quality/fit signal. Score relevance to the actual post, communicative usefulness, composition, clarity, specificity, and whether the visual adds something rather than feeling like generic decorative AI imagery.',
-        'A merely average, stylistically imperfect, simple, unusual, or non-literal image should still pass. Do not make personal aesthetic preference a blocker.',
-        'Minor/major issues may lower score without failing. Only critical issues should normally make pass=false.',
-        'If the image is safe and usable but weakly matched, keep pass=true and explain how it could be improved in correctionPrompt.',
-        'Write useful objective alt text describing what is actually visible. Do not include hashtags, promotional copy, or "image of" boilerplate.',
+        'IMPORTANT: pass=false is a HARD gate. Use it only for serious problems: unsafe content, corrupted/broken rendering, severe anatomy/object failure, prominent garbled text, unwanted watermark/logo, severe crop/composition failure, or a clearly deceptive/contradictory mismatch with the post.',
+        'The numeric score is a SOFT signal for relevance, communicative usefulness, composition, clarity, specificity, and whether the visual adds something rather than feeling like generic decorative AI imagery.',
+        'A merely average, simple, unusual, non-literal, or stylistically imperfect image should still pass. Only critical issues should normally make pass=false.',
+        'If safe and usable but weakly matched, keep pass=true and explain improvements in correctionPrompt.',
+        'Write objective alt text describing what is visible.',
         `Requested media type: ${context.mediaType || 'image'}`,
         `Original visual request: ${String(context.prompt || '').slice(0, 5000)}`,
         `Associated post text: ${String(context.postText || '').slice(0, 3000)}`
@@ -124,25 +127,34 @@ async function reviewImageUrl(accountId, account, imageUrl, context = {}) {
     text: { format: { type: 'json_schema', name: 'sns_media_qa', schema: QA_SCHEMA, strict: true } }
   };
 
-  const response = await requestQa(accountId, account, body);
-  const parsed = parseJson(outputText(response));
+  let parsed;
+  try {
+    const response = await requestQa(accountId, account, body);
+    parsed = parseJson(outputText(response));
+  } catch (error) {
+    if (context.softOnReviewError === true) {
+      return {
+        pass: true, score: null,
+        issues: [{ type: 'review_unavailable', severity: 'minor', detail: String(error?.message || error).slice(0, 300) }],
+        altText: '', correctionPrompt: '', softWarning: true, assessorUnavailable: true,
+        recommendedAction: 'use', chatReviewRecommended: true
+      };
+    }
+    throw error;
+  }
+
   const issues = Array.isArray(parsed.issues) ? parsed.issues.slice(0, 8) : [];
   const score = Math.max(0, Math.min(100, Number(parsed.score) || 0));
   const critical = issues.some((issue) => issue.severity === 'critical');
   const hardPass = Boolean(parsed.pass) && !critical;
   const softWarning = hardPass && score < settings.minScore;
   return {
-    // Score is deliberately NOT part of pass. This prevents the quality layer from becoming a
-    // brittle gate that causes otherwise safe posts to disappear.
-    pass: hardPass,
-    score,
-    issues,
+    pass: hardPass, score, issues,
     altText: String(parsed.altText || '').trim().slice(0, 1000),
     correctionPrompt: String(parsed.correctionPrompt || '').trim().slice(0, 3000),
-    model: settings.model,
-    threshold: settings.minScore,
-    softWarning,
-    recommendedAction: hardPass ? (softWarning ? 'consider_replace' : 'use') : 'reject'
+    model: settings.model, threshold: settings.minScore, softWarning,
+    recommendedAction: hardPass ? (softWarning ? 'consider_replace' : 'use') : 'reject',
+    chatReviewRecommended: softWarning
   };
 }
 
