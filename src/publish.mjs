@@ -4,6 +4,7 @@ import { appendAudit } from './lib/audit.mjs';
 import { getDurableClaim, writeDurableClaim } from './lib/durable-claim.mjs';
 import { publish as corePublish, __test as coreTest } from './publish-core.mjs';
 import { assertHubBeforeProvider, hubRequirement, syncPublishedHubBacklink } from './hub/publish-hooks.mjs';
+import { prepareHubPublish } from './hub/prepare.mjs';
 
 const HANDLED = new Set(['publishing','publish_unknown','published']);
 const sleep = (ms) => new Promise((resolve)=>setTimeout(resolve,ms));
@@ -21,29 +22,36 @@ export async function publish(payload,{
   syncBacklink=syncPublishedHubBacklink,
   resolve=resolveAccount,
   audit=appendAudit,
-  sleepImpl=sleep
+  sleepImpl=sleep,
+  prepare=prepareHubPublish
 }={}){
   const dryRun=boolValue(payload?.dryRun),slotId=payload?.slotId||null;
   let claim=slotId?await getClaim(slotId,{fresh:true}):null;
-  const requirement=hubRequirement(payload,claim);
+  let effectivePayload=payload;
+  let requirement=hubRequirement(payload,claim);
+  if(!requirement&&payload?.hubProduct&&!dryRun){
+    const prepared=await prepare(payload.hubProduct);
+    effectivePayload={...payload,hub:prepared.hub};
+    requirement=hubRequirement(effectivePayload,claim);
+  }
   if(!requirement)return core(payload);
   if(dryRun)return core(payload);
   if(!slotId){const error=new Error('Hub-dependent live publishing requires slotId for durable recovery.');error.code='HUB_SLOT_REQUIRED';error.publishStage='hub';throw error}
 
   if(!HANDLED.has(claim?.status)){
-    await assertBefore(payload,{claim});
+    await assertBefore(effectivePayload,{claim});
     const preparedStatus=claim?.status||'hub_ready';
     claim=await writeClaim(slotId,preparedStatus,{hub:requirement});
   }
 
-  const result=await core(payload);
+  const result=await core(effectivePayload);
   const finalClaim=(await getClaim(slotId,{fresh:true}))||claim;
   const account=await resolve(payload.account);
   const postId=result?.postId||finalClaim?.providerPostId||null;
   const publishedAt=finalClaim?.publishedAt||claim?.publishedAt||new Date().toISOString();
   let hubSync;
   try{
-    hubSync=await syncWithRetry({payload,account,claim:finalClaim||claim,postId,publishedAt,result},{sync:syncBacklink,sleepImpl});
+    hubSync=await syncWithRetry({payload:effectivePayload,account,claim:finalClaim||claim,postId,publishedAt,result},{sync:syncBacklink,sleepImpl});
   }catch(error){
     const pending=pendingError(error,result);
     await audit({account:payload.account,stage:'hub-backlink-pending',slotId,platform:account.platform,providerPostId:postId,hubProductId:requirement.productId,error:String(error?.message||error).slice(0,500)}).catch(()=>{});
