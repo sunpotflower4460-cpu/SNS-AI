@@ -35,12 +35,26 @@ function currentRow(state, accountId, account) {
   return { localDate: previous.localDate, counts: { ...(previous.counts || {}) } };
 }
 
+function configuredLimit(accountId, account, kind) {
+  const limitKey = LIMIT_KEYS[kind];
+  if (!limitKey) return null;
+  const raw = account?.budgets?.[limitKey];
+  const limit = Number(raw);
+  if (!Number.isFinite(limit) || limit < 0) {
+    const error = new Error(`Invalid daily ${kind} budget for ${accountId}: budgets.${limitKey} must be a non-negative number.`);
+    error.code = 'BUDGET_CONFIG_INVALID';
+    error.kind = kind;
+    error.limitKey = limitKey;
+    throw error;
+  }
+  return limit;
+}
+
 function budgetStatusFromState(state, accountId, account, kind) {
   if (account?.budgets?.enabled === false) return { allowed: true, disabled: true };
   const limitKey = LIMIT_KEYS[kind];
   if (!limitKey) return { allowed: true };
-  const limit = Number(account?.budgets?.[limitKey]);
-  if (!Number.isFinite(limit)) return { allowed: true, unlimited: true };
+  const limit = configuredLimit(accountId, account, kind);
   const row = currentRow(state, accountId, account);
   const used = Number(row.counts?.[kind] || 0);
   if (used >= limit) {
@@ -95,3 +109,5 @@ export async function consumeUsage(accountId, account, kind, detail = {}) {
     return status;
   });
 }
+
+export const __test = { configuredLimit };

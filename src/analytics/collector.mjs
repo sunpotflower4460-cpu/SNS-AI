@@ -4,9 +4,21 @@ import { appendAudit } from '../lib/audit.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from '../ops/circuit.mjs';
 import { evaluateAnomalyBrake } from '../ops/brake.mjs';
 import { readMetricSnapshots, snapshotsForPost, appendMetricSnapshot } from './store.mjs';
-import { nextDueCheckpoint } from './checkpoints.mjs';
+import { DEFAULT_CHECKPOINTS, nextDueCheckpoint } from './checkpoints.mjs';
 import { collectXMetrics } from './x-metrics.mjs';
 import { collectInstagramMetrics } from './instagram-metrics.mjs';
+
+function positiveSetting(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function checkpointSettings(value) {
+  if (!Array.isArray(value) || !value.length) return DEFAULT_CHECKPOINTS;
+  const normalized = value.map(Number);
+  if (normalized.some((checkpoint) => !Number.isFinite(checkpoint) || checkpoint <= 0)) return DEFAULT_CHECKPOINTS;
+  return normalized;
+}
 
 async function evaluateBrakeSafely(accountId, account, snapshots, report) {
   try {
@@ -34,12 +46,12 @@ export async function collectMetrics({ accountFilter, now = new Date() } = {}) {
     catch (error) { report.push({ account: accountId, status: 'circuit-open', error: error.message }); continue; }
     const posts = history.filter((row) => row.account === accountId && row.status === 'published' && row.providerPostId && row.at);
     for (const post of posts) {
-      const maxAgeDays = Number(account.analytics?.maxAgeDays ?? (account.platform === 'x' ? 30 : 14));
+      const maxAgeDays = positiveSetting(account.analytics?.maxAgeDays, account.platform === 'x' ? 30 : 14);
       if (now.getTime() - new Date(post.at).getTime() > maxAgeDays * 86400000) continue;
       const snapshots = snapshotsForPost(existing, accountId, post.providerPostId);
       const due = nextDueCheckpoint({
         publishedAt: post.at, snapshots,
-        checkpoints: account.analytics?.checkpointsMinutes || [60, 360, 1440, 4320, 10080], now
+        checkpoints: checkpointSettings(account.analytics?.checkpointsMinutes), now
       });
       if (!due) continue;
       try {
@@ -79,3 +91,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(JSON.stringify(report, null, 2));
   if (report.some((row) => row.status === 'failed')) process.exitCode = 1;
 }
+
+export const __test = { positiveSetting, checkpointSettings };

@@ -93,18 +93,18 @@ function unsafeNetworkHostname(hostname) {
   return false;
 }
 
-function publicHttpsUrl(value) {
+export function assertPublicHttpsUrl(value, label = 'mediaUrl') {
   let parsed;
   try { parsed = new URL(String(value || '')); }
-  catch { throw new Error('mediaUrl must be a valid https:// URL.'); }
-  if (parsed.protocol !== 'https:') throw new Error('mediaUrl must be an https:// URL.');
-  if (parsed.username || parsed.password) throw new Error('mediaUrl must not contain embedded credentials.');
-  if (unsafeNetworkHostname(parsed.hostname)) throw new Error(`mediaUrl host is not a public network destination: ${parsed.hostname}`);
+  catch { throw new Error(`${label} must be a valid https:// URL.`); }
+  if (parsed.protocol !== 'https:') throw new Error(`${label} must be an https:// URL.`);
+  if (parsed.username || parsed.password) throw new Error(`${label} must not contain embedded credentials.`);
+  if (unsafeNetworkHostname(parsed.hostname)) throw new Error(`${label} host is not a public network destination: ${parsed.hostname}`);
   return parsed;
 }
 
 async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
-  let current = publicHttpsUrl(url);
+  let current = assertPublicHttpsUrl(url);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
     const response = await fetch(current, { redirect: 'manual' });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
@@ -112,7 +112,7 @@ async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
     const location = response.headers.get('location');
     if (!location) throw new Error(`Media redirect (${response.status}) did not include a Location header.`);
     await response.body?.cancel?.().catch(() => {});
-    current = publicHttpsUrl(new URL(location, current).toString());
+    current = assertPublicHttpsUrl(new URL(location, current).toString());
   }
   throw new Error('Media redirect resolution failed.');
 }
@@ -149,4 +149,10 @@ export async function downloadMedia(url, { maxBytes = 25 * 1024 * 1024 } = {}) {
   return { bytes: combined.buffer, contentType };
 }
 
-export const __test = { privateIpv4, privateIpv6, unsafeNetworkHostname, publicHttpsUrl };
+export const __test = {
+  privateIpv4,
+  privateIpv6,
+  unsafeNetworkHostname,
+  publicHttpsUrl: assertPublicHttpsUrl,
+  assertPublicHttpsUrl
+};

@@ -11,6 +11,18 @@ function serializeMutation(task) {
   return run;
 }
 
+function positiveSetting(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+export function circuitSettings(config = {}) {
+  return {
+    failureThreshold: positiveSetting(config?.failureThreshold, 3),
+    cooldownMinutes: positiveSetting(config?.cooldownMinutes, 60)
+  };
+}
+
 async function load() {
   return await readJson(FILE, { circuits: {} }) || { circuits: {} };
 }
@@ -52,8 +64,7 @@ export async function recordCircuitSuccess(accountId, stage, config = {}) {
 
 export async function recordCircuitFailure(accountId, stage, error, config = {}) {
   if (config?.enabled === false) return;
-  const threshold = Math.max(1, Number(config?.failureThreshold ?? 3));
-  const cooldownMinutes = Math.max(1, Number(config?.cooldownMinutes ?? 60));
+  const { failureThreshold, cooldownMinutes } = circuitSettings(config);
   return serializeMutation(async () => {
     const state = await load();
     state.circuits ||= {};
@@ -65,7 +76,7 @@ export async function recordCircuitFailure(accountId, stage, error, config = {})
       lastFailure: new Date().toISOString(),
       lastSuccess: previous.lastSuccess || null,
       lastError: String(error?.message || error || 'unknown').slice(0, 500),
-      openUntil: failures >= threshold ? new Date(Date.now() + cooldownMinutes * 60_000).toISOString() : null
+      openUntil: failures >= failureThreshold ? new Date(Date.now() + cooldownMinutes * 60_000).toISOString() : null
     };
     await writeJsonAtomic(FILE, state);
     return state.circuits[key];

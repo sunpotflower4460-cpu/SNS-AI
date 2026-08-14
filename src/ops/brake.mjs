@@ -5,20 +5,34 @@ import { scoreSnapshot } from '../analytics/scorer.mjs';
 
 const FILE = fileURLToPath(new URL('../../data/brakes.json', import.meta.url));
 
+function setting(value, fallback, { min = -Infinity, max = Infinity, integer = false, exclusiveMin = false } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  if (integer && !Number.isInteger(number)) return fallback;
+  if (exclusiveMin ? number <= min : number < min) return fallback;
+  if (number > max) return fallback;
+  return number;
+}
+
 export function brakeSettings(account = {}) {
   const cfg = account.safety?.anomalyBrake || {};
+  const lowScoreThreshold = setting(cfg.lowScoreThreshold, 25, { min: 0, max: 100 });
+  let severeScoreThreshold = setting(cfg.severeScoreThreshold, 12, { min: 0, max: 100 });
+  if (severeScoreThreshold > lowScoreThreshold) severeScoreThreshold = Math.min(12, lowScoreThreshold);
   return {
     enabled: cfg.enabled !== false,
-    matureCheckpointMinutes: Number(cfg.matureCheckpointMinutes ?? account.learning?.matureCheckpointMinutes ?? 1440),
-    minBaselinePosts: Number(cfg.minBaselinePosts ?? 5),
-    minConfidence: Number(cfg.minConfidence ?? 0.55),
-    minExposure: Number(cfg.minExposure ?? 500),
-    severeScoreThreshold: Number(cfg.severeScoreThreshold ?? 12),
-    lowScoreThreshold: Number(cfg.lowScoreThreshold ?? 25),
-    consecutiveLowPosts: Number(cfg.consecutiveLowPosts ?? 2),
-    conversationSpikeMultiplier: Number(cfg.conversationSpikeMultiplier ?? 5),
-    minimumConversationRate: Number(cfg.minimumConversationRate ?? 0.02),
-    cooldownHours: Number(cfg.cooldownHours ?? 12)
+    matureCheckpointMinutes: setting(cfg.matureCheckpointMinutes ?? account.learning?.matureCheckpointMinutes, 1440, { min: 0 }),
+    // Explicit zero remains a valid direct-runtime/testing override. Malformed/NaN values still fall
+    // back to the protective production defaults; npm run validate rejects zero in normal config.
+    minBaselinePosts: setting(cfg.minBaselinePosts, 5, { min: 0, integer: true }),
+    minConfidence: setting(cfg.minConfidence, 0.55, { min: 0, max: 1 }),
+    minExposure: setting(cfg.minExposure, 500, { min: 0 }),
+    severeScoreThreshold,
+    lowScoreThreshold,
+    consecutiveLowPosts: setting(cfg.consecutiveLowPosts, 2, { min: 0, exclusiveMin: true, integer: true }),
+    conversationSpikeMultiplier: setting(cfg.conversationSpikeMultiplier, 5, { min: 0, exclusiveMin: true }),
+    minimumConversationRate: setting(cfg.minimumConversationRate, 0.02, { min: 0, max: 1 }),
+    cooldownHours: setting(cfg.cooldownHours, 12, { min: 0, exclusiveMin: true })
   };
 }
 
@@ -111,7 +125,7 @@ export async function evaluateAnomalyBrake(accountId, account, snapshots) {
   if (existing?.open && (!existing.openUntil || Date.now() < Date.parse(existing.openUntil))) return { opened: false, alreadyOpen: true, ...existing };
 
   const openedAt = new Date().toISOString();
-  const openUntil = new Date(Date.now() + Math.max(1, cfg.cooldownHours) * 3600000).toISOString();
+  const openUntil = new Date(Date.now() + cfg.cooldownHours * 3600000).toISOString();
   const row = { open: true, openedAt, openUntil, reason: decision.reason, evidence: decision.evidence };
   state.accounts[accountId] = row;
   await saveState(state);
