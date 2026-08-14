@@ -59,6 +59,14 @@ function videoInitializePayload(bytes, contentType) {
   return { media_category: 'tweet_video', media_type: normalizedType, shared: false, total_bytes: bytes.byteLength };
 }
 
+function createPostPayload({ text = '', mediaIds = [], paidPartnership = false }) {
+  const payload = {};
+  if (text) payload.text = text;
+  if (mediaIds.length) payload.media = { media_ids: mediaIds.map(String) };
+  if (paidPartnership) payload.paid_partnership = true;
+  return payload;
+}
+
 async function setAltText(mediaId, text, credentials) {
   const payload = mediaMetadataPayload(mediaId, text);
   if (!payload.metadata.alt_text.text) return;
@@ -153,12 +161,11 @@ export async function verifyXOAuth2Credential(credential) {
   return { id: body.data.id, username: body.data.username || null, name: body.data.name || null, session };
 }
 
-export async function publishX({ text = '', mediaUrl, mediaType = 'image', mediaAltText = '', credential, dryRun = false }) {
+export async function publishX({ text = '', mediaUrl, mediaType = 'image', mediaAltText = '', credential, dryRun = false, paidPartnership = false }) {
   if (!text && !mediaUrl) throw new Error('X requires text or mediaUrl.');
-  if (dryRun) return { dryRun: true, platform: 'x', text, mediaUrl: mediaUrl || null, mediaType, mediaAltText: mediaAltText || null };
+  if (dryRun) return { dryRun: true, platform: 'x', text, mediaUrl: mediaUrl || null, mediaType, mediaAltText: mediaAltText || null, paidPartnership: Boolean(paidPartnership) };
 
-  const payload = {};
-  if (text) payload.text = text;
+  const payload = createPostPayload({ text, paidPartnership });
   if (mediaUrl) {
     try {
       const mediaId = mediaType === 'reel'
@@ -183,4 +190,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   }
 }
 
-export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload };

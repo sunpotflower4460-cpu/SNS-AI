@@ -6,6 +6,7 @@ import { checkRateLimits, validateDraftText } from './lib/safety.mjs';
 import { markSlot } from './lib/state.mjs';
 import { beginPublishClaim, finishPublishClaim, getDurableClaim } from './lib/durable-claim.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
+import { assertAffiliateTrust, normalizeCommercial } from './monetization/trust-guard.mjs';
 import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
 
@@ -108,6 +109,7 @@ async function reconcilePublishedReplay(payload, account, claim) {
       mediaUrl: claim?.mediaUrl ?? payload.mediaUrl ?? null,
       mediaType: claim?.mediaType ?? payload.mediaType ?? null,
       mediaAltText: (claim?.mediaAltText ?? String(payload.mediaAltText || '').slice(0, 1000)) || null,
+      commercial: claim?.commercial ?? payload.commercial ?? null,
       providerPostId: postId,
       recoveredFromDurableClaim: true,
       recoveryIncomplete
@@ -156,6 +158,7 @@ async function recoverHandledClaimFromHistory(payload, account, claim) {
     mediaUrl: evidence.mediaUrl ?? claim.mediaUrl ?? payload.mediaUrl ?? null,
     mediaType: evidence.mediaType ?? claim.mediaType ?? payload.mediaType ?? null,
     mediaAltText: evidence.mediaAltText ?? claim.mediaAltText ?? (String(payload.mediaAltText || '').slice(0, 1000) || null),
+    commercial: evidence.commercial ?? claim.commercial ?? payload.commercial ?? null,
     recoveredFromHistory: true
   };
 
@@ -172,13 +175,26 @@ export async function publish(payload) {
   const text = String(payload.text || '').trim();
   const dryRun = boolValue(payload.dryRun);
   validateDraftText(account, text, { requireNonEmpty: false });
+
+  const normalizedCommercial = normalizeCommercial(payload.commercial);
+  const commercialHistory = normalizedCommercial.kind === 'affiliate' ? await readHistory() : [];
+  const commercial = assertAffiliateTrust({
+    accountId: payload.account,
+    account,
+    text,
+    commercial: normalizedCommercial,
+    history: commercialHistory,
+    now: new Date()
+  });
+
   const common = {
     text,
     mediaUrl: payload.mediaUrl || undefined,
     mediaType: payload.mediaType || 'image',
     mediaAltText: String(payload.mediaAltText || '').slice(0, 1000),
     credential: account.credential,
-    dryRun
+    dryRun,
+    paidPartnership: Boolean(commercial.paidPartnership)
   };
   validateProviderPayload(account, common);
 
@@ -217,13 +233,14 @@ export async function publish(payload) {
       textHash: textHash(text),
       mediaUrl: payload.mediaUrl || null,
       mediaType: payload.mediaType || null,
-      mediaAltText: String(payload.mediaAltText || '').slice(0, 1000) || null
+      mediaAltText: String(payload.mediaAltText || '').slice(0, 1000) || null,
+      commercial
     });
     if (durable.replay) return reconcilePublishedReplay(payload, account, durable.claim);
   }
 
   const preWarnings = [];
-  await bestEffort('publish-attempt-audit', () => appendAudit({ account: payload.account, stage: dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length }), preWarnings);
+  await bestEffort('publish-attempt-audit', () => appendAudit({ account: payload.account, stage: dryRun ? 'publish-dry-run' : 'publish-attempt', slotId: payload.slotId || null, platform: account.platform, source: payload.source || 'manual', hasMedia: Boolean(payload.mediaUrl), hasAltText: Boolean(payload.mediaAltText), mediaResolution: payload.mediaResolution || null, sourceCount: (payload.sources || []).length, commercialKind: commercial.kind, paidPartnership: Boolean(commercial.paidPartnership) }), preWarnings);
 
   let result;
   try {
@@ -246,12 +263,12 @@ export async function publish(payload) {
     if (!dryRun && error.code !== 'CIRCUIT_OPEN') {
       await bestEffort('publish-circuit-failure', () => recordCircuitFailure(payload.account, 'publish', error, account.resilience), failureWarnings);
     }
-    await bestEffort('publish-error-audit', () => appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500) }), failureWarnings);
+    await bestEffort('publish-error-audit', () => appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500), commercialKind: commercial.kind }), failureWarnings);
     if (failureWarnings.length) error.bookkeepingWarnings = failureWarnings;
     throw error;
   }
 
-  if (dryRun) return preWarnings.length ? { ...result, bookkeepingWarnings: preWarnings } : result;
+  if (dryRun) return preWarnings.length ? { ...result, commercial, bookkeepingWarnings: preWarnings } : { ...result, commercial };
 
   const postId = providerPostId(result);
   const warnings = [...preWarnings];
@@ -272,13 +289,13 @@ export async function publish(payload) {
     at: publishedAt,
     account: payload.account, platform: account.platform, status: 'published', source: payload.source || 'manual', slotId: payload.slotId || null,
     text, mediaUrl: payload.mediaUrl || null, mediaType: payload.mediaType || null, mediaAltText: String(payload.mediaAltText || '').slice(0, 1000) || null,
-    mediaQa: payload.mediaQa || null, mediaResolution: payload.mediaResolution || null,
+    mediaQa: payload.mediaQa || null, mediaResolution: payload.mediaResolution || null, commercial,
     providerPostId: postId, ai: payload.ai || null, features: payload.features || null, rationale: payload.rationale || null,
     predictedScore: payload.predictedScore ?? null, selectionMode: payload.selectionMode || null,
     experiment: payload.experiment || null, sources: (payload.sources || []).slice(0, 30)
   }), warnings);
   await bestEffort('publish-circuit-success', () => recordCircuitSuccess(payload.account, 'publish', account.resilience), warnings);
-  await bestEffort('publish-success-audit', () => appendAudit({ account: payload.account, stage: 'publish-success', slotId: payload.slotId || null, platform: account.platform, providerPostId: postId, mediaResolution: payload.mediaResolution || null, mediaQaScore: payload.mediaQa?.score ?? null, experiment: payload.experiment || null, sourceCount: (payload.sources || []).length }), warnings);
+  await bestEffort('publish-success-audit', () => appendAudit({ account: payload.account, stage: 'publish-success', slotId: payload.slotId || null, platform: account.platform, providerPostId: postId, mediaResolution: payload.mediaResolution || null, mediaQaScore: payload.mediaQa?.score ?? null, experiment: payload.experiment || null, sourceCount: (payload.sources || []).length, commercialKind: commercial.kind, paidPartnership: Boolean(commercial.paidPartnership) }), warnings);
 
   if (warnings.length) {
     await appendAudit({
@@ -291,7 +308,7 @@ export async function publish(payload) {
     }).catch(() => {});
   }
 
-  return warnings.length ? { ...result, bookkeepingWarnings: warnings } : result;
+  return warnings.length ? { ...result, commercial, bookkeepingWarnings: warnings } : { ...result, commercial };
 }
 if (import.meta.url === `file://${process.argv[1]}`) {
   try { const payload = await loadPayload(parseArgs(process.argv.slice(2))); const result = await publish(payload); console.log(JSON.stringify({ ok: true, account: payload.account, result }, null, 2)); }
