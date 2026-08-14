@@ -149,4 +149,10 @@ export async function downloadMedia(url, { maxBytes = 25 * 1024 * 1024 } = {}) {
   return { bytes: combined.buffer, contentType };
 }
 
-export const __test = { privateIpv4, privateIpv6, unsafeNetworkHostname, assertPublicHttpsUrl };
+export const __test = {
+  privateIpv4,
+  privateIpv6,
+  unsafeNetworkHostname,
+  publicHttpsUrl: assertPublicHttpsUrl,
+  assertPublicHttpsUrl
+};
