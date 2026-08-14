@@ -48,7 +48,10 @@ function finiteSetting(value, fallback, { min = 0, max = 100 } = {}) {
 export function naturalizationSettings(account = {}) {
   const cfg = account.generation?.naturalization || {};
   return {
-    enabled: cfg.enabled !== false,
+    // Opt in explicitly at the merged config level. The repository defaults do this for real
+    // accounts, while minimal low-level callers/tests that construct partial account objects do not
+    // unexpectedly trigger another paid Responses call.
+    enabled: cfg.enabled === true,
     model: cfg.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5',
     minNaturalness: finiteSetting(cfg.minNaturalness, 72),
     maxAiPatternRisk: finiteSetting(cfg.maxAiPatternRisk, 45),
@@ -122,12 +125,14 @@ async function requestReview(accountId, account, draft, context, settings, dryRu
 }
 
 export async function naturalizeDraft(accountId, account, draft, context = {}) {
-  const original = validateDraftText(account, draft?.text || '');
   const settings = naturalizationSettings(account);
+  // Disabled means truly zero additional work/cost. Do this before validation so generic media-only
+  // callers with no post text are unaffected by the optional editor.
   if (!settings.enabled) {
-    return { ...draft, text: original, naturalization: { skipped: true, applied: false, version: NATURALIZATION_VERSION } };
+    return { ...draft, naturalization: { skipped: true, applied: false, version: NATURALIZATION_VERSION } };
   }
 
+  const original = validateDraftText(account, draft?.text || '');
   let review;
   try {
     review = await requestReview(accountId, account, { ...draft, text: original }, context, settings, Boolean(context.dryRun));
@@ -168,8 +173,6 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
     }
   }
 
-  // The original winner was already moderated by generatePost(). Only a changed final text needs a
-  // second moderation pass. Naturalness review itself must never become a publication blocker.
   if (applied && !context.dryRun) {
     try {
       await moderateText(finalText, account, accountId);
