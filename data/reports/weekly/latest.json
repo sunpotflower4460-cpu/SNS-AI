@@ -1,0 +1,96 @@
+{
+  "generatedAt": "2026-08-16T18:51:26.567Z",
+  "periodDays": 7,
+  "accounts": {
+    "music-tools-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "approval",
+      "current": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "previous": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "changes": {
+        "postCount": 0,
+        "averagePerformanceScore": null,
+        "errorCount": 0
+      },
+      "currentStrategy": {
+        "sampleSize": 0,
+        "confidence": 0,
+        "preferred": [],
+        "avoid": []
+      },
+      "experiment": null,
+      "recentlyCompletedExperiments": []
+    },
+    "example-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "current": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "previous": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "changes": {
+        "postCount": 0,
+        "averagePerformanceScore": null,
+        "errorCount": 0
+      },
+      "currentStrategy": {
+        "sampleSize": 0,
+        "confidence": 0,
+        "preferred": [],
+        "avoid": []
+      },
+      "experiment": null,
+      "recentlyCompletedExperiments": []
+    },
+    "example-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "current": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "previous": {
+        "postCount": 0,
+        "maturedPostCount": 0,
+        "averagePerformanceScore": null,
+        "best": null
+      },
+      "changes": {
+        "postCount": 0,
+        "averagePerformanceScore": null,
+        "errorCount": 0
+      },
+      "currentStrategy": {
+        "sampleSize": 0,
+        "confidence": 0,
+        "preferred": [],
+        "avoid": []
+      },
+      "experiment": null,
+      "recentlyCompletedExperiments": []
+    }
+  }
+}
