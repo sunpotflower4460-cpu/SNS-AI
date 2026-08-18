@@ -34,7 +34,8 @@ function response(body, status = 200, headers = {}) {
 
 async function withPreflightFixture(task, {
   scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access',
-  stateId = 'engagement-preflight-full'
+  stateId = 'engagement-preflight-full',
+  platformComplianceReady = true
 } = {}) {
   const savedFiles = await snapshot([CONFIG, POLICY, OAUTH_STATE]);
   const savedEnv = {
@@ -62,6 +63,10 @@ async function withPreflightFixture(task, {
     policy.liveAccounts = [];
     policy.autoReply = true;
     policy.autoDmReply = true;
+    if (platformComplianceReady) {
+      policy.xAutomatedAccountLabelConfirmed = true;
+      policy.xAiReplyBotApprovalConfirmed = true;
+    }
     await writeFile(POLICY, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
 
     await rm(OAUTH_STATE, { force: true });
@@ -153,6 +158,23 @@ test('Live Preflight proves X engagement scopes before liveAccounts activation w
     ]));
     assert.equal(wasPostAttempted(), false);
   }, { stateId: 'engagement-preflight-full' });
+});
+
+test('Live Preflight blocks X engagement before OAuth checks when one-time platform compliance is incomplete', async () => {
+  await withPreflightFixture(async () => {
+    const scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access';
+    const wasPostAttempted = installFetchMock({ tokenScopes: scopes });
+    const report = await runLivePreflight({ accountFilter: 'music-tools-x' });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.state, 'blocked');
+    assert.equal(report.accounts[0].ok, false);
+    assert.match(report.accounts[0].error, /Automated account label/i);
+    assert.equal(wasPostAttempted(), false);
+  }, {
+    stateId: 'engagement-preflight-platform-gate',
+    platformComplianceReady: false
+  });
 });
 
 test('Live Preflight blocks activation when X engagement OAuth is missing a required DM scope', async () => {
