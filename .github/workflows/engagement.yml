@@ -61,8 +61,17 @@ jobs:
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-false}" == "true" ]]; then args+=(--dry-run); fi
-          node src/engagement/run.mjs "${args[@]}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+            private_output=/tmp/sns-engagement-dry-run-private.txt
+            if node src/engagement/run.mjs "${args[@]}" --dry-run >"$private_output" 2>&1; then
+              echo 'Engagement dry-run completed; detailed interaction output is intentionally suppressed because it can contain private-DM-derived content.'
+            else
+              echo '::error::Engagement dry-run failed; detailed interaction output is intentionally suppressed for privacy.'
+              exit 1
+            fi
+          else
+            node src/engagement/run.mjs "${args[@]}"
+          fi
 
       - name: Persist privacy-safe engagement state
         if: always() && steps.engagement_run.outcome != 'skipped'
