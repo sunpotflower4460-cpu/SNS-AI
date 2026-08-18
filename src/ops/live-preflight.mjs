@@ -2,6 +2,13 @@ import { loadAccounts, resolveAccount } from '../lib/config.mjs';
 import { openaiRequest } from '../lib/openai.mjs';
 import { verifyXCredential, verifyXOAuth2Credential } from '../providers/x.mjs';
 import { verifyInstagramCredential } from '../providers/instagram.mjs';
+import { effectiveEngagementPolicy, loadEngagementPolicy } from '../engagement/policy.mjs';
+import {
+  allowedEngagementAccount,
+  assertXEngagementCredential,
+  liveEngagementAccount,
+  requiredXEngagementScopes
+} from '../engagement/readiness.mjs';
 
 function parseArgs(argv) {
   const args = {};
@@ -35,6 +42,13 @@ function needsOpenAI(account) {
 
 function xUsesMedia(account) {
   return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
+}
+
+function engagementConfigured(globalPolicy, accountId, account) {
+  const policy = effectiveEngagementPolicy(globalPolicy, account);
+  return globalPolicy?.enabled === true
+    && allowedEngagementAccount(policy, accountId)
+    && (policy.autoReply === true || policy.autoDmReply === true);
 }
 
 function requiredModels(account) {
@@ -220,6 +234,7 @@ async function durableStateBranchCheck() {
 
 export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
+  const globalEngagementPolicy = await loadEngagementPolicy();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
   // ok:false with nothing enabled. Preflight with no selected account touches neither OpenAI, nor the
@@ -253,19 +268,28 @@ export async function runLivePreflight({ accountFilter } = {}) {
   for (const [id, account] of selected) {
     try {
       const resolved = await resolveAccount(id, { allowDisabled: Boolean(accountFilter) });
+      const accountEngagementPolicy = effectiveEngagementPolicy(globalEngagementPolicy, resolved);
+      const engagementIsConfigured = engagementConfigured(globalEngagementPolicy, id, resolved);
+      const engagementIsLive = engagementIsConfigured && liveEngagementAccount(accountEngagementPolicy, id);
       let identity;
       let oauth2Identity = null;
+      let engagementCredential = null;
       if (resolved.platform === 'x') {
         identity = await verifyXCredential(resolved.credential);
-        if (xUsesMedia(resolved)) {
+        if (xUsesMedia(resolved) || engagementIsConfigured) {
           oauth2Identity = await verifyXOAuth2Credential(resolved.credential);
           if (String(oauth2Identity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
-          const scopes = String(oauth2Identity.session?.scope || '').split(/\s+/).filter(Boolean);
+        }
+        if (xUsesMedia(resolved)) {
+          const scopes = String(oauth2Identity?.session?.scope || '').split(/\s+/).filter(Boolean);
           const requiredScopes = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
           if (scopes.length) {
             const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
             if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
           }
+        }
+        if (engagementIsConfigured) {
+          engagementCredential = assertXEngagementCredential(oauth2Identity, accountEngagementPolicy);
         }
       } else if (resolved.platform === 'instagram') {
         identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v25.0' });
@@ -291,6 +315,15 @@ export async function runLivePreflight({ accountFilter } = {}) {
         xOAuth2Identity: oauth2Identity,
         enabled: Boolean(account.enabled),
         mode: account.mode || 'pause',
+        engagement: engagementIsConfigured ? {
+          configured: true,
+          live: engagementIsLive,
+          credentialReady: resolved.platform === 'x' ? engagementCredential?.ok === true : null,
+          requiredScopes: resolved.platform === 'x' ? requiredXEngagementScopes(accountEngagementPolicy) : [],
+          note: engagementIsLive
+            ? 'Inbound engagement is LIVE for this account.'
+            : 'Engagement credentials are checked before activation; liveAccounts remains the separate one-time send gate.'
+        } : { configured: false, live: false, credentialReady: null, requiredScopes: [] },
         openaiModels: ownModels.map((model) => modelChecks.find((check) => check.model === model)).filter(Boolean),
         builtInMedia: kind ? {
           configured: true,
@@ -330,4 +363,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 }
 
-export const __test = { durableStateBranchCheck };
+export const __test = { durableStateBranchCheck, engagementConfigured };
