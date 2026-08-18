@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "enabled": true,
   "allowedAccounts": [
     "music-tools-x"
@@ -8,6 +8,8 @@
   "autoReply": true,
   "autoDmReply": true,
   "approvalRequired": false,
+  "requireXAiReplyBotApproval": true,
+  "xAiReplyBotApprovalConfirmed": false,
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
   "replyDelayMinutes": [
