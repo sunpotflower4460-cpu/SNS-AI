@@ -97,7 +97,7 @@ Account Strategy
   "strategy": "auto",
   "type": "image",
   "internalImageGeneration": true,
-  "imageModel": "gpt-image-1",
+  "imageModel": "gpt-image-2",
   "imageSize": "1024x1024",
   "imageQuality": "medium"
 }
@@ -302,9 +302,15 @@ InstagramはProfessional（Business / Creator）アカウントを使い、Insta
 
 ## 任意のRepository Variables
 
-- `OPENAI_MODEL` — 投稿生成モデルの上書き
-- `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可ユーザー、カンマ区切り
-- `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数
+- `OPENAI_MODEL` — 投稿生成モデルの上書き。**ただし`config/accounts.json`の`defaults.generation.model`が設定されている間は効きません**（defaultsが全アカウントにmergeされ、`account.generation.model`が常に優先されるため）。モデルを変えるならconfig側を編集してください。
+- `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可ユーザー、カンマ区切り。approval Issueに`approved` labelを付けられるのもここに載ったユーザーとrepository ownerだけです。**repositoryをOrganization配下へ移す場合は必須です** — `publish.yml`は`github.actor`を`github.repository_owner`と比較するため、org配下では個人アカウントが一致することはありません。
+- `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数（既定7）
+
+環境変数（workflowで設定、Repository Variableではありません）:
+
+- `SNS_REQUIRE_DURABLE_STATE` — `true`のとき`sns-ai-state` branchによる耐久claimを必須にします。Live Preflightのworkflowは`true`固定です。
+- `SNS_DURABLE_STATE_BRANCH` — 耐久claim用branch名の上書き（既定`sns-ai-state`）
+- `STUCK_CLAIM_MAX_AGE_HOURS` — `npm run stale-claims`が「詰まったclaim」と判定するまでの時間（既定3時間）
 
 ## Live Preflightで確認するもの
 
@@ -316,7 +322,10 @@ InstagramはProfessional（Business / Creator）アカウントを使い、Insta
 - Instagram対象Professional accountの読取
 - OpenAI Moderation API認証
 - 設定されたOpenAI text / image / video / QA modelの`/v1/models/{model}` availability
-- 内蔵media hosting時のGitHub repository public状態
+- 内蔵media hosting時のGitHub repository public状態と`sns-ai-media` releaseの可読性（asset uploadの権限は実投稿まで未証明のまま報告されます）
+- X access tokenのwrite権限（`x-access-level` responseヘッダが返る場合）
+- Instagramの`account_type`とcontent publishing権限（`content_publishing_limit`の読み取り）
+- approval modeのアカウントがある場合、Issuesが有効か / `approved` labelが読めるか
 
 PreflightはSNS投稿や画像/動画generationを行いません。したがって、**モデルが見えること**までは無料/低副作用で確認できますが、Image / Video endpointの最終利用可否とbilling/rate limitを含む完全な証明は最初のcontrolled generationで行います。
 

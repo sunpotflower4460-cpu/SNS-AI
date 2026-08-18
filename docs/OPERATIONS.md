@@ -31,8 +31,8 @@ npm run maintenance
 既定:
 
 - text / QA: `gpt-5`
-- image: `gpt-image-1`
-- video: `sora-2`
+- image: `gpt-image-2`
+- video: `sora-2`（**OpenAI Videos APIは2026-09-24に終了**。既定の`internalVideoGeneration`は`false`）
 
 Live Preflightは`/v1/models/{model}`でmodel availabilityを確認します。Image / Video endpointの最終proofは最初のcontrolled generationです。
 
@@ -220,7 +220,7 @@ multipart /media_publish
 ### Image
 
 ```text
-OpenAI Image API (gpt-image-1)
+OpenAI Image API (gpt-image-2)
   ↓
 Moderation + Visual QA
   ↓ pass only
