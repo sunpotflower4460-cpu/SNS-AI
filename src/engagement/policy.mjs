@@ -32,6 +32,7 @@ export function normalizeEngagementEvent(value) {
   if (!SUPPORTED_KINDS.has(kind)) engagementError('ENGAGEMENT_KIND_UNSUPPORTED', `Unsupported engagement kind "${kind}".`);
   return {
     ...value,
+    platform: String(value.platform || '').trim().toLowerCase(),
     kind,
     inbound: value.inbound === true,
     userOptedOut: value.userOptedOut === true,
@@ -40,6 +41,19 @@ export function normalizeEngagementEvent(value) {
     sensitive: value.sensitive === true,
     asksForHuman: value.asksForHuman === true
   };
+}
+
+function xAiPublicReplyNeedsApproval(config, event) {
+  return event?.platform === 'x'
+    && event?.kind === 'reply'
+    && config.requireXAiReplyBotApproval === true
+    && config.xAiReplyBotApprovalConfirmed !== true;
+}
+
+function xAutomatedResponseNeedsOptOut(config, event) {
+  if (event?.platform !== 'x' || !SUPPORTED_KINDS.has(event?.kind)) return false;
+  if (config.requireXAutomatedResponseOptOut !== true) return false;
+  return !String(config.xAutomatedResponseOptOutText || '').trim();
 }
 
 export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
@@ -62,11 +76,16 @@ export function assertAutomatedEngagementAllowed({ account, event, globalPolicy 
   }
   if (normalized.kind === 'reply' && config.autoReply !== true) engagementError('ENGAGEMENT_REPLY_DISABLED', 'Automated replies are disabled.');
   if (normalized.kind === 'dm' && config.autoDmReply !== true) engagementError('ENGAGEMENT_DM_DISABLED', 'Automated DM replies are disabled.');
+  if (xAutomatedResponseNeedsOptOut(config, normalized)) {
+    engagementError('ENGAGEMENT_X_OPTOUT_NOTICE_MISSING', 'X automated responses require a configured opt-out notice before they can be sent.');
+  }
 
+  const platformApprovalRequired = xAiPublicReplyNeedsApproval(config, normalized);
   return {
     allowed: true,
     kind: normalized.kind,
-    approvalRequired: config.approvalRequired !== false,
+    approvalRequired: platformApprovalRequired || config.approvalRequired !== false,
+    platformApprovalRequired,
     inboundOnly: config.inboundOnly !== false,
     oneAutomatedResponsePerInteraction: config.oneAutomatedResponsePerInteraction !== false
   };
@@ -76,4 +95,4 @@ export function prohibitedGrowthAutomation(action) {
   return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
 }
 
-export const __test = { SUPPORTED_KINDS, plainObject };
+export const __test = { SUPPORTED_KINDS, plainObject, xAiPublicReplyNeedsApproval, xAutomatedResponseNeedsOptOut };
