@@ -104,7 +104,8 @@ async function instagramEvents(accountId, account, history) {
     try {
       const response = await listInstagramComments({ accessToken, mediaId, apiVersion });
       for (const comment of response?.data || []) {
-        if (!comment?.id || !comment?.text) continue;
+        const authorId = String(comment?.from?.id || '');
+        if (!comment?.id || !comment?.text || (authorId && authorId === ownId)) continue;
         output.push({
           id: String(comment.id), platform: 'instagram', kind: 'reply', inbound: true, public: true,
           text: String(comment.text), createdAt: comment.timestamp || null, commentId: String(comment.id), mediaId,
