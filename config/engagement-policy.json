@@ -1,9 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "enabled": true,
   "allowedAccounts": [
     "music-tools-x"
   ],
+  "liveAccounts": [],
   "inboundOnly": true,
   "autoReply": true,
   "autoDmReply": true,
