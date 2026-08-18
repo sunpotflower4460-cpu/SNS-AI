@@ -7,6 +7,12 @@ import { validateDraftText } from '../lib/safety.mjs';
 import { moderateText } from '../lib/openai.mjs';
 import { verifyXOAuth2Credential } from '../providers/x.mjs';
 import { classifyAndDraftEngagement, hardHumanCategory } from './ai.mjs';
+import {
+  beginDelivery,
+  definitiveDeliveryFailure,
+  deliveryNeedsHuman,
+  markDelivery
+} from './delivery-ledger.mjs';
 import { assertAutomatedEngagementAllowed, effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
 import {
   allowedEngagementAccount,
@@ -49,7 +55,7 @@ function parseArgs(argv) {
 }
 
 function bool(value) { return value === true || ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase()); }
-function terminal(status) { return ['sent', 'ignored', 'human', 'opted_out'].includes(String(status || '')); }
+function terminal(status) { return ['sent', 'ignored', 'human', 'opted_out', 'delivery_handled'].includes(String(status || '')); }
 function nowIso() { return new Date().toISOString(); }
 function ageMs(value) { const time = new Date(value || 0).getTime(); return Number.isFinite(time) ? Date.now() - time : Infinity; }
 
@@ -238,6 +244,58 @@ async function closeHumanIssue(issueNumber, message) {
   }).catch(() => {});
 }
 
+function publicDeliveryTarget(event) {
+  if (event.public !== true) return null;
+  if (event.platform === 'x' && event.postId) return { type: 'x_post', id: String(event.postId) };
+  if (event.platform === 'instagram' && event.commentId) return { type: 'instagram_comment', id: String(event.commentId) };
+  return null;
+}
+
+async function deliveryIssueByNumber(issueNumber) {
+  if (!issueNumber) return null;
+  const { repository } = githubContext();
+  const [owner, repo] = repository.split('/');
+  try { return await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`); }
+  catch (error) { if (Number(error?.status) === 404) return null; throw error; }
+}
+
+async function createDeliveryAmbiguityIssue({ accountId, event, key }) {
+  const { repository } = githubContext();
+  const [owner, repo] = repository.split('/');
+  const title = `[engagement-delivery-unknown] ${accountId} ${key}`;
+  const existing = await githubRequest(`/repos/${owner}/${repo}/issues?state=all&per_page=100&sort=created&direction=desc`);
+  const found = (existing || []).find((issue) => issue.title === title && !issue.pull_request);
+  if (found) return found;
+  await ensureNeedsHumanLabel();
+  const isPublic = event.public === true;
+  const body = {
+    kind: 'sns-ai-engagement-delivery-unknown',
+    schemaVersion: 1,
+    account: accountId,
+    platform: event.platform,
+    interactionKind: event.kind,
+    eventKey: key,
+    detectedAt: nowIso(),
+    publicInteraction: isPublic,
+    publicTarget: publicDeliveryTarget(event),
+    privateContentOmitted: !isPublic,
+    summary: 'SNS-AI reserved this interaction before sending, but the provider result could not be durably confirmed. Automatic retry is blocked to prevent a duplicate reply.',
+    action: isPublic
+      ? 'Check the public interaction on the provider. If a reply already exists, or after you intentionally handle/skip it, close this Issue. Do not run engagement-resolve while this Issue is open.'
+      : 'Check the SNS app around the reported time. The DM body, participant ID, and generated reply were intentionally not copied to GitHub. If the reply already exists, or after you intentionally handle/skip it, close this Issue.'
+  };
+  return githubRequest(`/repos/${owner}/${repo}/issues`, {
+    method: 'POST',
+    body: JSON.stringify({ title, body: JSON.stringify(body, null, 2), labels: ['needs-human'] })
+  });
+}
+
+function deliveryUnknownError(issueNumber) {
+  const error = new Error(`Engagement delivery outcome is ambiguous; automatic retry is blocked${issueNumber ? ` until needs-human Issue #${issueNumber} is resolved` : ''}.`);
+  error.code = 'ENGAGEMENT_DELIVERY_UNKNOWN';
+  return error;
+}
+
 async function sendResponse(account, event, text, dryRun) {
   if (event.platform === 'x' && event.kind === 'reply') return sendXReply({ credential: account.credential, postId: event.postId, text, dryRun });
   if (event.platform === 'x' && event.kind === 'dm') return sendXDirectMessage({ credential: account.credential, participantId: event.participantId, text, dryRun });
@@ -248,6 +306,57 @@ async function sendResponse(account, event, text, dryRun) {
     return sendInstagramDm({ accessToken: account.credential.accessToken, igUserId: account.credential.igUserId, recipientId: event.participantId, message: text, apiVersion: account.credential.apiVersion || account.apiVersion || 'v25.0', dryRun });
   }
   throw new Error(`Unsupported engagement send path ${event.platform}/${event.kind}.`);
+}
+
+async function resolveDeliveryReplay({ accountId, event, key, record }) {
+  if (record?.status === 'sent') return { state: 'sent-replay', result: null };
+  if (record?.status === 'handled') return { state: 'handled', result: null };
+  if (!deliveryNeedsHuman(record)) throw new Error(`Unexpected engagement delivery replay state "${record?.status || 'unknown'}".`);
+
+  let issue = await deliveryIssueByNumber(record.issueNumber);
+  if (!issue) issue = await createDeliveryAmbiguityIssue({ accountId, event, key });
+  if (issue?.state === 'closed') {
+    await markDelivery(key, 'handled', { issueNumber: issue.number || record.issueNumber || null }, { durable: true });
+    return { state: 'handled', result: null, issueNumber: issue.number || null };
+  }
+  await markDelivery(key, 'unknown', { issueNumber: issue?.number || null }, { durable: true });
+  throw deliveryUnknownError(issue?.number || null);
+}
+
+async function sendResponseWithDeliveryGuard({ accountId, account, event, key, text, dryRun }) {
+  if (dryRun) return { state: 'dry-run', result: await sendResponse(account, event, text, true) };
+
+  const claim = await beginDelivery({
+    key,
+    accountId,
+    platform: event.platform,
+    kind: event.kind,
+    publicInteraction: event.public === true
+  });
+  if (!claim.claimed) return resolveDeliveryReplay({ accountId, event, key, record: claim.record });
+
+  let result;
+  try {
+    result = await sendResponse(account, event, text, false);
+  } catch (error) {
+    if (definitiveDeliveryFailure(error)) {
+      await markDelivery(key, 'failed', { failureCode: error?.code || `HTTP_${Number(error?.status) || '4XX'}` }, { durable: true }).catch(() => {});
+      throw error;
+    }
+
+    await markDelivery(key, 'unknown', { failureCode: error?.code || 'PROVIDER_OUTCOME_UNKNOWN' }, { durable: true }).catch(() => {});
+    let issue = null;
+    try { issue = await createDeliveryAmbiguityIssue({ accountId, event, key }); }
+    catch { /* the durable unknown claim still prevents a duplicate; the next run retries Issue creation */ }
+    if (issue?.number) await markDelivery(key, 'unknown', { issueNumber: issue.number }, { durable: true }).catch(() => {});
+    throw deliveryUnknownError(issue?.number || null);
+  }
+
+  // Mark the local ledger before any later bookkeeping. The workflow persists this file to sns-ai-state
+  // together with engagement-state. If the runner dies after the provider accepted the send but before
+  // this line, the already-durable `sending` claim becomes an ambiguity that blocks automatic retry.
+  await markDelivery(key, 'sent');
+  return { state: 'sent', result };
 }
 
 async function collectEvents(accountId, account, history, globalPolicy) {
@@ -386,7 +495,7 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: dryRun ? 'dry-run-deferred' : 'deferred', reason: 'daily-cap' };
   }
 
-  const decision = await classifyAndDraftEngagement({ accountId, account, event, policy });
+  const decision = await classifyAndDraftEngagement({ accountId, account, event, policy, dryRun });
   const threshold = Number(policy.minAutoReplyConfidence ?? 0.82);
   const humanCategory = new Set((policy.humanRequiredCategories || []).map((value) => String(value).toLowerCase())).has(String(decision.category || '').toLowerCase());
   if (decision.action === 'human' || humanCategory || (decision.action === 'reply' && decision.confidence < threshold) || allowed.approvalRequired) {
@@ -403,11 +512,18 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: 'ignored' };
   }
 
-  const result = await sendResponse(account, event, decision.response, dryRun);
-  if (dryRun) return { status: 'dry-run-reply', decision: privateSafeDecision(event, decision), result: event.public === true ? result : { dryRun: true, privateContentOmitted: true } };
-  await markEngagementSent(accountId, key, aKey, { dueAt, sentAt: nowIso(), kind: event.kind, platform: event.platform, actorKey: aKey, category: decision.category });
-  await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'sent', category: decision.category, public: event.public === true });
-  return { status: 'sent' };
+  const delivery = await sendResponseWithDeliveryGuard({ accountId, account, event, key, text: decision.response, dryRun });
+  if (dryRun) return { status: 'dry-run-reply', decision: privateSafeDecision(event, decision), result: event.public === true ? delivery.result : { dryRun: true, privateContentOmitted: true } };
+  if (delivery.state === 'handled') {
+    await markEngagementEvent(accountId, key, { status: 'delivery_handled', dueAt, kind: event.kind, platform: event.platform, actorKey: aKey, category: decision.category });
+    await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'delivery-handled', category: decision.category, public: event.public === true });
+    return { status: 'delivery-handled', skipped: true };
+  }
+
+  const recovered = delivery.state === 'sent-replay';
+  await markEngagementSent(accountId, key, aKey, { dueAt, sentAt: nowIso(), kind: event.kind, platform: event.platform, actorKey: aKey, category: recovered ? 'delivery-recovered' : decision.category });
+  await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: recovered ? 'sent-delivery-recovered' : 'sent', category: decision.category, public: event.public === true });
+  return { status: 'sent', recoveredFromDeliveryLedger: recovered };
 }
 
 export async function resolveHumanEngagement({ accountId, key, action = 'reply', text = '', dryRun = false } = {}) {
@@ -438,13 +554,21 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
 
   const responseText = validateDraftText(account, String(text || '').trim());
   await moderateText(responseText, account, accountId);
-  const result = await sendResponse(account, event, responseText, dryRun);
-  if (!dryRun) {
-    await markEngagementSent(accountId, key, actorKey(accountId, event), { sentAt: nowIso(), kind: event.kind, platform: event.platform, category: prior.category || 'human-resolved', resolvedAt: nowIso() });
-    await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'sent-human-resolved', public: true });
-    await closeHumanIssue(prior.issueNumber, '✅ Human-approved public reply sent by SNS-AI.');
+  const delivery = await sendResponseWithDeliveryGuard({ accountId, account, event, key, text: responseText, dryRun });
+  if (dryRun) return { status: 'dry-run-reply', eventKey: key, result: delivery.result };
+
+  if (delivery.state === 'handled') {
+    await markEngagementEvent(accountId, key, { status: 'delivery_handled', kind: event.kind, platform: event.platform, actorKey: actorKey(accountId, event), category: prior.category || 'human-resolved', resolvedAt: nowIso() });
+    await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'delivery-handled-human-resolved', public: true });
+    await closeHumanIssue(prior.issueNumber, '✅ Delivery ambiguity was manually handled; no automatic retry was sent.');
+    return { status: 'delivery-handled', eventKey: key };
   }
-  return { status: dryRun ? 'dry-run-reply' : 'sent', eventKey: key, result };
+
+  const recovered = delivery.state === 'sent-replay';
+  await markEngagementSent(accountId, key, actorKey(accountId, event), { sentAt: nowIso(), kind: event.kind, platform: event.platform, category: prior.category || 'human-resolved', resolvedAt: nowIso() });
+  await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: recovered ? 'sent-human-delivery-recovered' : 'sent-human-resolved', public: true });
+  await closeHumanIssue(prior.issueNumber, recovered ? '✅ Previously confirmed public reply reconciled from the durable delivery ledger.' : '✅ Human-approved public reply sent by SNS-AI.');
+  return { status: 'sent', eventKey: key, result: delivery.result, recoveredFromDeliveryLedger: recovered };
 }
 
 export async function runEngagement({ accountFilter = null, dryRun = false } = {}) {
@@ -520,5 +644,7 @@ export const __test = {
   assertXEngagementCredential,
   privateSafeDecision,
   safeEventError,
-  deterministicHumanDecision
+  deterministicHumanDecision,
+  publicDeliveryTarget,
+  deliveryUnknownError
 };
