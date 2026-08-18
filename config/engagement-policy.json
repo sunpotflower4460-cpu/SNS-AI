@@ -1,15 +1,34 @@
 {
-  "schemaVersion": 1,
-  "enabled": false,
+  "schemaVersion": 2,
+  "enabled": true,
+  "allowedAccounts": [
+    "music-tools-x"
+  ],
   "inboundOnly": true,
-  "autoReply": false,
-  "autoDmReply": false,
-  "approvalRequired": true,
+  "autoReply": true,
+  "autoDmReply": true,
+  "approvalRequired": false,
   "oneAutomatedResponsePerInteraction": true,
+  "minAutoReplyConfidence": 0.82,
+  "replyDelayMinutes": [
+    8,
+    35
+  ],
+  "dmDelayMinutes": [
+    12,
+    50
+  ],
   "maxAutomatedRepliesPerDay": 12,
-  "maxAutomatedDmRepliesPerDay": 12,
+  "maxAutomatedDmRepliesPerDay": 8,
   "replyCooldownMinutes": 30,
   "dmCooldownMinutes": 30,
+  "privateContentPersistence": "never",
+  "humanEscalation": {
+    "issuePrefix": "[engagement-human]",
+    "publicExcerptMaxChars": 800,
+    "privateMessageBodyInIssue": false,
+    "notifyChatOnlyWhenNeeded": true
+  },
   "prohibitedGrowthAutomation": [
     "auto_follow",
     "auto_unfollow",
@@ -25,6 +44,8 @@
     "privacy_or_personal_data",
     "refund_or_payment_dispute",
     "account_security",
+    "binding_partnership_or_contract",
+    "rights_or_licensing_commitment",
     "user_requests_human"
   ]
 }

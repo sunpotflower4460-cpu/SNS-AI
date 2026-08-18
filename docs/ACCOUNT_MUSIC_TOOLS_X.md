@@ -74,7 +74,7 @@ If only secondary evidence is available, wording should remain appropriately qua
 
 ## Initial publishing policy
 
-The account is configured conservatively:
+The account is configured conservatively only for the **first controlled launch**:
 
 - `enabled: false`
 - `mode: approval`
@@ -85,15 +85,17 @@ The account is configured conservatively:
 - nominal slots: 09:00 and 20:00 JST
 - adaptive scheduling is restricted to the explicitly configured candidate times
 
-Keeping media disabled initially avoids requiring X OAuth2 media setup. Once the text-only path is stable, image publishing can be enabled separately without changing the account identity or research policy.
+Keeping media disabled initially avoids requiring X OAuth2 **media** setup. It does not mean OAuth2 is unnecessary for inbound engagement: autonomous mentions/DM handling uses OAuth2 user-context scopes separately from the OAuth1 text-posting path.
+
+The intended steady state is **`mode: auto` with exception-based human escalation**, not ongoing per-post approval.
 
 ## External setup still required
 
-Do not put any secret value in this repository or in an Issue/PR comment.
+Do not put any secret value in this repository, an Issue/PR comment, or ordinary chat text.
 
-### 1. X developer credentials
+### 1. X developer credentials — posting
 
-For initial text-only posting, prepare OAuth1 user-context credentials for the real X account:
+For initial text-only publishing, prepare OAuth1 user-context credentials for the real X account:
 
 - consumer key
 - consumer secret
@@ -102,42 +104,69 @@ For initial text-only posting, prepare OAuth1 user-context credentials for the r
 
 The credential entry key must be `music-tools-x` in `SOCIAL_CREDENTIALS_JSON`.
 
-### 2. OpenAI API
+### 2. X OAuth2 — autonomous replies / DMs
 
-Prepare an OpenAI API key with API billing/credits available. This account uses the API for post generation, Web Search, Trend Intelligence and moderation.
+To enable the Engagement Autopilot as part of the initial long-running setup, complete OAuth2 user authorization for the same X account.
 
-### 3. GitHub Actions Secrets
+The authorization must cover the read/write functions actually enabled. For the current design this includes the scopes needed to:
+
+- read mentions: `tweet.read`, `users.read`
+- send public replies: `tweet.write` plus the user-context read scopes required by X
+- read DMs: `dm.read`, `tweet.read`, `users.read`
+- send one-to-one DM replies: `dm.write`, `tweet.read`, `users.read`
+- keep the authorization alive without repeated manual consent: `offline.access`
+
+Store the OAuth2 client/refresh/access fields only inside the `music-tools-x` credential object in `SOCIAL_CREDENTIALS_JSON` and use `X_OAUTH2_STATE_KEY` for encrypted rotating OAuth2 state.
+
+If posting credentials are ready but these engagement scopes are not, normal publishing can still be tested while `SNS Engagement Autopilot` stays in `waiting_for_engagement_credentials`; it must not guess missing permissions or send anything.
+
+### 3. OpenAI API
+
+Prepare an OpenAI API key with API billing/credits available. This account uses the API for post generation, Web Search, Trend Intelligence, moderation, and eligible inbound-response classification/drafting.
+
+### 4. GitHub Actions Secrets
 
 Add these directly in Repository Settings → Secrets and variables → Actions:
 
 - `OPENAI_API_KEY`
 - `SOCIAL_CREDENTIALS_JSON`
+- `X_OAUTH2_STATE_KEY` when autonomous X engagement is enabled
 
-`X_OAUTH2_STATE_KEY` is not required while this account remains text-only. Add it later if X image/video publishing is enabled.
+`X_OAUTH2_STATE_KEY` is also used later for OAuth2 media publishing. Losing it requires OAuth2 reauthorization/bootstrap because saved rotating token state can no longer be decrypted.
 
 ## Controlled activation sequence
 
 After the external setup above is complete:
 
-1. change only `music-tools-x.enabled` to `true`; keep `mode: approval`
-2. run **SNS Live Preflight** for `music-tools-x`
-3. run **SNS Autopilot** manually with `force=true` and `dry_run=true`
-4. inspect the generated post and cited research sources
-5. approve exactly one controlled real post — **approval Issueに `approved` labelを付ける**
-   - labelを付ける操作だけが投稿を実行します。Issueへのコメントやcloseでは何も起きません。
-   - 却下する場合はlabelを付けずにcloseします。
-   - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです。
-6. verify `data/history.jsonl`, provider post ID and subsequent metrics collection
-7. review several approval posts for tone, factuality and topic balance
-8. only then change `mode` to `auto`
+1. change only `music-tools-x.enabled` to `true`; keep `mode: approval` for the first controlled publish
+2. from ChatGPT/GitHub ChatOps, run `[preflight] music-tools-x`
+3. run `[dry-run] music-tools-x` and inspect the generated post/research result
+4. if engagement OAuth2 is configured, run `[engagement-dry-run] music-tools-x`
+5. approve exactly **one** controlled real post by adding the `approved` label to its approval Issue
+6. verify `data/history.jsonl`, provider post ID, and subsequent metrics collection
+7. if that controlled publish and readiness checks are clean, change `mode` to `auto`
+8. leave routine posting and eligible inbound engagement unattended; return to approval only after a safety brake, credential change, major account-policy change, or another explicit exception
+
+The goal is not to keep clicking approval buttons. The one controlled publish is a launch proof; steady-state operation is autonomous.
+
+## Engagement steady state
+
+Once engagement credentials are ready and the account is enabled:
+
+- X mentions and eligible inbound DMs are polled automatically
+- routine high-confidence interactions are answered after a bounded human-like delay
+- opt-outs, duplicate responses, unsolicited outreach, and daily caps are enforced before sending
+- difficult/high-stakes/low-confidence cases create `[engagement-human]` Issues instead of guessing
+- the connected ChatGPT condition-watch surfaces only those unresolved exception cases back into chat
+- private DM bodies are not copied into this public repository
 
 ## Later optional expansion
 
-After text-only operation is stable:
+After the initial text-only path is stable:
 
 - enable image generation or a trusted media library
-- add X OAuth2 media scopes and `X_OAUTH2_STATE_KEY`
+- add X OAuth2 `media.write` and the media-specific setup if images/video are enabled
 - connect approved affiliate providers behind the existing Affiliate Trust Guard
 - tune discovery mix and posting times using follow conversion, bookmarks, replies, profile clicks and explicit human feedback
 
-The current configuration deliberately does not enable affiliate claims, paid-placement wording, media publishing or engagement automation before those external requirements are known.
+Affiliate claims, paid-placement wording, and media publishing remain separately gated until their own external requirements are satisfied. Engagement automation is separately allowlisted and still cannot run while `music-tools-x` itself remains disabled.

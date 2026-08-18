@@ -1,81 +1,116 @@
 # Engagement automation
 
-Verified baseline: 2026-08-14. This subsystem is intentionally dormant until external API permissions and account identity are configured and live preflight succeeds.
+Verified baseline: 2026-08-18.
 
 ## Goal
 
-Automate useful inbound community handling without turning the account into a spam bot. The preferred order is:
+Run useful inbound community handling with minimal operator interruption:
 
-1. Detect an inbound interaction.
-2. Classify intent and safety.
-3. Draft a concise account-voice response.
-4. Require approval initially.
-5. Respond only within the originating interaction/conversation.
-6. Store outcome and feedback for later quality optimization.
+1. Detect genuine inbound interactions.
+2. Wait a bounded human-like delay instead of replying instantly.
+3. Classify intent, sensitivity, and confidence.
+4. Draft a concise account-voice response.
+5. Send routine high-confidence responses automatically.
+6. Escalate only interactions that genuinely require an owner/human decision.
+7. Persist privacy-safe state and outcome metadata for idempotency and later quality tuning.
+
+The target is **exception-based human involvement**, not per-reply approval.
+
+## Current runtime
+
+`SNS Engagement Autopilot` polls every ten minutes at `07,17,27,37,47,57` minutes past the hour.
+
+The global policy is allowlisted to `music-tools-x`. It becomes operational only when the account itself is enabled and the required provider credentials/scopes exist.
+
+Current automatic response policy:
+
+- inbound only;
+- no keyword-search cold replies;
+- no proactive follow/unfollow;
+- no unsolicited bulk DMs;
+- one automated response per inbound interaction;
+- deterministic human-like delay: replies roughly 6–24 minutes, DMs roughly 4–18 minutes;
+- confidence threshold before automatic sending;
+- daily hard caps for replies and DM replies;
+- opt-out phrases are honored before generation;
+- private DM bodies are never persisted in repository state/audit/Issues.
+
+## Human-required boundary
+
+Routine questions, thanks, reactions, light criticism, and straightforward support should normally be handled automatically.
+
+Escalation is reserved for cases such as:
+
+- legal claims or legal commitments;
+- medical advice;
+- payment/refund disputes;
+- account-security matters;
+- private personal data;
+- harassment or threats;
+- binding partnership/contract terms;
+- rights/licensing commitments;
+- explicit requests to speak to a human;
+- low-confidence cases where a reply would otherwise be sent.
+
+Human escalation creates a `[engagement-human]` Issue. Public interactions can include a short public excerpt. Private-message content is intentionally omitted because this repository is public.
+
+A separate ChatGPT condition-watch can surface only new unresolved human-required Issues directly in chat. This keeps normal operation unattended while preserving a human decision path for exceptions.
 
 ## X
 
-Current X automation rules permit automated replies when the recipient has clearly indicated intent to be contacted, for example by replying to the account, and permit automated DM responses when the user has requested/initiated DM contact. X prohibits unsolicited automated replies/mentions at scale, keyword-search-only cold replies, unsolicited bulk automated DMs, duplicate/substantially similar automated posts across accounts, and automated proactive follow/unfollow.
+Implemented polling/sending paths:
 
-Technical capability:
+- mentions: `GET /2/users/{id}/mentions`;
+- DM events: `GET /2/dm_events`;
+- public reply: `POST /2/tweets` with `reply.in_reply_to_tweet_id`;
+- one-to-one DM reply: `POST /2/dm_conversations/with/:participant_id/messages`.
 
-- Reply to a post: `POST /2/tweets` with `reply.in_reply_to_tweet_id`.
-- Read DMs: X DM lookup endpoints.
-- Send a one-to-one DM: `POST /2/dm_conversations/with/:participant_id/messages`.
-- OAuth 2.0 DM scopes include `dm.write`, `dm.read`, `tweet.read`, and `users.read`.
+External setup still required before X engagement can become live:
+
+- OAuth 2.0 user authorization;
+- scopes required for the chosen read/write functions, including DM scopes when DM handling is enabled;
+- refresh/access token bootstrap;
+- authenticated account identity verification.
+
+If those credentials are not ready, the Engagement Autopilot remains in a waiting state instead of sending anything.
 
 Official references:
 
+- https://docs.x.com/x-api/users/get-mentions
+- https://docs.x.com/x-api/direct-messages/get-dm-events
+- https://docs.x.com/x-api/direct-messages/manage/integrate
 - https://help.x.com/en/rules-and-policies/x-automation
-- https://help.x.com/en/rules-and-policies/x-rules-and-best-practices
-- https://docs.x.com/x-api/posts/create-or-edit-post
-- https://docs.x.com/x-api/direct-messages/manage/quickstart
-
-### X manual gate
-
-Before enabling reply/DM automation:
-
-1. Extend the X app/user authorization to the scopes required by the chosen functions.
-2. Complete OAuth 2.0 PKCE/user authorization and store refresh/access credentials in GitHub Secrets only.
-3. Verify the authenticated X user ID and account identity.
-4. Run an inbound-read-only preflight first.
-5. Start in approval mode; do not begin with fully automatic reply/DM sending.
-6. Provide and honor an opt-out path for automated responses.
 
 ## Instagram
 
-Instagram professional accounts can expose comments and messaging through the Instagram APIs. Meta recommends Webhooks for comment ingestion to reduce polling/rate-limit pressure. Public comment replies can be posted to the comment's replies endpoint. A professional account may also send a private reply to a person who comments; current documentation allows the private reply within 7 days of the comment (Instagram Live has a narrower live-broadcast condition). Messaging uses the standard messaging window; human-agent extensions are not for automated messages.
+Implemented scheduled path:
+
+- read comments on recent SNS-AI-published media;
+- reply publicly through `/{comment_id}/replies`.
+
+The provider adapter also supports private replies and DMs, but inbound Instagram messaging is designed around Meta Webhooks. A GitHub Actions repository is not itself a public webhook receiver, so full Instagram DM/comment-event ingestion still requires an externally reachable webhook endpoint or equivalent bridge.
+
+External setup for Instagram engagement therefore includes:
+
+- Professional account;
+- `instagram_business_manage_comments` for comment management when using Instagram Login;
+- `instagram_business_manage_messages` for messaging when enabled;
+- Meta app/login setup;
+- Webhook endpoint/subscriptions for event-driven comment/message ingestion if full DM handling is desired.
 
 Official Meta API collection/reference:
 
 - https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
 
-### Instagram manual gate
+## Privacy and state
 
-1. Use an Instagram professional account.
-2. Configure the Meta app/login flow and required Instagram business permissions.
-3. Configure and verify the Webhook endpoint/subscriptions for comments/messages.
-4. Store access tokens in GitHub Secrets only.
-5. Run read-only comment/message ingestion first.
-6. Start response sending in approval mode.
+`data/engagement-state.json` stores only hashed interaction keys and operational status. `data/engagement-audit.jsonl` stores metadata such as account, platform, kind, category, and result.
 
-## Safe growth automation
+Neither file stores inbound message text or provider user IDs. Private DM content is not copied to GitHub Issues.
 
-Good candidates for automation:
+## Growth guardrails
 
-- choose posting times from measured performance;
-- research new plugin/tool topics and avoid saturated/repeated themes;
-- generate multiple candidate posts and select by predicted usefulness;
-- respond to genuine inbound questions quickly;
-- detect FAQ patterns and turn them into future organic posts;
-- identify posts receiving unusually strong positive conversation and create follow-up content without duplicating text;
-- detect unanswered comments/DMs and queue them for approval;
-- measure whether affiliate posts damage later organic engagement;
-- learn which content categories attract followers without sacrificing trust;
-- surface partnership/review requests for human review;
-- maintain source freshness for releases, sales and compatibility claims.
-
-Do not automate for growth:
+Do not automate:
 
 - proactive auto-follow or auto-unfollow;
 - keyword-search cold replies to unrelated users;
@@ -84,9 +119,3 @@ Do not automate for growth:
 - duplicate/substantially similar posts across multiple operated accounts;
 - engagement bait whose main purpose is manipulating platform metrics;
 - pretending an AI-generated response is based on personal product use when no real use is known.
-
-## Current repository state
-
-`config/engagement-policy.json` is fail-closed (`enabled: false`, auto reply/DM false). `src/engagement/policy.mjs` rejects unsolicited activity, keyword-only cold replies, opted-out users, repeated automated replies to one interaction, and sensitive/human-requested cases.
-
-The next implementation after credentials exist should be read-only inbox/comment ingestion + approval queues, not immediate full-auto sending.

@@ -33,6 +33,21 @@ export function buildInstagramCommentsUrl({ mediaId, apiVersion = 'v25.0', after
   return url.toString();
 }
 
+export function buildInstagramConversationsUrl({ igUserId, apiVersion = 'v25.0', after } = {}) {
+  const url = new URL(`${apiBase(apiVersion)}/${id(igUserId, 'igUserId')}/conversations`);
+  url.searchParams.set('platform', 'instagram');
+  url.searchParams.set('fields', 'id,updated_time');
+  url.searchParams.set('limit', '25');
+  if (after) url.searchParams.set('after', String(after));
+  return url.toString();
+}
+
+export function buildInstagramConversationMessagesUrl({ conversationId, apiVersion = 'v25.0' } = {}) {
+  const url = new URL(`${apiBase(apiVersion)}/${id(conversationId, 'conversationId')}`);
+  url.searchParams.set('fields', 'messages.limit(25){id,created_time,from,to,message,is_unsupported}');
+  return url.toString();
+}
+
 export function buildInstagramCommentReplyPayload({ message }) {
   return { message: text(message) };
 }
@@ -47,6 +62,14 @@ export function buildInstagramDmPayload({ recipientId, message }) {
 
 export async function listInstagramComments({ accessToken, ...params }) {
   return fetchJson(buildInstagramCommentsUrl(params), { method: 'GET', headers: auth(accessToken) });
+}
+
+export async function listInstagramConversations({ accessToken, ...params }) {
+  return fetchJson(buildInstagramConversationsUrl(params), { method: 'GET', headers: auth(accessToken) });
+}
+
+export async function listInstagramConversationMessages({ accessToken, ...params }) {
+  return fetchJson(buildInstagramConversationMessagesUrl(params), { method: 'GET', headers: auth(accessToken) });
 }
 
 export async function sendInstagramCommentReply({ accessToken, commentId, message, apiVersion = 'v25.0', dryRun = true }) {
@@ -70,4 +93,11 @@ export async function sendInstagramDm({ accessToken, igUserId, recipientId, mess
   return fetchJson(url, { method: 'POST', headers: auth(accessToken, true), body: JSON.stringify(payload), retries: 0 });
 }
 
-export const __test = { apiBase, auth, id, text };
+export const __test = {
+  apiBase,
+  auth,
+  id,
+  text,
+  buildInstagramConversationsUrl,
+  buildInstagramConversationMessagesUrl
+};

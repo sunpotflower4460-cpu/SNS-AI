@@ -6,7 +6,17 @@ import { buildAffiliateReadinessReport } from '../src/monetization/affiliate-rea
 import { buildImpactTrackingLinkRequest } from '../src/monetization/providers/impact.mjs';
 import { assertAutomatedEngagementAllowed, prohibitedGrowthAutomation, normalizeEngagementEvent, loadEngagementPolicy, effectiveEngagementPolicy } from '../src/engagement/policy.mjs';
 import { buildXMentionsUrl, buildXDmEventsUrl, buildXReplyPayload, buildXDmPayload, sendXReply, sendXDirectMessage } from '../src/engagement/providers/x.mjs';
-import { buildInstagramCommentsUrl, buildInstagramCommentReplyPayload, buildInstagramPrivateReplyPayload, buildInstagramDmPayload, sendInstagramCommentReply, sendInstagramPrivateReply, sendInstagramDm } from '../src/engagement/providers/instagram.mjs';
+import {
+  buildInstagramCommentsUrl,
+  buildInstagramConversationsUrl,
+  buildInstagramConversationMessagesUrl,
+  buildInstagramCommentReplyPayload,
+  buildInstagramPrivateReplyPayload,
+  buildInstagramDmPayload,
+  sendInstagramCommentReply,
+  sendInstagramPrivateReply,
+  sendInstagramDm
+} from '../src/engagement/providers/instagram.mjs';
 
 const registryUrl = new URL('../config/affiliate-programs.json', import.meta.url);
 
@@ -61,16 +71,32 @@ test('Impact request builder produces official media-partner deep-link endpoint 
   assert.throws(() => buildImpactTrackingLinkRequest({ accountSid: 'a', authToken: 'b', programId: 'c', deepLink: 'http://example.com' }), /HTTPS/);
 });
 
-test('global engagement policy is fail-closed and can be overridden only explicitly per account', async () => {
+test('global engagement policy enables only an explicit allowlist and remains inbound-only', async () => {
   const globalPolicy = await loadEngagementPolicy();
-  assert.equal(globalPolicy.enabled, false);
+  assert.equal(globalPolicy.enabled, true);
+  assert.deepEqual(globalPolicy.allowedAccounts, ['music-tools-x']);
   assert.equal(globalPolicy.inboundOnly, true);
-  assert.equal(globalPolicy.autoReply, false);
-  assert.equal(globalPolicy.autoDmReply, false);
-  const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { enabled: true, autoReply: true } });
+  assert.equal(globalPolicy.autoReply, true);
+  assert.equal(globalPolicy.autoDmReply, true);
+  assert.equal(globalPolicy.approvalRequired, false);
+
+  const allowed = assertAutomatedEngagementAllowed({
+    account: { id: 'music-tools-x' },
+    globalPolicy,
+    event: { kind: 'reply', inbound: true }
+  });
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.approvalRequired, false);
+  assert.throws(() => assertAutomatedEngagementAllowed({
+    account: { id: 'some-other-account' },
+    globalPolicy,
+    event: { kind: 'reply', inbound: true }
+  }), { code: 'ENGAGEMENT_ACCOUNT_NOT_ALLOWED' });
+
+  const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { autoReply: false } });
   assert.equal(effective.enabled, true);
-  assert.equal(effective.autoReply, true);
-  assert.equal(effective.autoDmReply, false);
+  assert.equal(effective.autoReply, false);
+  assert.equal(effective.autoDmReply, true);
   assert.equal(effective.inboundOnly, true);
 });
 
@@ -111,10 +137,19 @@ test('X engagement adapters build inbound lookup and dry-run send requests witho
   assert.equal(dryDm.dryRun, true);
 });
 
-test('Instagram engagement adapters build comments, public replies, private replies and DMs as dry-runs', async () => {
+test('Instagram engagement adapters build comments, conversations and dry-run sends', async () => {
   const comments = new URL(buildInstagramCommentsUrl({ mediaId: '123', apiVersion: 'v25.0', after: 'cursor' }));
   assert.equal(comments.pathname, '/v25.0/123/comments');
   assert.equal(comments.searchParams.get('after'), 'cursor');
+
+  const conversations = new URL(buildInstagramConversationsUrl({ igUserId: '321', apiVersion: 'v25.0', after: 'next' }));
+  assert.equal(conversations.pathname, '/v25.0/321/conversations');
+  assert.equal(conversations.searchParams.get('platform'), 'instagram');
+  assert.equal(conversations.searchParams.get('after'), 'next');
+  const messages = new URL(buildInstagramConversationMessagesUrl({ conversationId: '654', apiVersion: 'v25.0' }));
+  assert.equal(messages.pathname, '/v25.0/654');
+  assert.match(messages.searchParams.get('fields'), /messages\.limit\(25\)/);
+
   assert.deepEqual(buildInstagramCommentReplyPayload({ message: 'Thanks!' }), { message: 'Thanks!' });
   assert.equal(buildInstagramPrivateReplyPayload({ commentId: '456', message: 'DM' }).recipient.comment_id, '456');
   assert.equal(buildInstagramDmPayload({ recipientId: '789', message: 'Hello' }).recipient.id, '789');

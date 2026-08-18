@@ -1,0 +1,87 @@
+name: SNS Engagement Autopilot
+
+on:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Optional account ID; leave blank for all allowlisted enabled accounts
+        required: false
+        type: string
+      dry_run:
+        description: Classify and draft without sending or persisting terminal actions
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  engagement:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Ensure human-escalation label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label create needs-human --description 'SNS-AI requires a human decision' --color B60205 --force
+
+      - name: Run engagement autopilot
+        id: engagement_run
+        shell: bash
+        run: |
+          args=()
+          if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-false}" == "true" ]]; then args+=(--dry-run); fi
+          node src/engagement/run.mjs "${args[@]}"
+
+      - name: Persist privacy-safe engagement state
+        if: always() && steps.engagement_run.outcome != 'skipped'
+        shell: bash
+        run: |
+          paths=(data/engagement-state.json data/engagement-audit.jsonl data/x-oauth2-state.json)
+          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then
+            echo "No engagement state changes."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          for path in "${paths[@]}"; do
+            [[ -e "$path" ]] && git add "$path"
+          done
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: persist SNS engagement state"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
