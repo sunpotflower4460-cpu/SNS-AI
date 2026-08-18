@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { trustedApprovalPayload, __test as githubTest } from '../src/lib/github.mjs';
@@ -252,4 +252,139 @@ test('the preflight workflow can verify the approval channel it depends on', asy
 
   const names = (await readdir(WORKFLOWS_DIR)).filter((name) => name.endsWith('.yml'));
   assert.ok(names.includes('publish.yml'), 'sanity: the workflow directory resolved correctly');
+});
+
+test('a fractional resilience.failureThreshold cannot open the circuit on the first failure', async () => {
+  // `failures >= failureThreshold` compares against an integer count, so 0.5 was satisfied immediately
+  // and paused the account for a full cooldown on a single transient failure.
+  const { circuitSettings } = await import('../src/ops/circuit.mjs');
+  assert.equal(circuitSettings({ failureThreshold: 0.5 }).failureThreshold, 1);
+  assert.equal(circuitSettings({ failureThreshold: 2.9 }).failureThreshold, 2);
+  assert.equal(circuitSettings({ failureThreshold: 3 }).failureThreshold, 3);
+  assert.equal(circuitSettings({}).failureThreshold, 3);
+  // A cooldown is a duration, so a fractional value there stays legitimate.
+  assert.equal(circuitSettings({ cooldownMinutes: 0.5 }).cooldownMinutes, 0.5);
+});
+
+test('a budget config typo reports a config error instead of tripping the resilience circuit', async () => {
+  const source = await readFile(fileURLToPath(new URL('../src/orchestrate.mjs', import.meta.url)), 'utf8');
+  const line = source.split('\n').find((row) => row.includes('const nonCircuitCodes'));
+  assert.ok(line, 'nonCircuitCodes must still exist');
+  // BUDGET_CONFIG_INVALID is thrown by src/ops/budget.mjs for a malformed budgets block. Opening the
+  // circuit for it pauses the account for a cooldown and buries the actual cause.
+  assert.match(line, /BUDGET_CONFIG_INVALID/);
+});
+
+test('config validation catches the media traps that only surface at publish time', () => {
+  const base = (account) => ({ defaults: {}, accounts: { acct: { enabled: true, credentialKey: 'acct', ...account } } });
+
+  // An X account may host up to 15 MB by default while X itself rejects anything over 5 MB: the image
+  // is generated, QA'd and hosted, and only then rejected by the provider.
+  const oversize = validateStrictConfig(base({
+    platform: 'x',
+    media: { strategy: 'generate', type: 'image', maxHostedImageBytes: 15 * 1024 * 1024 }
+  }));
+  assert.ok(oversize.some((error) => error.includes('maxHostedImageBytes')), 'an X image budget above 5 MB must be rejected');
+
+  const withinLimit = validateStrictConfig(base({
+    platform: 'x',
+    media: { strategy: 'generate', type: 'image', maxHostedImageBytes: 5 * 1024 * 1024 }
+  }));
+  assert.ok(!withinLimit.some((error) => error.includes('maxHostedImageBytes')));
+
+  // A text-only X account never uploads an image, so the hosting default must not be flagged for it.
+  const textOnly = validateStrictConfig(base({
+    platform: 'x',
+    media: { strategy: 'none', maxHostedImageBytes: 15 * 1024 * 1024 }
+  }));
+  assert.ok(!textOnly.some((error) => error.includes('maxHostedImageBytes')));
+
+  // A typo in defaultInstagramDecision falls through every branch in resolveMedia and resurfaces as the
+  // misleading "Unsupported media strategy: auto".
+  const typo = validateStrictConfig(base({ platform: 'instagram', media: { strategy: 'auto', defaultInstagramDecision: 'genrate' } }));
+  assert.ok(typo.some((error) => error.includes('defaultInstagramDecision')));
+  const valid = validateStrictConfig(base({ platform: 'instagram', media: { strategy: 'auto', defaultInstagramDecision: 'generate' } }));
+  assert.ok(!valid.some((error) => error.includes('defaultInstagramDecision')));
+});
+
+test('two accounts cannot silently share one credential', () => {
+  const shared = validateStrictConfig({
+    defaults: {},
+    accounts: {
+      first: { enabled: true, platform: 'x', credentialKey: 'shared-key' },
+      second: { enabled: true, platform: 'x', credentialKey: 'shared-key' }
+    }
+  });
+  assert.ok(
+    shared.some((error) => error.includes('shared by') && error.includes('shared-key')),
+    'a shared credentialKey posts both accounts through one provider identity'
+  );
+
+  const distinct = validateStrictConfig({
+    defaults: {},
+    accounts: {
+      first: { enabled: true, platform: 'x', credentialKey: 'first-key' },
+      second: { enabled: true, platform: 'x', credentialKey: 'second-key' }
+    }
+  });
+  assert.ok(!distinct.some((error) => error.includes('shared by')));
+
+  const wrongType = validateStrictConfig({ defaults: {}, accounts: { first: { enabled: true, platform: 'x', credentialKey: 42 } } });
+  assert.ok(wrongType.some((error) => error.includes('credentialKey')));
+});
+
+test('expiring a stale approval clears the slot, but never overwrites a real publish', async (t) => {
+  // Closing the issue used to leave the slot at approval_pending forever, so data/state.json claimed a
+  // draft was still awaiting review long after the issue was closed.
+  const { markSlotIfUnhandled, markSlot, getSlot } = await import('../src/lib/state.mjs');
+  const slotId = `go-live-hardening:${process.pid}:expiry`;
+  const publishedSlot = `go-live-hardening:${process.pid}:published`;
+  const guard = { handledStatuses: ['published', 'publishing', 'publish_unknown', 'skipped'] };
+
+  // These write to the real data/state.json (the repo-wide convention here, which is also why the test
+  // runner is pinned to --test-concurrency=1); snapshot and restore it so the committed file is
+  // untouched.
+  const statePath = fileURLToPath(new URL('../data/state.json', import.meta.url));
+  const savedState = await readFile(statePath, 'utf8');
+  t.after(async () => { await writeFile(statePath, savedState, 'utf8'); });
+
+  await markSlot(slotId, 'approval_pending', { account: 'acct', issue: 1 });
+  const expired = await markSlotIfUnhandled(slotId, 'expired', { account: 'acct' }, guard);
+  assert.equal(expired.applied, true, 'approval_pending must be supersedable once the issue is closed');
+  assert.equal((await getSlot(slotId))?.status, 'expired');
+
+  await markSlot(publishedSlot, 'published', { account: 'acct', providerPostId: 'p1' });
+  const refused = await markSlotIfUnhandled(publishedSlot, 'expired', { account: 'acct' }, guard);
+  assert.equal(refused.applied, false, 'a slot that really published must never be downgraded to expired');
+  assert.equal((await getSlot(publishedSlot))?.status, 'published');
+
+  // The default guard is unchanged for every other caller: approval_pending still blocks a stale skip.
+  await markSlot(slotId, 'approval_pending', { account: 'acct', issue: 2 });
+  const defaultGuard = await markSlotIfUnhandled(slotId, 'skipped', { account: 'acct' });
+  assert.equal(defaultGuard.applied, false);
+});
+
+test("an image over X's 5 MB ceiling is classified as a config problem, not a provider outage", async () => {
+  // Without a code this threw a bare Error, which counted toward the resilience circuit and paused the
+  // account for a pure config mismatch (15 MB hosting budget vs a 5 MB provider ceiling).
+  // MEDIA_HOSTING_TOO_LARGE is in both nonCircuitCodes and TERMINAL_SKIP_CODES, so the slot is skipped
+  // once instead of re-paying for generation on every poll.
+  const { __test: xTest } = await import('../src/providers/x.mjs');
+  const previousFetch = globalThis.fetch;
+  try {
+    const oversized = new Uint8Array(6 * 1024 * 1024);
+    globalThis.fetch = async () => new Response(oversized, {
+      status: 200,
+      headers: { 'content-type': 'image/png', 'content-length': String(oversized.byteLength) }
+    });
+    const error = await xTest.uploadImage('https://media.example/large.png', {}).then(() => null, (thrown) => thrown);
+    assert.ok(error, 'an oversized image must not be uploaded');
+    assert.equal(error.code, 'MEDIA_HOSTING_TOO_LARGE');
+    assert.match(error.message, /5 MB/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+
+  const source = await readFile(fileURLToPath(new URL('../src/orchestrate.mjs', import.meta.url)), 'utf8');
+  assert.match(source, /nonCircuitCodes = \[[^\]]*MEDIA_HOSTING_TOO_LARGE/, 'the code must actually be excluded from the circuit');
 });

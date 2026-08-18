@@ -185,6 +185,11 @@ function generationPrompt(accountId, account, history, context, feedback) {
   };
 }
 
+// Model precedence is account.generation.model -> OPENAI_MODEL -> 'gpt-5'. Note that
+// config/accounts.json sets defaults.generation.model and loadConfig merges defaults into every
+// account, so in practice the first branch always wins and the OPENAI_MODEL repository variable has no
+// effect. To change the model, edit config (per account, or defaults.generation.model) - not the
+// variable. The env fallback is kept for direct/local invocation against a config without that default.
 export async function generatePost(accountId, account, history = [], context = {}) {
   const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = Number(account.generation?.duplicateThreshold ?? 0.72);
   const model = account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5'; const explore = shouldExplore(context.slotId || new Date().toISOString(), account.learning?.exploreRate ?? context.strategy?.exploreRate ?? 0.2);

@@ -3,6 +3,14 @@ import { assertPublicHttpsUrl } from './lib/http.mjs';
 import { validateConfig } from './validate-config.mjs';
 
 const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint', 'generate', 'auto']);
+// The values resolveMedia() actually branches on for `strategy: auto`. A typo here does not error where
+// it is written - it falls through every branch and resurfaces later as the misleading
+// "Unsupported media strategy: auto" (see src/lib/media.mjs).
+const INSTAGRAM_DECISIONS = new Set(['none', 'library', 'search', 'generate']);
+// X rejects image uploads over 5 MB (src/providers/x.mjs). media.maxHostedImageBytes defaults to 15 MB,
+// so an X account configured above the provider ceiling generates and hosts an image that can never be
+// published - paying for generation every time.
+const X_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function merged(config, account, key) {
   return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) };
@@ -65,6 +73,9 @@ export function validateStrictConfig(config) {
   for (const [id, account] of Object.entries(config.accounts || {})) {
     if (!account || typeof account !== 'object' || Array.isArray(account)) continue;
     strictBoolean(errors, id, 'enabled', account.enabled);
+    if (account.credentialKey != null && (typeof account.credentialKey !== 'string' || !account.credentialKey.trim())) {
+      errors.push(`${id}: credentialKey must be a non-empty string`);
+    }
 
     const generation = merged(config, account, 'generation');
     strictPositiveInteger(errors, id, 'generation.maxChars', generation.maxChars);
@@ -135,6 +146,13 @@ export function validateStrictConfig(config) {
     if (!MEDIA_STRATEGIES.has(strategy)) errors.push(`${id}: unsupported media.strategy "${strategy}"`);
     strictBoolean(errors, id, 'media.internalImageGeneration', media.internalImageGeneration);
     strictBoolean(errors, id, 'media.internalVideoGeneration', media.internalVideoGeneration);
+    if (media.defaultInstagramDecision != null && !INSTAGRAM_DECISIONS.has(media.defaultInstagramDecision)) {
+      errors.push(`${id}: unsupported media.defaultInstagramDecision "${media.defaultInstagramDecision}" (expected ${[...INSTAGRAM_DECISIONS].join(', ')})`);
+    }
+    if (account.platform === 'x' && strategy !== 'none' && (media.type || 'image') === 'image'
+      && Number(media.maxHostedImageBytes) > X_MAX_IMAGE_BYTES) {
+      errors.push(`${id}: media.maxHostedImageBytes is ${media.maxHostedImageBytes}, above X's 5242880-byte image upload limit; an image between the two can never be published`);
+    }
     if (strictObject(errors, id, 'media.qa', media.qa) && media.qa) {
       strictBoolean(errors, id, 'media.qa.enabled', media.qa.enabled);
       strictBoolean(errors, id, 'media.qa.selectedSemanticReview', media.qa.selectedSemanticReview);
@@ -156,6 +174,21 @@ export function validateStrictConfig(config) {
       }
     }
   }
+
+  // Two accounts sharing one credentialKey silently post both accounts' content through the same
+  // provider identity - the kind of mistake that is invisible in config review and obvious only after
+  // the wrong thing has been published.
+  const byCredential = new Map();
+  for (const [id, account] of Object.entries(config.accounts || {})) {
+    const key = typeof account?.credentialKey === 'string' ? account.credentialKey.trim() : '';
+    if (!key) continue;
+    if (!byCredential.has(key)) byCredential.set(key, []);
+    byCredential.get(key).push(id);
+  }
+  for (const [key, ids] of byCredential) {
+    if (ids.length > 1) errors.push(`credentialKey "${key}" is shared by ${ids.join(', ')}; each account needs its own credential entry`);
+  }
+
   return [...new Set(errors)];
 }
 

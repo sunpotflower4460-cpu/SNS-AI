@@ -77,11 +77,32 @@ async function setAltText(mediaId, text, credentials) {
   }, credentials);
 }
 
+// X caps image uploads at 5 MB while media.maxHostedImageBytes defaults to 15 MB, so an oversized image
+// passes generation, QA and hosting and only dies here - as a bare Error with no code, which trips the
+// resilience circuit and pauses the account for a pure config mismatch. MEDIA_HOSTING_TOO_LARGE is the
+// existing classification for exactly this: excluded from the circuit and persisted as a terminal skip,
+// so the slot stops re-paying for generation on every poll.
+export const X_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function oversizedImage(message) {
+  const error = new Error(message);
+  error.code = 'MEDIA_HOSTING_TOO_LARGE';
+  return error;
+}
+
 async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
-  const maxBytes = 5 * 1024 * 1024;
-  const { bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes });
+  const maxBytes = X_MAX_IMAGE_BYTES;
+  let bytes;
+  let contentType;
+  try {
+    ({ bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes }));
+  } catch (error) {
+    // downloadMedia enforces the same ceiling and rejects before buffering; classify that identically.
+    if (/too large|exceeds/i.test(String(error?.message || ''))) throw oversizedImage(`X image exceeds the 5 MB API upload limit: ${error.message}`);
+    throw error;
+  }
   if (!contentType.startsWith('image/')) throw new Error(`X image publisher expected image media; got ${contentType}.`);
-  if (bytes.byteLength > maxBytes) throw new Error('X image exceeds the 5 MB API upload limit.');
+  if (bytes.byteLength > maxBytes) throw oversizedImage('X image exceeds the 5 MB API upload limit.');
 
   const body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, {
     method: 'POST',
@@ -213,4 +234,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   }
 }
 
-export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload, uploadImage, readAccessLevel };
