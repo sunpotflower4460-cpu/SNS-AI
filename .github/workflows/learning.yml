@@ -21,6 +21,10 @@ jobs:
   learn:
     runs-on: ubuntu-latest
     env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
       INPUT_ACCOUNT: ${{ inputs.account }}
     steps:
       - uses: actions/checkout@v7
