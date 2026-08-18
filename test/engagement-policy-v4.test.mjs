@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { countFetchesSince, recordInboundFetch } from '../src/engagement/store.mjs';
 import {
   replyScopeFor,
   safeConfidenceThreshold,
@@ -109,4 +112,37 @@ test('reply scope defaults to our own threads and never widens by accident', () 
   assert.equal(replyScopeFor({ replyScope: null }), 'own-posts');
   assert.equal(replyScopeFor({ replyScope: 'own-posts' }), 'own-posts');
   assert.equal(replyScopeFor({ replyScope: 'all-mentions' }), 'all-mentions', 'the broad scope stays available as an explicit opt-in');
+});
+
+
+
+test('inbound fetch budget counts every provider read and fails closed when malformed', async (t) => {
+  // The read itself is the billed event on X's pay-per-use pricing, and it is billed on every poll
+  // whether or not anything new arrived. OpenAI spend is already capped inside openaiRequest via the
+  // account budgets, but provider reads went straight through xOAuth2FetchJson/fetchJson with no
+  // counter at all, so nothing bounded the one cost that accrues even on a completely quiet day.
+  const statePath = fileURLToPath(new URL('../data/engagement-state.json', import.meta.url));
+  const saved = await readFile(statePath, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  t.after(async () => {
+    if (saved == null) await rm(statePath, { force: true });
+    else await writeFile(statePath, saved, 'utf8');
+  });
+
+  const account = `fetch-budget-${process.pid}`;
+  const since = new Date(Date.now() - 24 * 60 * 60_000);
+  assert.equal(await countFetchesSince(account, since), 0);
+  await recordInboundFetch(account, { channel: 'x' });
+  await recordInboundFetch(account, { channel: 'x' });
+  assert.equal(await countFetchesSince(account, since), 2, 'each provider read must be counted');
+
+  // A read outside the window must not consume the current budget.
+  assert.equal(await countFetchesSince(account, new Date(Date.now() + 60_000)), 0);
+
+  // The budget uses the same fail-closed coercion as the reply caps: a malformed value stops polling
+  // rather than removing the ceiling.
+  assert.equal(safeDailyAutomationCap('lots', 48), 0);
+  assert.equal(safeDailyAutomationCap(48, 12), 48);
 });

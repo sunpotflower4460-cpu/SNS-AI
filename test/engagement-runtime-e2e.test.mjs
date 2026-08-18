@@ -114,6 +114,13 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false,
     const policy = JSON.parse(snap.get(POLICY));
     policy.allowedAccounts = ['music-tools-x'];
     policy.liveAccounts = live ? ['music-tools-x'] : [];
+    // These tests exercise the send machinery end to end, so the fixture opts into automatic sending
+    // explicitly. The committed policy deliberately does NOT - it keeps approvalRequired on and DM off
+    // for launch (locked by test/affiliate-engagement-foundation.test.mjs). Keeping the two separate
+    // means the runtime stays covered without the shipped configuration having to be permissive.
+    policy.approvalRequired = false;
+    policy.autoDmReply = true;
+    policy.maxAutomatedDmRepliesPerDay = 8;
     if (platform === 'x') {
       policy.xAiReplyBotApprovalRequiredAccounts = ['music-tools-x'];
       policy.xAiReplyBotApprovalConfirmedAccounts = live ? ['music-tools-x'] : [];

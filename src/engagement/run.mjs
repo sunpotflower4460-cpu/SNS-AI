@@ -41,12 +41,14 @@ import {
   actorKey,
   actorStatus,
   appendEngagementAudit,
+  countFetchesSince,
   countSentSince,
   eventKey,
   eventStatus,
   markActorOptOut,
   markEngagementEvent,
-  markEngagementSent
+  markEngagementSent,
+  recordInboundFetch
 } from './store.mjs';
 
 function parseArgs(argv) {
@@ -394,8 +396,23 @@ async function sendResponseWithDeliveryGuard({ accountId, account, event, key, t
   return { state: 'sent', result };
 }
 
+// Enforced before any provider read, because the read is the billed event. Uses the same fail-closed
+// coercion as the reply caps: a malformed maxInboundFetchesPerDay stops polling rather than uncapping it.
+async function assertInboundFetchBudget(accountId, policy) {
+  const limit = safeDailyAutomationCap(policy.maxInboundFetchesPerDay, 48);
+  const used = await countFetchesSince(accountId, new Date(Date.now() - 24 * 60 * 60_000));
+  if (used >= limit) {
+    const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
+    error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
+    throw error;
+  }
+  return { limit, used };
+}
+
 async function collectEvents(accountId, account, history, globalPolicy) {
   const policy = effectiveEngagementPolicy(globalPolicy, account);
+  await assertInboundFetchBudget(accountId, policy);
+  await recordInboundFetch(accountId, { channel: account.platform });
   if (account.platform === 'x') {
     const identity = await verifyXOAuth2Credential(account.credential);
     assertXEngagementCredential(identity, policy);

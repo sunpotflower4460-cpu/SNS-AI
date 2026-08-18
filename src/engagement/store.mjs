@@ -60,8 +60,35 @@ function ensureAccount(state, accountId) {
   account.events ||= {};
   account.actors ||= {};
   account.sentLog = Array.isArray(account.sentLog) ? account.sentLog : [];
+  account.fetchLog = Array.isArray(account.fetchLog) ? account.fetchLog : [];
   state.accounts[accountId] = account;
   return account;
+}
+
+// Reading inbound interactions is itself a billed operation on X's pay-per-use pricing, and it is
+// billed on every poll whether or not anything new arrived. Nothing else in the system bounds it:
+// OpenAI spend is capped inside openaiRequest via the account's budgets, but provider READS go
+// straight through xOAuth2FetchJson/fetchJson with no counter at all. This log is what
+// maxInboundFetchesPerDay is enforced against.
+export async function countFetchesSince(accountId, since) {
+  const state = await loadEngagementState();
+  const threshold = new Date(since).getTime();
+  const rows = state.accounts?.[accountId]?.fetchLog;
+  if (!Array.isArray(rows)) return 0;
+  return rows.filter((row) => {
+    const at = new Date(row?.at || 0).getTime();
+    return Number.isFinite(at) && at >= threshold;
+  }).length;
+}
+
+export async function recordInboundFetch(accountId, detail = {}) {
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = detail.at || new Date().toISOString();
+  account.fetchLog.push({ at: now, channel: detail.channel || null });
+  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+  await writeJsonAtomic(STATE_FILE, state);
+  return account.fetchLog.length;
 }
 
 export async function eventStatus(accountId, key) {
@@ -165,6 +192,7 @@ export async function appendEngagementAudit(entry) {
 }
 
 export const __test = {
+  compactSentLog,
   compactEvents,
   compactActors,
   compactSentLog,

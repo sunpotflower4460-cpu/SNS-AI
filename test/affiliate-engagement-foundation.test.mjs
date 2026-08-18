@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { validateAffiliateRegistry, matchAffiliatePrograms, programReadiness, registryReadiness } from '../src/monetization/affiliate-registry.mjs';
 import { buildAffiliateReadinessReport } from '../src/monetization/affiliate-readiness.mjs';
 import { buildImpactTrackingLinkRequest } from '../src/monetization/providers/impact.mjs';
@@ -17,6 +18,8 @@ import {
   sendInstagramPrivateReply,
   sendInstagramDm
 } from '../src/engagement/providers/instagram.mjs';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 const registryUrl = new URL('../config/affiliate-programs.json', import.meta.url);
 
@@ -72,13 +75,22 @@ test('Impact request builder produces official media-partner deep-link endpoint 
 });
 
 test('global engagement policy enables only an explicit allowlist and remains inbound-only', async () => {
+  // This locks the operating posture the owner chose for launch, so a later edit that widens automated
+  // behaviour has to change a test that says why - rather than silently taking effect the moment an
+  // account is added to liveAccounts:
+  //   approvalRequired  - every generated reply goes to a human Issue before anything is sent.
+  //   autoDmReply       - DMs are out of scope. X DMs need a paid tier plus dm.read/dm.write scopes,
+  //                       and Instagram DMs need Meta App Review, so this cannot be flipped on alone.
+  //   replyScope        - replies stay inside threads rooted at our own posts; no cold outreach.
   const globalPolicy = await loadEngagementPolicy();
   assert.equal(globalPolicy.enabled, true);
   assert.deepEqual(globalPolicy.allowedAccounts, ['music-tools-x']);
   assert.equal(globalPolicy.inboundOnly, true);
   assert.equal(globalPolicy.autoReply, true);
-  assert.equal(globalPolicy.autoDmReply, true);
-  assert.equal(globalPolicy.approvalRequired, false);
+  assert.equal(globalPolicy.autoDmReply, false, 'DM automation is deliberately out of scope for launch');
+  assert.equal(globalPolicy.approvalRequired, true, 'every reply must pass through a human before sending');
+  assert.equal(globalPolicy.replyScope, 'own-posts', 'automated replies must not reach cold mentions');
+  assert.equal(globalPolicy.maxAutomatedDmRepliesPerDay, 0, 'the DM cap must not permit sends while DM is off');
 
   const allowed = assertAutomatedEngagementAllowed({
     account: { id: 'music-tools-x' },
@@ -86,18 +98,34 @@ test('global engagement policy enables only an explicit allowlist and remains in
     event: { kind: 'reply', inbound: true }
   });
   assert.equal(allowed.allowed, true);
-  assert.equal(allowed.approvalRequired, false);
+  assert.equal(allowed.approvalRequired, true);
   assert.throws(() => assertAutomatedEngagementAllowed({
     account: { id: 'some-other-account' },
     globalPolicy,
     event: { kind: 'reply', inbound: true }
   }), { code: 'ENGAGEMENT_ACCOUNT_NOT_ALLOWED' });
+  assert.throws(() => assertAutomatedEngagementAllowed({
+    account: { id: 'music-tools-x' },
+    globalPolicy,
+    event: { kind: 'dm', inbound: true }
+  }), { code: 'ENGAGEMENT_DM_DISABLED' }, 'an inbound DM must be refused while DM automation is off');
 
   const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { autoReply: false } });
   assert.equal(effective.enabled, true);
   assert.equal(effective.autoReply, false);
-  assert.equal(effective.autoDmReply, true);
+  assert.equal(effective.autoDmReply, false);
   assert.equal(effective.inboundOnly, true);
+});
+
+test('the engagement workflow does not poll on a schedule', async () => {
+  // X bills per read since February 2026, so an unattended 10-minute cron is ~144 paid requests a day
+  // even when nothing arrives. Polling stays manual until the owner has seen the real per-request price
+  // and the real reply volume; re-enabling it is a deliberate edit, not the default.
+  const workflow = await readFile(`${ROOT}.github/workflows/engagement.yml`, 'utf8');
+  const active = workflow.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(active, /^\s*schedule:/m, 'engagement must not poll on a schedule yet');
+  assert.doesNotMatch(active, /cron:/, 'no active cron entry may remain');
+  assert.match(active, /workflow_dispatch:/, 'it must still be runnable on demand');
 });
 
 test('engagement guard allows only opted-in inbound interaction when explicitly enabled', () => {

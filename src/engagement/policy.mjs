@@ -100,6 +100,7 @@ export function validateEngagementPolicy(policy) {
     strictLimit(policy, 'replyCooldownMinutes');
     strictLimit(policy, 'dmCooldownMinutes');
     strictLimit(policy, 'minAutoReplyConfidence', { max: 1 });
+    strictLimit(policy, 'maxInboundFetchesPerDay', { integer: true });
     if (policy.replyScope != null && !REPLY_SCOPES.has(String(policy.replyScope))) {
       throw new Error(`config/engagement-policy.json replyScope must be one of ${[...REPLY_SCOPES].join(', ')}.`);
     }
