@@ -39,6 +39,8 @@ jobs:
       MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_FORCE: ${{ inputs.force }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}

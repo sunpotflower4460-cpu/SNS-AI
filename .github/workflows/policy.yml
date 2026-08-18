@@ -19,8 +19,12 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
     steps:
       - uses: actions/checkout@v7
         with:
