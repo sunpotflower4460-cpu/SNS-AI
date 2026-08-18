@@ -28,6 +28,16 @@ export async function eventStatus(accountId, key) {
   return state.accounts?.[accountId]?.events?.[key] || null;
 }
 
+export async function countSentSince(accountId, kind, since) {
+  const state = await loadEngagementState();
+  const threshold = new Date(since).getTime();
+  return Object.values(state.accounts?.[accountId]?.events || {}).filter((row) => {
+    if (row?.status !== 'sent' || row?.kind !== kind || !row?.sentAt) return false;
+    const at = new Date(row.sentAt).getTime();
+    return Number.isFinite(at) && at >= threshold;
+  }).length;
+}
+
 export async function markEngagementEvent(accountId, key, detail = {}) {
   const state = await loadEngagementState();
   state.schemaVersion = 1;
