@@ -48,7 +48,10 @@ export function hardHumanCategory(text) {
   if (/個人情報|住所|電話番号|パスワード|乗っ取|不正アクセス|privacy|password|hacked/i.test(value)) return 'privacy_or_personal_data';
   if (/脅迫|殺す|危害|harass|threat/i.test(value)) return 'harassment_or_threat';
   if (/著作権|権利侵害|ライセンス.*(?:違反|問題)|copyright dispute|licen[cs]e dispute/i.test(value)) return 'rights_or_licensing_commitment';
-  if (/案件|提携|スポンサー|業務委託|契約したい|partnership|sponsor|business proposal/i.test(value)) return 'binding_partnership_or_contract';
+  // Business words by themselves are often ordinary discussion (e.g. "この案件どう思う？" or
+  // "スポンサー機能とは？"). Escalate only when the message actually asks the account owner to enter,
+  // negotiate, accept, or discuss a commercial commitment.
+  if (/(?:案件.{0,12}(?:依頼|相談|報酬|条件|契約|お願い|オファー|受けて|受けられ)|(?:依頼|相談|オファー).{0,12}案件|提携.{0,12}(?:したい|相談|依頼|条件|契約|お願い|オファー)|スポンサー.{0,12}(?:依頼|相談|契約|お願い|オファー|なって|募集)|業務委託.{0,12}(?:依頼|相談|契約|条件|報酬|お願い|受けて)|契約したい|partner(?:ship)?\s+(?:proposal|offer|request|terms)|partner\s+with|sponsor(?:ship)?\s+(?:proposal|offer|request|deal|terms)|business proposal)/i.test(value)) return 'binding_partnership_or_contract';
   if (/人間.*(?:対応|返事)|本人.*返事|担当者|human agent|real person/i.test(value)) return 'user_requests_human';
   return null;
 }
