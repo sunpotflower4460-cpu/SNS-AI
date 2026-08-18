@@ -42,6 +42,13 @@ export function normalizeEngagementEvent(value) {
   };
 }
 
+function xAiPublicReplyNeedsApproval(config, event) {
+  return String(event?.platform || '').toLowerCase() === 'x'
+    && event?.kind === 'reply'
+    && config.requireXAiReplyBotApproval === true
+    && config.xAiReplyBotApprovalConfirmed !== true;
+}
+
 export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
   const config = effectiveEngagementPolicy(globalPolicy, account);
   const normalized = normalizeEngagementEvent(event);
@@ -63,10 +70,13 @@ export function assertAutomatedEngagementAllowed({ account, event, globalPolicy 
   if (normalized.kind === 'reply' && config.autoReply !== true) engagementError('ENGAGEMENT_REPLY_DISABLED', 'Automated replies are disabled.');
   if (normalized.kind === 'dm' && config.autoDmReply !== true) engagementError('ENGAGEMENT_DM_DISABLED', 'Automated DM replies are disabled.');
 
+  const platformApprovalRequired = xAiPublicReplyNeedsApproval(config, normalized);
+
   return {
     allowed: true,
     kind: normalized.kind,
-    approvalRequired: config.approvalRequired !== false,
+    approvalRequired: platformApprovalRequired || config.approvalRequired !== false,
+    platformApprovalRequired,
     inboundOnly: config.inboundOnly !== false,
     oneAutomatedResponsePerInteraction: config.oneAutomatedResponsePerInteraction !== false
   };
@@ -76,4 +86,4 @@ export function prohibitedGrowthAutomation(action) {
   return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
 }
 
-export const __test = { SUPPORTED_KINDS, plainObject };
+export const __test = { SUPPORTED_KINDS, plainObject, xAiPublicReplyNeedsApproval };
