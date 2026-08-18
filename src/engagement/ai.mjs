@@ -53,10 +53,15 @@ export function hardHumanCategory(text) {
   return null;
 }
 
+function safeCategory(value) {
+  const category = String(value || 'unknown').trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_-]{0,99}$/.test(category) ? category : 'unknown';
+}
+
 function normalizeResult(raw = {}) {
   return {
     action: String(raw.action || '').trim().toLowerCase(),
-    category: String(raw.category || 'unknown').trim().toLowerCase().slice(0, 100),
+    category: safeCategory(raw.category),
     response: String(raw.response || '').trim(),
     reason: String(raw.reason || '').trim().slice(0, 500),
     humanSummary: String(raw.humanSummary || '').trim().slice(0, 600),
@@ -90,6 +95,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
     'Replies should be concise, natural, helpful, and in the account voice. Do not sound like a customer-service robot. Do not mention that an AI generated the reply unless directly relevant.',
     'Do not use engagement bait. Do not pressure users into purchases or DMs. Do not send unsolicited follow-up messages.',
     'For praise or reactions that need no answer, ignore is acceptable. For genuine questions, prefer reply when safe.',
+    'Use a short ASCII snake_case category token only. Never put names, handles, IDs, contact details, message text, or secrets in category.',
     'humanSummary and humanQuestion are only for the account owner. They must be useful but privacy-minimized. For private DMs, summarize the decision needed without quoting the message or reproducing names, handles, email addresses, phone numbers, addresses, IDs, tokens, or other unnecessary private details.',
     'reason must also avoid reproducing secrets or unnecessary private-message details.',
     'Return only the required JSON object.'
@@ -151,4 +157,4 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
   return result;
 }
 
-export const __test = { outputText, parseJson, RESPONSE_SCHEMA, normalizeResult };
+export const __test = { outputText, parseJson, RESPONSE_SCHEMA, normalizeResult, safeCategory };
