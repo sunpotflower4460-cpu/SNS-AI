@@ -78,7 +78,7 @@ test('local delivery claim is at-most-once and definitive failures can be retrie
   });
 });
 
-test('delivery ledger compaction never evicts unresolved ambiguity records and outlives the 30-day inbound window', () => {
+test('delivery ledger compaction never evicts unresolved ambiguity or in-window resolved guards', () => {
   const now = Date.parse('2026-08-18T00:00:00Z');
   const records = {
     unresolved_old: { status: 'unknown', updatedAt: '2020-01-01T00:00:00Z' },
@@ -95,11 +95,13 @@ test('delivery ledger compaction never evicts unresolved ambiguity records and o
   assert.equal(compacted.resolved_old, undefined);
   assert.ok(deliveryTest.RESOLVED_RETENTION_MS > 30 * 24 * 60 * 60_000);
 
+  // A count cap must never delete still-in-window delivery guards. If volume spikes, safety wins over
+  // ledger compactness until those records naturally age beyond the 35-day retention window.
   const manyResolved = {};
-  for (let i = 0; i < deliveryTest.MAX_RESOLVED_RECORDS + 25; i += 1) {
+  for (let i = 0; i < 2500; i += 1) {
     manyResolved[`k${i}`] = { status: 'sent', updatedAt: new Date(now - i * 1000).toISOString() };
   }
-  assert.equal(Object.keys(deliveryTest.compactRecords(manyResolved, now)).length, deliveryTest.MAX_RESOLVED_RECORDS);
+  assert.equal(Object.keys(deliveryTest.compactRecords(manyResolved, now)).length, 2500);
 });
 
 test('delivery failure classification retries only provider-confirmed non-acceptance', () => {
