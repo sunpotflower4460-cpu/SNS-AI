@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { __test as xTest } from '../src/engagement/providers/x.mjs';
 import { __test as instagramTest } from '../src/engagement/providers/instagram.mjs';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -112,4 +116,10 @@ test('Instagram pagination fails closed when the provider still exposes a next p
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('Failure Watch subscribes to scheduled engagement failures', async () => {
+  const workflow = await readFile(`${ROOT}.github/workflows/failure-watch.yml`, 'utf8');
+  assert.match(workflow, /- SNS Engagement Autopilot/);
+  assert.match(workflow, /failure|timed_out|cancelled/);
 });
