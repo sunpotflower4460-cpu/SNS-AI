@@ -11,15 +11,15 @@
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
   "replyDelayMinutes": [
-    6,
-    24
+    8,
+    35
   ],
   "dmDelayMinutes": [
-    4,
-    18
+    12,
+    50
   ],
   "maxAutomatedRepliesPerDay": 12,
-  "maxAutomatedDmRepliesPerDay": 12,
+  "maxAutomatedDmRepliesPerDay": 8,
   "replyCooldownMinutes": 30,
   "dmCooldownMinutes": 30,
   "privateContentPersistence": "never",
