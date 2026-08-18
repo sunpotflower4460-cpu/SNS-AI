@@ -20,7 +20,7 @@
 
 `sns-ai-state`は外部SNSへpublishする直前にslot claimを耐久保存する専用branchです。通常の履歴/state pushが投稿後に失敗しても、次runが同じslotを再送しないための最後のidempotency guardとして使います。削除しないでください。
 
-Autopilotは毎時`03,13,23,33,43,53`分にpollします。投稿scheduleはアカウントtimezoneの`times` + `windowMinutes`で判定します。
+`SNS Autopilot`（投稿用）は毎時`03,13,23,33,43,53`分にpollします。投稿scheduleはアカウントtimezoneの`times` + `windowMinutes`で判定します。返信エンゲージメント用の別workflow `SNS Engagement Autopilot` はこれとは別物で、§Iのとおり現在手動実行のみです。
 
 GitHub Actionsのscheduleはhard real-timeではありません。public repositoryは60日間repository activityがない場合scheduled workflowsが自動無効化され得るため、長期休止後はActions状態を確認してください。
 

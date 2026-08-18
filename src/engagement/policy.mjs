@@ -54,7 +54,10 @@ export function replyScopeFor(policy = {}) {
 // validated global policy file - an account-level override never passes through file validation.
 export function safeDailyAutomationCap(value, fallback) {
   if (value == null) return fallback;
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+  // Must be an integer: this gates a COUNT comparison (`used >= cap`). A fractional cap like 0.5 is
+  // not "essentially zero" - since `used` only ever takes integer values, `0 >= 0.5` is false, so a
+  // configured cap below one would still let exactly one reply/read through before blocking.
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 export function safeCooldownMinutes(value, fallback) {

@@ -41,14 +41,13 @@ import {
   actorKey,
   actorStatus,
   appendEngagementAudit,
-  countFetchesSince,
   countSentSince,
   eventKey,
   eventStatus,
   markActorOptOut,
   markEngagementEvent,
   markEngagementSent,
-  recordInboundFetch
+  reserveInboundFetch
 } from './store.mjs';
 
 function parseArgs(argv) {
@@ -170,6 +169,7 @@ async function instagramEvents(accountId, account, history, policy) {
   if (policy.autoReply === true) {
     for (const mediaId of instagramMediaIds(history, accountId)) {
       try {
+        await reserveFetch(accountId, policy, 'instagram-comments');
         const response = await listInstagramComments({ accessToken, mediaId, apiVersion });
         for (const comment of response?.data || []) {
           const authorId = String(comment?.from?.id || '');
@@ -181,6 +181,7 @@ async function instagramEvents(accountId, account, history, policy) {
           });
         }
       } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('Instagram comment engagement authorization/permission is not ready.');
         warnings.push(`Instagram comments temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('comments');
@@ -191,9 +192,11 @@ async function instagramEvents(accountId, account, history, policy) {
 
   if (policy.autoDmReply === true) {
     try {
+      await reserveFetch(accountId, policy, 'instagram-conversations');
       const conversations = await listInstagramConversations({ accessToken, igUserId: ownId, apiVersion });
       for (const conversation of (conversations?.data || []).slice(0, 25)) {
         if (!conversation?.id) continue;
+        await reserveFetch(accountId, policy, 'instagram-conversation-messages');
         const detail = await listInstagramConversationMessages({ accessToken, conversationId: conversation.id, apiVersion });
         for (const message of detail?.messages?.data || []) {
           const senderId = String(message?.from?.id || '');
@@ -207,6 +210,7 @@ async function instagramEvents(accountId, account, history, policy) {
         }
       }
     } catch (error) {
+      if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
       if (engagementAuthFailure(error)) throw engagementCredentialError('Instagram DM engagement authorization/permission is not ready.');
       warnings.push(`Instagram DMs temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
       unavailableChannels.push('dms');
@@ -396,23 +400,20 @@ async function sendResponseWithDeliveryGuard({ accountId, account, event, key, t
   return { state: 'sent', result };
 }
 
-// Enforced before any provider read, because the read is the billed event. Uses the same fail-closed
-// coercion as the reply caps: a malformed maxInboundFetchesPerDay stops polling rather than uncapping it.
-async function assertInboundFetchBudget(accountId, policy) {
+// Reserved immediately before EACH individual provider-read request, not once per collection. A
+// single X collection reads both mentions and DM events; a single Instagram collection reads one
+// comment set per own media id, plus conversations and one call per conversation - checking/recording
+// only once per collection let a configured cap of N permit far more than N real, billed requests.
+// Uses the same fail-closed coercion as the reply caps: a malformed maxInboundFetchesPerDay stops
+// polling rather than uncapping it. Pagination internal to a single logical read (see paginateX) is
+// accounted as that one read - it already carries its own page-count safety cap.
+async function reserveFetch(accountId, policy, channel) {
   const limit = safeDailyAutomationCap(policy.maxInboundFetchesPerDay, 48);
-  const used = await countFetchesSince(accountId, new Date(Date.now() - 24 * 60 * 60_000));
-  if (used >= limit) {
-    const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
-    error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
-    throw error;
-  }
-  return { limit, used };
+  return reserveInboundFetch(accountId, limit, { channel });
 }
 
 async function collectEvents(accountId, account, history, globalPolicy) {
   const policy = effectiveEngagementPolicy(globalPolicy, account);
-  await assertInboundFetchBudget(accountId, policy);
-  await recordInboundFetch(accountId, { channel: account.platform });
   if (account.platform === 'x') {
     const identity = await verifyXOAuth2Credential(account.credential);
     assertXEngagementCredential(identity, policy);
@@ -421,16 +422,22 @@ async function collectEvents(accountId, account, history, globalPolicy) {
     let mentions = { data: [] };
     let dms = { data: [] };
     if (policy.autoReply === true) {
-      try { mentions = await listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 }); }
-      catch (error) {
+      try {
+        await reserveFetch(accountId, policy, 'x-mentions');
+        mentions = await listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 });
+      } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('X mention engagement authorization/permission is not ready.');
         warnings.push(`X mentions temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('mentions');
       }
     }
     if (policy.autoDmReply === true) {
-      try { dms = await listXDirectMessages({ credential: account.credential, maxResults: 100 }); }
-      catch (error) {
+      try {
+        await reserveFetch(accountId, policy, 'x-dms');
+        dms = await listXDirectMessages({ credential: account.credential, maxResults: 100 });
+      } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('X DM engagement authorization/permission is not ready.');
         warnings.push(`X DMs temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('dms');
@@ -707,6 +714,7 @@ export const __test = {
   optedOut,
   terminal,
   instagramMediaIds,
+  instagramEvents,
   xEvents,
   xOwnPostIds,
   inOwnThread,

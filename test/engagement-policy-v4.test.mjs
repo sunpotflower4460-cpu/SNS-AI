@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { countFetchesSince, recordInboundFetch } from '../src/engagement/store.mjs';
+import { __test as runTest } from '../src/engagement/run.mjs';
 import {
   replyScopeFor,
   safeConfidenceThreshold,
@@ -72,6 +73,12 @@ test('malformed automation limits reduce automation instead of removing the limi
   }
   // A confidence threshold is a 0..1 score; anything outside that range cannot be honoured.
   assert.equal(safeConfidenceThreshold(1.5, 0.82), Number.POSITIVE_INFINITY);
+
+  // A fractional cap is not "essentially zero": since `used` only takes integer values, a cap of 0.5
+  // would satisfy `0 >= 0.5 -> false` and let exactly one reply/read through before blocking on the
+  // second. Only a whole number is a valid count ceiling.
+  assert.equal(safeDailyAutomationCap(0.5, 12), 0);
+  assert.equal(safeDailyAutomationCap(11.9, 12), 0);
 
   // Valid values are untouched, and an unset value falls back to the documented default.
   assert.equal(safeDailyAutomationCap(12, 99), 12);
@@ -145,4 +152,50 @@ test('inbound fetch budget counts every provider read and fails closed when malf
   // rather than removing the ceiling.
   assert.equal(safeDailyAutomationCap('lots', 48), 0);
   assert.equal(safeDailyAutomationCap(48, 12), 48);
+});
+
+test('the inbound fetch budget is charged per real provider read, not once per collection', async (t) => {
+  // A single Instagram collection can make one comments read PER OWN MEDIA ID, plus a conversations
+  // read and one messages read per conversation. Charging the budget once for the whole collectEvents
+  // call let a configured cap of N permit far more than N real, billed requests - a cap of 2 previously
+  // still allowed a 12-media-id collection to make 12 real reads for the price of 1.
+  const statePath = fileURLToPath(new URL('../data/engagement-state.json', import.meta.url));
+  const saved = await readFile(statePath, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  t.after(async () => {
+    if (saved == null) await rm(statePath, { force: true });
+    else await writeFile(statePath, saved, 'utf8');
+  });
+
+  const accountId = `fetch-budget-instagram-${process.pid}`;
+  const history = [
+    { account: accountId, status: 'published', providerPostId: '101' },
+    { account: accountId, status: 'published', providerPostId: '102' },
+    { account: accountId, status: 'published', providerPostId: '103' }
+  ];
+  const account = { credential: { accessToken: 'token', igUserId: '1', apiVersion: 'v25.0' } };
+  const policy = { autoReply: true, autoDmReply: false, maxInboundFetchesPerDay: 2 };
+
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await runTest.instagramEvents(accountId, account, history, policy);
+    // With a budget of 2 and 3 own media ids, the third comments read must be refused - proving the
+    // check applies per read, not once for the whole collection.
+    assert.equal(calls, 2, 'no more than the budgeted number of real HTTP reads may occur');
+    assert.equal(result.unavailableChannels.includes('comments'), false, 'budget exhaustion is not a transient-unavailable warning');
+  } catch (error) {
+    assert.equal(error.code, 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED');
+    assert.ok(calls <= 2, `must not exceed the configured budget before rejecting, got ${calls} calls`);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+
+  assert.equal(await countFetchesSince(accountId, new Date(Date.now() - 24 * 60 * 60_000)), 2);
 });

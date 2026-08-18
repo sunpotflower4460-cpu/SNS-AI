@@ -117,15 +117,24 @@ test('global engagement policy enables only an explicit allowlist and remains in
   assert.equal(effective.inboundOnly, true);
 });
 
-test('the engagement workflow does not poll on a schedule', async () => {
+test('the engagement workflow is triggered only by workflow_dispatch', async () => {
   // X bills per read since February 2026, so an unattended 10-minute cron is ~144 paid requests a day
   // even when nothing arrives. Polling stays manual until the owner has seen the real per-request price
   // and the real reply volume; re-enabling it is a deliberate edit, not the default.
+  //
+  // Checking only for the absence of `schedule:`/`cron:` would still pass if `push`, `workflow_run`, or
+  // `repository_dispatch` triggered the workflow unattended some other way. Parse the `on:` block itself
+  // (bounded by the next top-level `permissions:` key) and require workflow_dispatch to be its only
+  // active entry.
   const workflow = await readFile(`${ROOT}.github/workflows/engagement.yml`, 'utf8');
-  const active = workflow.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n');
-  assert.doesNotMatch(active, /^\s*schedule:/m, 'engagement must not poll on a schedule yet');
-  assert.doesNotMatch(active, /cron:/, 'no active cron entry may remain');
-  assert.match(active, /workflow_dispatch:/, 'it must still be runnable on demand');
+  const onBlock = /\non:\n([\s\S]*?)\npermissions:/.exec(workflow);
+  assert.ok(onBlock, 'engagement.yml must have an on: block followed by permissions:');
+  const activeTriggers = onBlock[1]
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#') && line.trim())
+    .map((line) => /^\s{2}([A-Za-z_]+):/.exec(line)?.[1])
+    .filter(Boolean);
+  assert.deepEqual(activeTriggers, ['workflow_dispatch'], 'workflow_dispatch must be the only active top-level trigger');
 });
 
 test('engagement guard allows only opted-in inbound interaction when explicitly enabled', () => {

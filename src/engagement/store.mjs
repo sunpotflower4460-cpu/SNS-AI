@@ -91,6 +91,32 @@ export async function recordInboundFetch(accountId, detail = {}) {
   return account.fetchLog.length;
 }
 
+// A single X or Instagram collection can make several distinct provider reads (mentions AND dm_events;
+// one comments call per own media id, plus conversations and one call per conversation) - checking and
+// recording once per COLLECTION let a configured cap of N permit far more than N real, billed requests.
+// This checks and appends in one load/write instead of two, so the check and the record cannot observe
+// different states, and it is called immediately before each individual provider-read request rather
+// than once before the whole collection.
+export async function reserveInboundFetch(accountId, limit, detail = {}) {
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = detail.at || new Date().toISOString();
+  const since = new Date(now).getTime() - 24 * 60 * 60_000;
+  const used = account.fetchLog.filter((row) => {
+    const at = new Date(row?.at || 0).getTime();
+    return Number.isFinite(at) && at >= since;
+  }).length;
+  if (used >= limit) {
+    const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
+    error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
+    throw error;
+  }
+  account.fetchLog.push({ at: now, channel: detail.channel || null });
+  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+  await writeJsonAtomic(STATE_FILE, state);
+  return { allowed: true, used: used + 1, limit };
+}
+
 export async function eventStatus(accountId, key) {
   const state = await loadEngagementState();
   return state.accounts?.[accountId]?.events?.[key] || null;
@@ -195,7 +221,6 @@ export const __test = {
   compactSentLog,
   compactEvents,
   compactActors,
-  compactSentLog,
   MAX_EVENTS_PER_ACCOUNT,
   MAX_ACTIVE_ACTORS_PER_ACCOUNT,
   MAX_SENT_LOG_PER_ACCOUNT
