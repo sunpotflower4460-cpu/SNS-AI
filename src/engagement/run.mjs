@@ -1,12 +1,21 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { loadAccounts, resolveAccount } from '../lib/config.mjs';
 import { readHistory } from '../lib/history.mjs';
 import { githubContext, githubRequest } from '../lib/github.mjs';
+import { validateDraftText } from '../lib/safety.mjs';
+import { moderateText } from '../lib/openai.mjs';
 import { verifyXOAuth2Credential } from '../providers/x.mjs';
 import { classifyAndDraftEngagement } from './ai.mjs';
 import { assertAutomatedEngagementAllowed, effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
 import { listXMentions, listXDirectMessages, sendXReply, sendXDirectMessage } from './providers/x.mjs';
-import { listInstagramComments, sendInstagramCommentReply } from './providers/instagram.mjs';
+import {
+  listInstagramComments,
+  listInstagramConversations,
+  listInstagramConversationMessages,
+  sendInstagramCommentReply,
+  sendInstagramDm
+} from './providers/instagram.mjs';
 import { appendEngagementAudit, countSentSince, eventKey, eventStatus, markEngagementEvent } from './store.mjs';
 
 function parseArgs(argv) {
@@ -86,38 +95,89 @@ function instagramMediaIds(history, accountId, limit = 12) {
 
 async function instagramEvents(accountId, account, history) {
   const output = [];
+  const warnings = [];
+  const accessToken = account.credential.accessToken;
+  const apiVersion = account.credential.apiVersion || account.apiVersion || 'v25.0';
+  const ownId = String(account.credential.igUserId || '');
+
   for (const mediaId of instagramMediaIds(history, accountId)) {
-    const response = await listInstagramComments({ accessToken: account.credential.accessToken, mediaId, apiVersion: account.credential.apiVersion || 'v25.0' });
-    for (const comment of response?.data || []) {
-      if (!comment?.id || !comment?.text) continue;
-      output.push({
-        id: String(comment.id), platform: 'instagram', kind: 'reply', inbound: true, public: true,
-        text: String(comment.text), createdAt: comment.timestamp || null, commentId: String(comment.id), mediaId,
-        username: comment?.from?.username || null, accountId
-      });
+    try {
+      const response = await listInstagramComments({ accessToken, mediaId, apiVersion });
+      for (const comment of response?.data || []) {
+        if (!comment?.id || !comment?.text) continue;
+        output.push({
+          id: String(comment.id), platform: 'instagram', kind: 'reply', inbound: true, public: true,
+          text: String(comment.text), createdAt: comment.timestamp || null, commentId: String(comment.id), mediaId,
+          username: comment?.from?.username || null, accountId
+        });
+      }
+    } catch (error) {
+      warnings.push(`Instagram comments unavailable: ${String(error?.message || error).slice(0, 180)}`);
+      break;
     }
   }
-  return output;
+
+  try {
+    const conversations = await listInstagramConversations({ accessToken, igUserId: ownId, apiVersion });
+    for (const conversation of (conversations?.data || []).slice(0, 25)) {
+      if (!conversation?.id) continue;
+      const detail = await listInstagramConversationMessages({ accessToken, conversationId: conversation.id, apiVersion });
+      for (const message of detail?.messages?.data || []) {
+        const senderId = String(message?.from?.id || '');
+        const body = String(message?.message || '').trim();
+        if (!message?.id || !senderId || senderId === ownId || !body || message?.is_unsupported === true) continue;
+        output.push({
+          id: String(message.id), platform: 'instagram', kind: 'dm', inbound: true, public: false,
+          text: body, createdAt: message.created_time || null, participantId: senderId,
+          conversationId: String(conversation.id), accountId
+        });
+      }
+    }
+  } catch (error) {
+    warnings.push(`Instagram DMs unavailable: ${String(error?.message || error).slice(0, 180)}`);
+  }
+
+  return { events: output, warnings };
+}
+
+async function ensureNeedsHumanLabel() {
+  const { repository } = githubContext();
+  const [owner, repo] = repository.split('/');
+  try { return await githubRequest(`/repos/${owner}/${repo}/labels/needs-human`); }
+  catch (error) { if (error.status !== 404) throw error; }
+  return githubRequest(`/repos/${owner}/${repo}/labels`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'needs-human', description: 'SNS-AI requires a human decision', color: 'B60205' })
+  });
 }
 
 async function createHumanIssue({ accountId, event, key, decision, policy }) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
-  const title = `[engagement-human] ${accountId} ${key}`;
+  const prefix = String(policy?.humanEscalation?.issuePrefix || '[engagement-human]');
+  const title = `${prefix} ${accountId} ${key}`;
   const existing = await githubRequest(`/repos/${owner}/${repo}/issues?state=open&per_page=100`);
   const found = (existing || []).find((issue) => issue.title === title && !issue.pull_request);
   if (found) return found;
+  await ensureNeedsHumanLabel();
   const excerptLimit = Math.max(0, Number(policy?.humanEscalation?.publicExcerptMaxChars ?? 800));
   const body = {
-    kind: 'sns-ai-engagement-human', schemaVersion: 1, account: accountId, platform: event.platform,
-    interactionKind: event.kind, eventKey: key, category: decision.category || 'unknown',
+    kind: 'sns-ai-engagement-human',
+    schemaVersion: 1,
+    account: accountId,
+    platform: event.platform,
+    interactionKind: event.kind,
+    eventKey: key,
+    category: decision.category || 'unknown',
     reason: String(decision.reason || 'Human judgment required.').slice(0, 500),
+    summary: String(decision.humanSummary || 'SNS-AIが自動返信を避けました。').slice(0, 600),
+    question: String(decision.humanQuestion || 'どのように対応しますか？').slice(0, 500),
     publicInteraction: event.public === true,
     publicExcerpt: event.public === true ? String(event.text || '').slice(0, excerptLimit) : null,
     privateContentOmitted: event.public !== true,
-    question: event.public === true
-      ? 'この公開インタラクションはSNS-AIが自動判断を避けました。どう返すか、または返信しないかを決めてください。'
-      : '非公開DMのため本文は公開GitHubへ保存していません。SNS上で該当DMを確認し、対応方針を決めてください。'
+    resolution: event.public === true
+      ? 'ChatGPT can submit a public reply through [engagement-resolve].'
+      : 'Private DM content and reply text must not be copied into this public repository. Use the chat decision to draft the response, then send it manually in the SNS app if a human response is required.'
   };
   return githubRequest(`/repos/${owner}/${repo}/issues`, {
     method: 'POST',
@@ -125,11 +185,26 @@ async function createHumanIssue({ accountId, event, key, decision, policy }) {
   });
 }
 
+async function closeHumanIssue(issueNumber, message) {
+  if (!issueNumber) return;
+  const { repository } = githubContext();
+  const [owner, repo] = repository.split('/');
+  await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
+    method: 'POST', body: JSON.stringify({ body: message })
+  }).catch(() => {});
+  await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`, {
+    method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'completed' })
+  }).catch(() => {});
+}
+
 async function sendResponse(account, event, text, dryRun) {
   if (event.platform === 'x' && event.kind === 'reply') return sendXReply({ credential: account.credential, postId: event.postId, text, dryRun });
   if (event.platform === 'x' && event.kind === 'dm') return sendXDirectMessage({ credential: account.credential, participantId: event.participantId, text, dryRun });
   if (event.platform === 'instagram' && event.kind === 'reply') {
-    return sendInstagramCommentReply({ accessToken: account.credential.accessToken, commentId: event.commentId, message: text, apiVersion: account.credential.apiVersion || 'v25.0', dryRun });
+    return sendInstagramCommentReply({ accessToken: account.credential.accessToken, commentId: event.commentId, message: text, apiVersion: account.credential.apiVersion || account.apiVersion || 'v25.0', dryRun });
+  }
+  if (event.platform === 'instagram' && event.kind === 'dm') {
+    return sendInstagramDm({ accessToken: account.credential.accessToken, igUserId: account.credential.igUserId, recipientId: event.participantId, message: text, apiVersion: account.credential.apiVersion || account.apiVersion || 'v25.0', dryRun });
   }
   throw new Error(`Unsupported engagement send path ${event.platform}/${event.kind}.`);
 }
@@ -137,14 +212,17 @@ async function sendResponse(account, event, text, dryRun) {
 async function collectEvents(accountId, account, history) {
   if (account.platform === 'x') {
     const identity = await verifyXOAuth2Credential(account.credential);
-    const [mentions, dms] = await Promise.all([
-      listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 }),
-      listXDirectMessages({ credential: account.credential, maxResults: 100 })
-    ]);
-    return xEvents(accountId, identity.id, mentions, dms);
+    const warnings = [];
+    let mentions = { data: [] };
+    let dms = { data: [] };
+    try { mentions = await listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 }); }
+    catch (error) { warnings.push(`X mentions unavailable: ${String(error?.message || error).slice(0, 180)}`); }
+    try { dms = await listXDirectMessages({ credential: account.credential, maxResults: 100 }); }
+    catch (error) { warnings.push(`X DMs unavailable: ${String(error?.message || error).slice(0, 180)}`); }
+    return { events: xEvents(accountId, identity.id, mentions, dms), warnings };
   }
   if (account.platform === 'instagram') return instagramEvents(accountId, account, history);
-  return [];
+  return { events: [], warnings: [] };
 }
 
 function credentialNotReady(error) {
@@ -182,12 +260,13 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
   }
 
-  const decision = await classifyAndDraftEngagement({ accountId, account, event });
+  const decision = await classifyAndDraftEngagement({ accountId, account, event, policy });
   const threshold = Number(policy.minAutoReplyConfidence ?? 0.82);
-  if (decision.action === 'human' || (decision.action === 'reply' && decision.confidence < threshold) || allowed.approvalRequired) {
+  const humanCategory = new Set((policy.humanRequiredCategories || []).map((value) => String(value).toLowerCase())).has(String(decision.category || '').toLowerCase());
+  if (decision.action === 'human' || humanCategory || (decision.action === 'reply' && decision.confidence < threshold) || allowed.approvalRequired) {
     if (dryRun) return { status: 'dry-run-human', decision };
     const issue = await createHumanIssue({ accountId, event, key, decision, policy });
-    await markEngagementEvent(accountId, key, { status: 'human', dueAt, kind: event.kind, platform: event.platform, category: decision.category, issueNumber: issue.number || null });
+    await markEngagementEvent(accountId, key, { status: 'human', dueAt, kind: event.kind, platform: event.platform, category: decision.category, issueNumber: issue.number || null, public: event.public === true });
     await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'human', category: decision.category, public: event.public === true });
     return { status: 'human', issueNumber: issue.number || null };
   }
@@ -205,6 +284,42 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
   return { status: 'sent' };
 }
 
+export async function resolveHumanEngagement({ accountId, key, action = 'reply', text = '', dryRun = false } = {}) {
+  if (!accountId || !key) throw new Error('Human engagement resolution requires accountId and eventKey.');
+  if (!['reply', 'ignore'].includes(action)) throw new Error('Human engagement resolution action must be reply or ignore.');
+  const prior = await eventStatus(accountId, key);
+  if (!prior || prior.status !== 'human') throw new Error('Engagement event is not awaiting a human decision.');
+  if (prior.public !== true) {
+    const error = new Error('Private DM resolutions are intentionally not sent through public GitHub ChatOps. Draft the response in chat, then send it manually in the SNS app.');
+    error.code = 'PRIVATE_ENGAGEMENT_MANUAL_SEND';
+    throw error;
+  }
+
+  const account = await resolveAccount(accountId);
+  const history = await readHistory();
+  const collected = await collectEvents(accountId, account, history);
+  const event = collected.events.find((candidate) => eventKey(accountId, candidate) === key);
+  if (!event) throw new Error('The original public interaction could not be found again; it may be too old or deleted.');
+
+  if (action === 'ignore') {
+    if (!dryRun) {
+      await markEngagementEvent(accountId, key, { status: 'ignored', kind: event.kind, platform: event.platform, category: prior.category || 'human-ignore', resolvedAt: nowIso() });
+      await closeHumanIssue(prior.issueNumber, '✅ Human decision recorded: no reply.');
+    }
+    return { status: dryRun ? 'dry-run-ignore' : 'ignored', eventKey: key };
+  }
+
+  const responseText = validateDraftText(account, String(text || '').trim());
+  await moderateText(responseText, account, accountId);
+  const result = await sendResponse(account, event, responseText, dryRun);
+  if (!dryRun) {
+    await markEngagementEvent(accountId, key, { status: 'sent', sentAt: nowIso(), kind: event.kind, platform: event.platform, category: prior.category || 'human-resolved', resolvedAt: nowIso() });
+    await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'sent-human-resolved', public: true });
+    await closeHumanIssue(prior.issueNumber, '✅ Human-approved public reply sent by SNS-AI.');
+  }
+  return { status: dryRun ? 'dry-run-reply' : 'sent', eventKey: key, result };
+}
+
 export async function runEngagement({ accountFilter = null, dryRun = false } = {}) {
   const globalPolicy = await loadEngagementPolicy();
   if (globalPolicy.enabled !== true) return { state: 'disabled', accounts: [] };
@@ -219,9 +334,9 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
   for (const accountId of ids) {
     try {
       const account = await resolveAccount(accountId);
-      const events = await collectEvents(accountId, account, history);
+      const collected = await collectEvents(accountId, account, history);
       const rows = [];
-      for (const event of events.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))) {
+      for (const event of collected.events.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))) {
         if (!event.text || ageMs(event.createdAt) > 30 * 24 * 60 * 60_000) continue;
         try { rows.push({ eventKey: eventKey(accountId, event), ...(await processEvent(accountId, account, event, globalPolicy, dryRun)) }); }
         catch (error) {
@@ -229,7 +344,7 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
           if (!dryRun) await appendEngagementAudit({ account: accountId, eventKey: eventKey(accountId, event), platform: event.platform, kind: event.kind, status: 'error', code: error?.code || null });
         }
       }
-      report.push({ account: accountId, state: 'ok', events: rows });
+      report.push({ account: accountId, state: 'ok', warnings: collected.warnings, events: rows });
     } catch (error) {
       if (credentialNotReady(error)) {
         report.push({ account: accountId, state: 'waiting_for_engagement_credentials', message: 'Engagement OAuth credentials/scopes are not ready yet.' });
@@ -243,9 +358,29 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = parseArgs(process.argv.slice(2));
-  const result = await runEngagement({ accountFilter: args.account || null, dryRun: bool(args['dry-run']) });
+  let result;
+  if (args['resolve-file']) {
+    const payload = JSON.parse(await readFile(String(args['resolve-file']), 'utf8'));
+    result = await resolveHumanEngagement({
+      accountId: payload.account,
+      key: payload.eventKey,
+      action: payload.action || 'reply',
+      text: payload.text || '',
+      dryRun: bool(payload.dryRun)
+    });
+  } else {
+    result = await runEngagement({ accountFilter: args.account || null, dryRun: bool(args['dry-run']) });
+  }
   console.log(JSON.stringify(result, null, 2));
   if (result.accounts?.some((row) => row.state === 'error')) process.exitCode = 1;
 }
 
-export const __test = { deterministicDelayMinutes, dueAtFor, optedOut, terminal, instagramMediaIds, xEvents, credentialNotReady };
+export const __test = {
+  deterministicDelayMinutes,
+  dueAtFor,
+  optedOut,
+  terminal,
+  instagramMediaIds,
+  xEvents,
+  credentialNotReady
+};
