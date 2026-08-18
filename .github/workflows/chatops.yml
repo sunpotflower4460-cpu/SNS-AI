@@ -101,8 +101,11 @@ jobs:
         run: |
           set -o pipefail
           {
-            npm run doctor -- --strict --account "${{ steps.command.outputs.account }}"
-            node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}"
+            status=0
+            npm run doctor -- --strict --account "${{ steps.command.outputs.account }}" || status=1
+            node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}" || status=1
+            node src/ops/x-automation-compliance.mjs --account "${{ steps.command.outputs.account }}" || status=1
+            exit "$status"
           } 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Execute Autopilot Dry Run
