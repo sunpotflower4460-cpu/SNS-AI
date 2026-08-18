@@ -281,15 +281,6 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
   }
 
-  const cooldownMinutes = event.kind === 'dm' ? Number(policy.dmCooldownMinutes ?? 30) : Number(policy.replyCooldownMinutes ?? 30);
-  if (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0) {
-    const recent = await countSentSince(accountId, event.kind, new Date(Date.now() - cooldownMinutes * 60_000));
-    if (recent > 0) {
-      if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'cooldown' });
-      return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
-    }
-  }
-
   const decision = await classifyAndDraftEngagement({ accountId, account, event, policy });
   const threshold = Number(policy.minAutoReplyConfidence ?? 0.82);
   const humanCategory = new Set((policy.humanRequiredCategories || []).map((value) => String(value).toLowerCase())).has(String(decision.category || '').toLowerCase());
@@ -305,6 +296,15 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     await markEngagementEvent(accountId, key, { status: 'ignored', dueAt, kind: event.kind, platform: event.platform, category: decision.category });
     await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'ignored', category: decision.category, public: event.public === true });
     return { status: 'ignored' };
+  }
+
+  const cooldownMinutes = event.kind === 'dm' ? Number(policy.dmCooldownMinutes ?? 30) : Number(policy.replyCooldownMinutes ?? 30);
+  if (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0) {
+    const recent = await countSentSince(accountId, event.kind, new Date(Date.now() - cooldownMinutes * 60_000));
+    if (recent > 0) {
+      if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'cooldown' });
+      return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
+    }
   }
 
   const result = await sendResponse(account, event, decision.response, dryRun);
