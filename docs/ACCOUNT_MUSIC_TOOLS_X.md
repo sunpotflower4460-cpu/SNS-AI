@@ -120,11 +120,24 @@ Store the OAuth2 client/refresh/access fields only inside the `music-tools-x` cr
 
 If posting credentials are ready but these engagement scopes are not, normal publishing can still be tested while `SNS Engagement Autopilot` stays in `waiting_for_engagement_credentials`; it must not guess missing permissions or send anything.
 
-### 3. OpenAI API
+### 3. X one-time approval for AI-powered public auto-replies
+
+Before allowing SNS-AI to auto-send AI-generated public X replies, obtain the written/explicit approval required by the current X Automation Rules for an AI-powered automated reply bot.
+
+SNS-AI is fail-closed until that one-time external gate is complete:
+
+- `requireXAiReplyBotApproval: true`
+- `xAiReplyBotApprovalConfirmed: false`
+
+Keep the confirmation false until X has actually granted the required approval. After it is granted, set `xAiReplyBotApprovalConfirmed` to `true` once. This is **not** a per-reply approval switch; it is a one-time platform-compliance gate. After it is confirmed, routine high-confidence inbound public replies can return to the intended autonomous steady state.
+
+X automated responses also append the configured stop instruction (`自動返信停止は「自動返信不要」でOKです。`) and inbound opt-out requests are handled before response generation.
+
+### 4. OpenAI API
 
 Prepare an OpenAI API key with API billing/credits available. This account uses the API for post generation, Web Search, Trend Intelligence, moderation, and eligible inbound-response classification/drafting.
 
-### 4. GitHub Actions Secrets
+### 5. GitHub Actions Secrets
 
 Add these directly in Repository Settings → Secrets and variables → Actions:
 
@@ -141,24 +154,27 @@ After the external setup above is complete:
 1. change only `music-tools-x.enabled` to `true`; keep `mode: approval` for the first controlled publish
 2. from ChatGPT/GitHub ChatOps, run `[preflight] music-tools-x`
 3. run `[dry-run] music-tools-x` and inspect the generated post/research result
-4. if engagement OAuth2 is configured, run `[engagement-dry-run] music-tools-x`
+4. if engagement OAuth2 is configured, run `[engagement-dry-run] music-tools-x`; detailed interaction content is intentionally suppressed from public GitHub logs/Issues for private-DM safety
 5. approve exactly **one** controlled real post by adding the `approved` label to its approval Issue
 6. verify `data/history.jsonl`, provider post ID, and subsequent metrics collection
-7. if that controlled publish and readiness checks are clean, change `mode` to `auto`
-8. leave routine posting and eligible inbound engagement unattended; return to approval only after a safety brake, credential change, major account-policy change, or another explicit exception
+7. for X public auto-replies, verify that the one-time X AI-reply approval exists and only then set `xAiReplyBotApprovalConfirmed: true`
+8. run one controlled engagement rehearsal
+9. if the controlled publish, engagement rehearsal, and readiness checks are clean, change `mode` to `auto`
+10. leave routine posting and eligible inbound engagement unattended; return to approval only after a safety brake, credential change, major account-policy change, or another explicit exception
 
-The goal is not to keep clicking approval buttons. The one controlled publish is a launch proof; steady-state operation is autonomous.
+The goal is not to keep clicking approval buttons. The controlled launch steps are one-time proofs; steady-state operation is autonomous.
 
 ## Engagement steady state
 
-Once engagement credentials are ready and the account is enabled:
+Once engagement credentials are ready, the account is enabled, and platform-specific one-time gates are complete:
 
 - X mentions and eligible inbound DMs are polled automatically
 - routine high-confidence interactions are answered after a bounded human-like delay
+- X automated responses contain an explicit opt-out instruction
 - opt-outs, duplicate responses, unsolicited outreach, and daily caps are enforced before sending
 - difficult/high-stakes/low-confidence cases create `[engagement-human]` Issues instead of guessing
 - the connected ChatGPT condition-watch surfaces only those unresolved exception cases back into chat
-- private DM bodies are not copied into this public repository
+- private DM bodies are not copied into this public repository or normal ChatOps result comments
 
 ## Later optional expansion
 
