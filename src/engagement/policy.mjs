@@ -3,6 +3,7 @@ import { xAiReplyApprovalReady, xAiReplyApprovalRequired } from './readiness.mjs
 
 const POLICY_FILE = new URL('../../config/engagement-policy.json', import.meta.url);
 const SUPPORTED_KINDS = new Set(['reply', 'dm']);
+const ACCOUNT_ID_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 
 function engagementError(code, message) {
   const error = new Error(message);
@@ -15,11 +16,42 @@ function plainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function strictAccountList(policy, key) {
+  const value = policy[key];
+  if (!Array.isArray(value)) throw new Error(`config/engagement-policy.json ${key} must be an array.`);
+  const normalized = value.map((item) => String(item));
+  if (normalized.some((item) => !ACCOUNT_ID_RE.test(item))) {
+    throw new Error(`config/engagement-policy.json ${key} contains an invalid account id.`);
+  }
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error(`config/engagement-policy.json ${key} must not contain duplicate account ids.`);
+  }
+  return normalized;
+}
+
+export function validateEngagementPolicy(policy) {
+  if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
+  if (Number(policy.schemaVersion || 0) >= 4) {
+    strictAccountList(policy, 'allowedAccounts');
+    strictAccountList(policy, 'liveAccounts');
+    strictAccountList(policy, 'xAutomationProfileComplianceConfirmedAccounts');
+    const required = strictAccountList(policy, 'xAiReplyBotApprovalRequiredAccounts');
+    const confirmed = strictAccountList(policy, 'xAiReplyBotApprovalConfirmedAccounts');
+    if (typeof policy.xAutomatedResponseOptOutText !== 'string' || !policy.xAutomatedResponseOptOutText.trim()) {
+      throw new Error('config/engagement-policy.json xAutomatedResponseOptOutText must be a non-empty string.');
+    }
+    const requiredSet = new Set(required);
+    const extraConfirmed = confirmed.filter((id) => !requiredSet.has(id));
+    if (extraConfirmed.length) {
+      throw new Error(`config/engagement-policy.json xAiReplyBotApprovalConfirmedAccounts contains account(s) not listed as required: ${extraConfirmed.join(', ')}.`);
+    }
+  }
+  return policy;
+}
+
 export async function loadEngagementPolicy() {
   const raw = await readFile(POLICY_FILE, 'utf8');
-  const policy = JSON.parse(raw);
-  if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
-  return policy;
+  return validateEngagementPolicy(JSON.parse(raw));
 }
 
 export function effectiveEngagementPolicy(globalPolicy = {}, account = {}) {
@@ -88,4 +120,4 @@ export function prohibitedGrowthAutomation(action) {
   return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
 }
 
-export const __test = { SUPPORTED_KINDS, plainObject, xAiPublicReplyNeedsApproval };
+export const __test = { SUPPORTED_KINDS, plainObject, strictAccountList, xAiPublicReplyNeedsApproval, ACCOUNT_ID_RE };
