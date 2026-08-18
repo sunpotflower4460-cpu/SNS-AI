@@ -76,6 +76,7 @@ async function withFixture(platform, task) {
     row.research = { ...(row.research || {}), webSearch: false, trendIntelligence: false };
     row.budgets = { ...(row.budgets || {}), enabled: false };
     row.safety = { ...(row.safety || {}), moderation: true };
+    if (platform === 'x') row.engagement = { ...(row.engagement || {}), xAiReplyBotApprovalConfirmed: true };
     await writeFile(CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     for (const path of MUTABLE) await rm(path, { force: true });
 
@@ -171,6 +172,8 @@ test('X engagement runtime auto-replies routine inbound, ignores noise, escalate
     assert.equal(rows.filter((row) => row.status === 'human').length, 2);
     assert.equal(sentPosts.length, 1);
     assert.equal(sentDms.length, 1);
+    assert.match(sentPosts[0].text, /自動返信不要/);
+    assert.match(sentDms[0].text, /自動返信不要/);
     assert.equal(issueBodies.length, 2);
     const privateIssue = issueBodies.find((body) => body.privateContentOmitted === true);
     assert.ok(privateIssue);
