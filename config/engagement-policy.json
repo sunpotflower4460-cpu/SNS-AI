@@ -10,6 +10,7 @@
   "approvalRequired": false,
   "requireXAiReplyBotApproval": true,
   "xAiReplyBotApprovalConfirmed": false,
+  "xAutomatedResponseOptOutText": "自動返信停止は「自動返信不要」でOKです。",
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
   "replyDelayMinutes": [
