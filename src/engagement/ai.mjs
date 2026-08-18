@@ -73,6 +73,13 @@ function normalizeResult(raw = {}) {
   };
 }
 
+export function clearXReplyIntent(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  if (/[?？]/.test(value)) return true;
+  return /(?:教えて|知りたい|詳しく|助けて|返信(?:して|ください|ほしい)|返事(?:して|ください|ほしい)|お願い(?:します|したい)|おすすめ(?:は|あります|教えて)|できますか|出来ますか|ありますか|どう思(?:う|います)|どうですか|なぜ|どこで|いつ|誰が|何を|何が|help\b|can you\b|could you\b|would you\b|do you\b|is there\b|are there\b|what\b|why\b|how\b|where\b|when\b|any recommendations?\b)/i.test(value);
+}
+
 export function withRequiredXOptOut(text, event, policy = {}) {
   const response = String(text || '').trim();
   const notice = String(policy.xAutomatedResponseOptOutText || '').trim();
@@ -107,6 +114,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
     'Replies should be concise, natural, helpful, and in the account voice. Do not sound like a customer-service robot. Do not mention that an AI generated the reply unless directly relevant.',
     'Do not use engagement bait. Do not pressure users into purchases or DMs. Do not send unsolicited follow-up messages.',
     'For praise or reactions that need no answer, ignore is acceptable. For genuine questions, prefer reply when safe.',
+    'For X public mentions/replies, choose reply only when the user clearly asks a question, requests information/help, or otherwise clearly asks for a response. A mention, follow, praise, criticism, or passing reference by itself is not enough; choose ignore when response intent is unclear.',
     'For X, a configured opt-out notice is appended deterministically after generation. Keep the drafted response concise enough to leave room for that notice, and do not duplicate or paraphrase the notice yourself.',
     'Use a short ASCII snake_case category token only. Never put names, handles, IDs, contact details, message text, or secrets in category.',
     'humanSummary and humanQuestion are only for the account owner. They must be useful but privacy-minimized. For private DMs, summarize the decision needed without quoting the message or reproducing names, handles, email addresses, phone numbers, addresses, IDs, tokens, or other unnecessary private details.',
@@ -157,6 +165,19 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
   }
   const humanCategories = new Set((policy.humanRequiredCategories || []).map((value) => String(value).toLowerCase()));
   if (humanCategories.has(result.category)) result.action = 'human';
+
+  if (
+    result.action === 'reply'
+    && event.public === true
+    && String(event.platform || '').toLowerCase() === 'x'
+    && String(event.kind || '').toLowerCase() === 'reply'
+    && policy.requireXClearReplyIntent === true
+    && !clearXReplyIntent(event.text)
+  ) {
+    result.action = 'ignore';
+    result.response = '';
+    result.reason = 'X public automated reply suppressed because clear user intent to receive a response was not detected.';
+  }
 
   if (result.action === 'reply') {
     if (!result.response) throw new Error('Engagement AI selected reply without response text.');
