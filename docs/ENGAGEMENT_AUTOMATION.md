@@ -60,6 +60,23 @@ Current automatic response policy:
 
 If a configured engagement channel becomes unavailable, or its OAuth/permission state is no longer valid, the scheduled run becomes degraded/non-zero instead of silently staying green.
 
+## At-most-once delivery guard
+
+A live public reply or DM reply is reserved in `data/engagement-delivery-ledger.json` on `sns-ai-state` **before** the provider send request is made. The reservation contains only the pseudonymous event key and operational metadata; it does not contain inbound message text, private participant IDs, or generated private reply text.
+
+This closes the normal duplicate-send crash window. If the provider accepts a reply and the runner fails before ordinary engagement bookkeeping is saved, the durable reservation prevents the next run from blindly sending the same interaction again.
+
+SNS-AI deliberately prefers **at-most-once automatic delivery** over automatic retry when provider acceptance is ambiguous. An ambiguous network/provider outcome creates or reuses a `[engagement-delivery-unknown]` Issue with the `needs-human` label and automatic retry remains blocked.
+
+When that Issue appears:
+
+1. Check the corresponding interaction directly on X/Instagram. Public cases may include the public target ID. Private DM body/user/response details are intentionally omitted from GitHub.
+2. If a reply already exists, leave it as-is. If no reply exists, decide whether to send/skip it manually rather than asking SNS-AI to guess whether the previous request succeeded.
+3. Close the `[engagement-delivery-unknown]` Issue after the interaction has been intentionally handled or skipped.
+4. On the next run, SNS-AI marks that delivery as handled and does not auto-retry it.
+
+An explicit provider rejection that proves the send was not accepted (for example a definitive request-level 4xx) is recorded as failed rather than unknown and may be attempted again later. Ambiguous network/5xx-style outcomes are never automatically retried.
+
 ## Human-required boundary
 
 Routine questions, thanks, reactions, light criticism, and straightforward support should normally be handled automatically.
@@ -140,9 +157,9 @@ Official Meta API collection/reference:
 
 `data/engagement-state.json` stores hashed interaction/actor keys plus operational status. It also keeps a bounded privacy-safe sent log so daily caps remain enforceable even after old event entries are compacted.
 
-`data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result. X OAuth2 rotation state is encrypted before it is written to `data/x-oauth2-state.json`.
+`data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result. X OAuth2 rotation state is encrypted before it is written to `data/x-oauth2-state.json`. `data/engagement-delivery-ledger.json` stores only bounded privacy-safe delivery reservations/results; unresolved delivery ambiguity records are retained until intentionally handled.
 
-In GitHub Actions, these three engagement runtime files are restored from and persisted to the existing `sns-ai-state` durable branch rather than `main`. Runtime churn therefore does not create normal code-history commits or trigger the repository's `push: main` CI on every engagement state update. Live Preflight verifies the durable-state branch/write path before live activation.
+In GitHub Actions, these four engagement runtime files are restored from and persisted to the existing `sns-ai-state` durable branch rather than `main`. Both the scheduled Engagement workflow and ChatOps engagement commands use the same restore/persist helper, so ChatGPT-triggered engagement does not fork a second state history. Runtime churn therefore does not create normal code-history commits or trigger the repository's `push: main` CI on every engagement state update. Live Preflight verifies the durable-state branch/write path before live activation.
 
 Neither engagement state file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username, and explicit opt-outs are retained rather than silently aged out with normal cooldown cache entries.
 
