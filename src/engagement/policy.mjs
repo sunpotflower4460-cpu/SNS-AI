@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { xAiReplyApprovalReady, xAiReplyApprovalRequired } from './readiness.mjs';
 
 const POLICY_FILE = new URL('../../config/engagement-policy.json', import.meta.url);
 const SUPPORTED_KINDS = new Set(['reply', 'dm']);
@@ -42,20 +43,21 @@ export function normalizeEngagementEvent(value) {
   };
 }
 
-function xAiPublicReplyNeedsApproval(config, event) {
+function xAiPublicReplyNeedsApproval(config, accountId, event) {
   return String(event?.platform || '').toLowerCase() === 'x'
     && event?.kind === 'reply'
-    && config.requireXAiReplyBotApproval === true
-    && config.xAiReplyBotApprovalConfirmed !== true;
+    && xAiReplyApprovalRequired(config, accountId)
+    && !xAiReplyApprovalReady(config, accountId);
 }
 
 export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
   const config = effectiveEngagementPolicy(globalPolicy, account);
   const normalized = normalizeEngagementEvent(event);
+  const accountId = String(account?.id || '');
   const allowedAccounts = Array.isArray(config.allowedAccounts) ? config.allowedAccounts.map(String) : null;
 
   if (config.enabled !== true) engagementError('ENGAGEMENT_DISABLED', 'Automated engagement is disabled for this account.');
-  if (allowedAccounts && !allowedAccounts.includes(String(account?.id || ''))) {
+  if (allowedAccounts && !allowedAccounts.includes(accountId)) {
     engagementError('ENGAGEMENT_ACCOUNT_NOT_ALLOWED', 'Automated engagement is not allowlisted for this account.');
   }
   if (config.inboundOnly !== false && !normalized.inbound) engagementError('ENGAGEMENT_UNSOLICITED', 'Cold or unsolicited automated engagement is not allowed.');
@@ -70,7 +72,7 @@ export function assertAutomatedEngagementAllowed({ account, event, globalPolicy 
   if (normalized.kind === 'reply' && config.autoReply !== true) engagementError('ENGAGEMENT_REPLY_DISABLED', 'Automated replies are disabled.');
   if (normalized.kind === 'dm' && config.autoDmReply !== true) engagementError('ENGAGEMENT_DM_DISABLED', 'Automated DM replies are disabled.');
 
-  const platformApprovalRequired = xAiPublicReplyNeedsApproval(config, normalized);
+  const platformApprovalRequired = xAiPublicReplyNeedsApproval(config, accountId, normalized);
 
   return {
     allowed: true,
