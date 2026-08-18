@@ -5,7 +5,10 @@ import { githubContext, githubRequest } from '../lib/github.mjs';
 const LOCAL_FILE = fileURLToPath(new URL('../../data/engagement-delivery-ledger.json', import.meta.url));
 const STATE_BRANCH = process.env.SNS_DURABLE_STATE_BRANCH || 'sns-ai-state';
 const REMOTE_PATH = 'data/engagement-delivery-ledger.json';
-const RESOLVED_RETENTION_MS = 8 * 24 * 60 * 60_000;
+// run.mjs ignores inbound interactions older than 30 days. Keep resolved delivery guards slightly
+// longer than that complete processing window so a compacted engagement-state entry cannot cause an
+// older-but-still-processable provider event to be sent twice.
+const RESOLVED_RETENTION_MS = 35 * 24 * 60 * 60_000;
 const MAX_RESOLVED_RECORDS = 2000;
 const BLOCKING_STATUSES = new Set(['sending', 'sent', 'unknown', 'handled']);
 const UNRESOLVED_STATUSES = new Set(['sending', 'unknown']);
