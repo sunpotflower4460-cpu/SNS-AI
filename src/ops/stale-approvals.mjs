@@ -34,14 +34,16 @@ export async function expireStaleApprovals({ maxAgeDays = Number(process.env.APP
   const closed = [];
   const expiredSlots = [];
   for (const issue of stale) {
-    await api(`/repos/${repo}/issues/${issue.number}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: `⏳ SNS-AI automatically expired this approval after ${normalizedMaxAgeDays} day(s). A fresh draft will be generated on a future slot.` }) });
-    await api(`/repos/${repo}/issues/${issue.number}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
-    closed.push(issue.number);
-
     // Closing the issue used to leave the slot sitting at `approval_pending` in data/state.json forever,
     // so state.json disagreed with reality and the operator reading it believed a draft was still
     // awaiting review. markSlotIfUnhandled is used rather than a plain write so a slot that was actually
     // approved and published in the window between the issue listing and this write is never downgraded.
+    //
+    // The slot write happens BEFORE the issue is closed, and closing is skipped if it fails. This
+    // matters because expireStaleApprovals only ever looks at OPEN issues (state=open above) - once an
+    // issue is closed there is no way for a later run to find it again and retry. Closing first and then
+    // failing to persist the slot would strand it at whatever state it was in, permanently and silently.
+    // Attempting the write first means a transient failure just leaves the issue open for next run.
     const payload = trustedApprovalPayload(issue);
     const slotId = payload?.slotId;
     if (!slotId) continue;
@@ -52,9 +54,30 @@ export async function expireStaleApprovals({ maxAgeDays = Number(process.env.APP
       expiredSlots.push({ slotId, issue: issue.number, applied: persisted.applied, currentStatus: persisted.current?.status || null });
     } catch (error) {
       expiredSlots.push({ slotId, issue: issue.number, applied: false, error: String(error.message || error) });
+      continue;
     }
+    await api(`/repos/${repo}/issues/${issue.number}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: `⏳ SNS-AI automatically expired this approval after ${normalizedMaxAgeDays} day(s). A fresh draft will be generated on a future slot.` }) });
+    await api(`/repos/${repo}/issues/${issue.number}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
+    closed.push(issue.number);
+  }
+  // A failed slot write leaves the issue open for retry next run, but maintenance.yml only runs weekly -
+  // waiting a week to notice is its own failure. Fail the command now so the workflow step goes red and
+  // Actions surfaces it immediately, without losing anything that already succeeded (closed/expiredSlots
+  // are still returned to the caller for inspection - see CLI block below).
+  const failures = expiredSlots.filter((row) => row.applied === false && row.error);
+  if (failures.length) {
+    const error = new Error(`Failed to persist expiry for ${failures.length} slot(s): ${failures.map((row) => row.slotId).join(', ')}. Their approval issues were left open for retry.`);
+    error.result = { skipped: false, maxAgeDays: normalizedMaxAgeDays, closed, expiredSlots };
+    throw error;
   }
   return { skipped: false, maxAgeDays: normalizedMaxAgeDays, closed, expiredSlots };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) console.log(JSON.stringify(await expireStaleApprovals(), null, 2));
+if (import.meta.url === `file://${process.argv[1]}`) {
+  try {
+    console.log(JSON.stringify(await expireStaleApprovals(), null, 2));
+  } catch (error) {
+    console.error(JSON.stringify(error.result || { error: error.message }, null, 2));
+    process.exitCode = 1;
+  }
+}

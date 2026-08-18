@@ -241,6 +241,7 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
 
       let privateRepo = false;
       let postAttempted = false;
+      let publishLimitStatus = 200;
       globalThis.fetch = async (url, options = {}) => {
         const target = String(url);
         if (target === 'https://api.openai.com/v1/moderations') {
@@ -259,6 +260,9 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
         }
         if (target === 'https://graph.instagram.com/v25.0/ig-user-123/content_publishing_limit?fields=config,quota_usage') {
           assert.equal(options.headers.Authorization, 'Bearer ig-access-token');
+          if (publishLimitStatus !== 200) {
+            return jsonResponse({ error: { message: 'Please reduce the amount of data you\'re asking for', code: 1 } }, publishLimitStatus);
+          }
           return jsonResponse({ data: [{ quota_usage: 3, config: { quota_total: 100 } }] });
         }
         if (target.includes('/media_publish') || target.endsWith('/media')) postAttempted = true;
@@ -287,6 +291,18 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
       assert.equal(blocked.mediaHosting.private, true);
       assert.match(blocked.mediaHosting.error, /public repository/);
       assert.equal(blocked.accounts[0].ok, false);
+      privateRepo = false;
+
+      // A publish-access probe failure that can't be classified as a missing scope (rate limit,
+      // transient 5xx) must still block readiness - publishing capability was never actually proven -
+      // without being misreported as "grant instagram_business_content_publish" when the operator
+      // already has that permission and the real cause is unrelated.
+      publishLimitStatus = 500;
+      const publishAccessBlocked = await runLivePreflight({ accountFilter: 'example-instagram' });
+      assert.equal(publishAccessBlocked.ok, false);
+      assert.equal(publishAccessBlocked.accounts[0].ok, false);
+      assert.match(publishAccessBlocked.accounts[0].error, /publish-access probe failed/);
+      assert.equal(postAttempted, false, 'preflight must never publish');
     } finally {
       globalThis.fetch = previousFetch;
       restoreEnv(env);

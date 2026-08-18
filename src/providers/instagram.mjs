@@ -53,7 +53,11 @@ const PROFESSIONAL_ACCOUNT_TYPES = new Set(['BUSINESS', 'MEDIA_CREATOR', 'CREATO
 
 function permissionDenied(error) {
   const code = Number(error?.body?.error?.code);
-  if (code === 10 || code === 200 || (code >= 200 && code <= 299)) return true;
+  // 200-299 already covers 200; code 10 ("Application does not have permission for this action") is a
+  // distinct value outside that range and is kept explicitly. Code 190 (invalid/expired OAuth token) is
+  // deliberately NOT included here - that is an auth problem, not a missing scope, and must not be
+  // reported as "grant instagram_business_content_publish" when the real fix is reauthenticating.
+  if (code === 10 || (code >= 200 && code <= 299)) return true;
   return /permission|scope|not authorized|insufficient/i.test(String(error?.message || ''));
 }
 

@@ -269,6 +269,14 @@ export async function runLivePreflight({ accountFilter } = {}) {
         }
       } else if (resolved.platform === 'instagram') {
         identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v25.0' });
+        // A hard permission/OAuth error already throws inside verifyInstagramCredential. publishAccess.ok
+        // === false is the OTHER outcome: content_publishing_limit failed for a reason that could not be
+        // classified as a missing scope (rate limit, transient 5xx, etc). That must still block readiness
+        // - publishing capability was never actually proven - it just must not be misreported as a scope
+        // problem the operator can't fix by granting a permission they already have.
+        if (identity.publishAccess?.ok === false) {
+          throw new Error(`Instagram publish-access probe failed: ${identity.publishAccess.error || 'unknown error'}`);
+        }
       } else throw new Error(`Unsupported platform: ${resolved.platform}`);
       const kind = builtInMediaKind(account);
       const ownModels = requiredModels(account);

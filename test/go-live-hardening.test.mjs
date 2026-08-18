@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { trustedApprovalPayload, __test as githubTest } from '../src/lib/github.mjs';
@@ -129,18 +130,33 @@ test('the generation prompt states X weighted length, so a Japanese account is n
   assert.doesNotMatch(ig.system, /weighted characters/);
 });
 
-test('readiness is not vacuously true when no account is enabled', async () => {
+test('readiness is not vacuously true when no account is enabled', async (t) => {
   // enabledRows.every(...) on an empty array is true, so doctor reported ready:true and live-preflight
   // returned ok:true before a single credential existed - while checking nothing at all. The go-live
   // checklist asks the operator to confirm "Doctor ready" and "Live Preflight ready", so both boxes
-  // ticked themselves. This is the committed state of the repo today (all three accounts disabled).
+  // ticked themselves.
+  //
+  // This writes a synthetic all-disabled config rather than asserting on the committed
+  // config/accounts.json directly: the rule under test is about the zero-enabled-accounts CASE, not
+  // about today's config contents. The operator is expected to flip music-tools-x's `enabled` to true
+  // as part of go-live, and this test must keep passing (proving the rule still holds for whatever
+  // OTHER accounts remain disabled) rather than failing the moment that happens.
   const { buildReadinessReport } = await import('../src/ops/doctor.mjs');
   const { buildStrictReadinessReport } = await import('../src/ops/doctor-strict.mjs');
   const { runLivePreflight } = await import('../src/ops/live-preflight.mjs');
 
-  const config = JSON.parse(await readFile(fileURLToPath(new URL('../config/accounts.json', import.meta.url)), 'utf8'));
-  const enabled = Object.values(config.accounts || {}).filter((account) => account?.enabled === true && account.mode !== 'pause');
-  assert.equal(enabled.length, 0, 'this test describes the dormant repo state; re-check it once an account is enabled');
+  const configPath = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
+  const savedConfig = await readFile(configPath, 'utf8');
+  t.after(async () => { await writeFile(configPath, savedConfig, 'utf8'); });
+
+  const original = JSON.parse(savedConfig);
+  const allDisabled = {
+    ...original,
+    accounts: Object.fromEntries(
+      Object.entries(original.accounts || {}).map(([id, account]) => [id, { ...account, enabled: false, mode: 'pause' }])
+    )
+  };
+  await writeFile(configPath, `${JSON.stringify(allDisabled, null, 2)}\n`, 'utf8');
 
   const report = await buildReadinessReport();
   assert.equal(report.ready, false, 'readiness with zero enabled accounts must not be reported as ready');
@@ -245,10 +261,27 @@ test('Instagram credential verification proves the publish permission and a Prof
 
 test('the preflight workflow can verify the approval channel it depends on', async () => {
   // approval mode does POST /labels then POST /issues after a full paid generation. preflight.yml
-  // granted only `contents: write`, so the channel was structurally unverifiable; Issues being disabled
-  // on the repository produced the same silent dead end.
+  // originally granted only `contents: write`, so the channel was structurally unverifiable; Issues
+  // being disabled on the repository produced the same silent dead end.
+  //
+  // approvalChannelCheck (src/ops/live-preflight.mjs) only ever issues GET requests - it verifies Issues
+  // are enabled and reads the `approved` label, it never creates either - so the fix is `issues: read`,
+  // not `write`. The actual create still happens later in autopilot.yml, which keeps `issues: write`.
+  //
+  // The permissions regex is anchored to indented lines directly under `permissions:` so it cannot match
+  // text outside that block - including this test file's own prose, or a comment in the workflow file
+  // that happens to mention "issues: write" (autopilot.yml's permission is referenced in a comment right
+  // next to this one, which a loose `[\s\S]*?` match would have matched instead of the real key).
   const yaml = await readFile(`${WORKFLOWS_DIR}preflight.yml`, 'utf8');
-  assert.match(yaml, /permissions:[\s\S]*?issues:\s*write/, 'preflight needs issues: write to verify the approval channel');
+  const permissionsBlock = /permissions:\n((?:[ \t]+[^\n]*\n)*)/.exec(yaml);
+  assert.ok(permissionsBlock, 'preflight.yml must have a permissions: block');
+  assert.match(permissionsBlock[1], /^[ \t]+issues:[ \t]*read\s*$/m, 'preflight only reads Issues state; it must not hold issues: write');
+  assert.doesNotMatch(permissionsBlock[1], /^[ \t]+issues:[ \t]*write\s*$/m, 'preflight never creates a label or issue, so it must not be granted issues: write');
+
+  const autopilot = await readFile(`${WORKFLOWS_DIR}autopilot.yml`, 'utf8');
+  const autopilotPermissions = /permissions:\n((?:[ \t]+[^\n]*\n)*)/.exec(autopilot);
+  assert.ok(autopilotPermissions, 'autopilot.yml must have a permissions: block');
+  assert.match(autopilotPermissions[1], /^[ \t]+issues:[ \t]*write\s*$/m, 'autopilot creates the approval issue/label and still needs issues: write');
 
   const names = (await readdir(WORKFLOWS_DIR)).filter((name) => name.endsWith('.yml'));
   assert.ok(names.includes('publish.yml'), 'sanity: the workflow directory resolved correctly');
@@ -305,6 +338,22 @@ test('config validation catches the media traps that only surface at publish tim
   assert.ok(typo.some((error) => error.includes('defaultInstagramDecision')));
   const valid = validateStrictConfig(base({ platform: 'instagram', media: { strategy: 'auto', defaultInstagramDecision: 'generate' } }));
   assert.ok(!valid.some((error) => error.includes('defaultInstagramDecision')));
+
+  // A malformed maxHostedImageBytes (wrong type, unparseable string) must be rejected on its own -
+  // Number("15MB") is NaN, and `NaN > X_MAX_IMAGE_BYTES` is false, so the size guard above would
+  // silently pass a value the runtime can't interpret at all.
+  const malformed = validateStrictConfig(base({
+    platform: 'x',
+    media: { strategy: 'generate', type: 'image', maxHostedImageBytes: '15MB' }
+  }));
+  assert.ok(malformed.some((error) => error.includes('media.maxHostedImageBytes') && error.includes('non-negative integer')));
+  assert.ok(!malformed.some((error) => error.includes("above X's")), 'a malformed value is a type error, not a size comparison');
+
+  const nullValue = validateStrictConfig(base({
+    platform: 'x',
+    media: { strategy: 'generate', type: 'image', maxHostedImageBytes: null }
+  }));
+  assert.ok(!nullValue.some((error) => error.includes('maxHostedImageBytes')), 'null defers to the configured default and is not itself an error');
 });
 
 test('two accounts cannot silently share one credential', () => {
@@ -331,6 +380,33 @@ test('two accounts cannot silently share one credential', () => {
 
   const wrongType = validateStrictConfig({ defaults: {}, accounts: { first: { enabled: true, platform: 'x', credentialKey: 42 } } });
   assert.ok(wrongType.some((error) => error.includes('credentialKey')));
+
+  // At runtime (src/ops/doctor.mjs) an account with no explicit credentialKey resolves to one keyed by
+  // its own account id: `account.credentialKey || id`. An account named "alpha" with no credentialKey
+  // and a second account whose explicit credentialKey is "alpha" therefore share one provider identity
+  // even though only one of them names a credentialKey in config - grouping by the literal field alone
+  // missed this collision entirely.
+  const implicitCollision = validateStrictConfig({
+    defaults: {},
+    accounts: {
+      alpha: { enabled: true, platform: 'x' },
+      second: { enabled: true, platform: 'x', credentialKey: 'alpha' }
+    }
+  });
+  assert.ok(
+    implicitCollision.some((error) => error.includes('shared by') && error.includes('alpha')),
+    'an explicit credentialKey colliding with another account\'s implicit (id-based) key must be caught'
+  );
+
+  // Two accounts that both fall back to their own distinct ids must not collide with each other.
+  const distinctImplicit = validateStrictConfig({
+    defaults: {},
+    accounts: {
+      alpha: { enabled: true, platform: 'x' },
+      beta: { enabled: true, platform: 'x' }
+    }
+  });
+  assert.ok(!distinctImplicit.some((error) => error.includes('shared by')));
 });
 
 test('expiring a stale approval clears the slot, but never overwrites a real publish', async (t) => {
@@ -387,4 +463,75 @@ test("an image over X's 5 MB ceiling is classified as a config problem, not a pr
 
   const source = await readFile(fileURLToPath(new URL('../src/orchestrate.mjs', import.meta.url)), 'utf8');
   assert.match(source, /nonCircuitCodes = \[[^\]]*MEDIA_HOSTING_TOO_LARGE/, 'the code must actually be excluded from the circuit');
+});
+
+test('a failed slot write leaves the approval issue open for retry, instead of closing it first', async (t) => {
+  // The issue used to be closed BEFORE the slot write was attempted. expireStaleApprovals only ever
+  // looks at OPEN issues, so a write failure after that close permanently stranded the slot - no later
+  // run could ever find that issue again to retry. The fix reorders the two: the durable write happens
+  // first, and the issue is only closed once it succeeds.
+  //
+  // Root bypasses ordinary chmod-based permission denial, so the immutable filesystem attribute is used
+  // to force the write to fail, exactly as in test/deprecated-media-skip.test.mjs's state-error case -
+  // verified with a real round-trip probe since chattr support isn't guaranteed in every environment.
+  const STATE_FILE = fileURLToPath(new URL('../data/state.json', import.meta.url));
+  const probePath = fileURLToPath(new URL('../data/.chattr-probe-stale-approvals.tmp', import.meta.url));
+  let chattrSupported = false;
+  try {
+    await writeFile(probePath, 'probe', 'utf8');
+    execFileSync('chattr', ['+i', probePath]);
+    try { await writeFile(probePath, 'should fail', 'utf8'); }
+    catch { chattrSupported = true; }
+  } catch { chattrSupported = false; }
+  finally {
+    try { execFileSync('chattr', ['-i', probePath]); } catch { /* ignore */ }
+    await rm(probePath, { force: true });
+  }
+  if (!chattrSupported) { t.skip('chattr immutable-attribute is not enforced in this environment'); return; }
+
+  const previousFetch = globalThis.fetch;
+  const savedEnv = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN, GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY };
+  const savedState = await readFile(STATE_FILE, 'utf8');
+  t.after(async () => {
+    globalThis.fetch = previousFetch;
+    for (const [key, value] of Object.entries(savedEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    try { execFileSync('chattr', ['-i', STATE_FILE]); } catch { /* already cleared */ }
+    await writeFile(STATE_FILE, savedState, 'utf8');
+  });
+
+  process.env.GH_TOKEN = 'gh-test-token';
+  delete process.env.GITHUB_TOKEN;
+  process.env.GITHUB_REPOSITORY = 'owner/repo';
+
+  const trustedBody = JSON.stringify({
+    account: 'example-x', slotId: 'stuck-slot',
+    _snsAi: { kind: 'sns-ai-approval', version: 1, account: 'example-x', slotId: 'stuck-slot' }
+  });
+  let closeAttempted = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const target = String(url);
+    if (target.includes('/issues?state=open')) {
+      return new Response(JSON.stringify([
+        { number: 42, title: '[approval] example-x stuck-slot', body: trustedBody, user: { login: 'github-actions[bot]' }, created_at: '2020-01-01T00:00:00.000Z' }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (target.endsWith('/issues/42/comments') || (target.endsWith('/issues/42') && options.method === 'PATCH')) {
+      closeAttempted = true;
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected mocked URL: ${target}`);
+  };
+
+  await writeFile(STATE_FILE, `${JSON.stringify({ slots: {} }, null, 2)}\n`, 'utf8');
+  execFileSync('chattr', ['+i', STATE_FILE]);
+
+  const { expireStaleApprovals } = await import(`../src/ops/stale-approvals.mjs?active=${Date.now()}`);
+  const error = await expireStaleApprovals({ maxAgeDays: 7 }).then(() => null, (thrown) => thrown);
+
+  assert.ok(error, 'expireStaleApprovals must fail loudly instead of silently swallowing the write failure');
+  assert.match(error.message, /stuck-slot/);
+  assert.equal(closeAttempted, false, 'the issue must stay open for retry - it must not be closed before the slot write succeeded');
+  assert.deepEqual(error.result?.closed, [], 'nothing was actually closed');
+  assert.equal(error.result?.expiredSlots?.[0]?.applied, false);
+  assert.ok(error.result?.expiredSlots?.[0]?.error, 'the failure reason must be attached for diagnosis');
 });
