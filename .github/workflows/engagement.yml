@@ -139,9 +139,9 @@ jobs:
               fi
             done
 
-            for path in "${paths[@]}"; do
-              git add -A -- "$path"
-            done
+            # Only the three engagement paths above are changed in this isolated worktree. Staging data/
+            # avoids a first-run pathspec error when one of those files does not exist yet.
+            git add -A -- data/
             if git diff --cached --quiet; then
               echo "No durable engagement state changes."
               exit 0
