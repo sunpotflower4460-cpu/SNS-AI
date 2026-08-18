@@ -140,9 +140,11 @@ Official Meta API collection/reference:
 
 `data/engagement-state.json` stores hashed interaction/actor keys plus operational status. It also keeps a bounded privacy-safe sent log so daily caps remain enforceable even after old event entries are compacted.
 
-`data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result.
+`data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result. X OAuth2 rotation state is encrypted before it is written to `data/x-oauth2-state.json`.
 
-Neither file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username, and explicit opt-outs are retained rather than silently aged out with normal cooldown cache entries.
+In GitHub Actions, these three engagement runtime files are restored from and persisted to the existing `sns-ai-state` durable branch rather than `main`. Runtime churn therefore does not create normal code-history commits or trigger the repository's `push: main` CI on every engagement state update. Live Preflight verifies the durable-state branch/write path before live activation.
+
+Neither engagement state file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username, and explicit opt-outs are retained rather than silently aged out with normal cooldown cache entries.
 
 ## Growth guardrails
 
