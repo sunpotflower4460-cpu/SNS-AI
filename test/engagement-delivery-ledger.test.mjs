@@ -78,19 +78,22 @@ test('local delivery claim is at-most-once and definitive failures can be retrie
   });
 });
 
-test('delivery ledger compaction never evicts unresolved ambiguity records', () => {
+test('delivery ledger compaction never evicts unresolved ambiguity records and outlives the 30-day inbound window', () => {
   const now = Date.parse('2026-08-18T00:00:00Z');
   const records = {
     unresolved_old: { status: 'unknown', updatedAt: '2020-01-01T00:00:00Z' },
     sending_old: { status: 'sending', updatedAt: '2020-01-01T00:00:00Z' },
-    resolved_old: { status: 'sent', updatedAt: '2020-01-01T00:00:00Z' },
+    resolved_29d: { status: 'sent', updatedAt: '2026-07-20T00:00:00Z' },
+    resolved_old: { status: 'sent', updatedAt: '2026-06-01T00:00:00Z' },
     resolved_recent: { status: 'sent', updatedAt: '2026-08-17T00:00:00Z' }
   };
   const compacted = deliveryTest.compactRecords(records, now);
   assert.ok(compacted.unresolved_old);
   assert.ok(compacted.sending_old);
   assert.ok(compacted.resolved_recent);
+  assert.ok(compacted.resolved_29d);
   assert.equal(compacted.resolved_old, undefined);
+  assert.ok(deliveryTest.RESOLVED_RETENTION_MS > 30 * 24 * 60 * 60_000);
 
   const manyResolved = {};
   for (let i = 0; i < deliveryTest.MAX_RESOLVED_RECORDS + 25; i += 1) {
