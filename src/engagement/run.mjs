@@ -8,6 +8,13 @@ import { moderateText } from '../lib/openai.mjs';
 import { verifyXOAuth2Credential } from '../providers/x.mjs';
 import { classifyAndDraftEngagement, hardHumanCategory } from './ai.mjs';
 import { assertAutomatedEngagementAllowed, effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
+import {
+  allowedEngagementAccount,
+  assertXEngagementCredential,
+  engagementCredentialError,
+  liveEngagementAccount,
+  requiredXEngagementScopes
+} from './readiness.mjs';
 import { listXMentions, listXDirectMessages, sendXReply, sendXDirectMessage } from './providers/x.mjs';
 import {
   listInstagramComments,
@@ -107,36 +114,6 @@ function engagementAuthFailure(error) {
   const status = Number(error?.status);
   if (status === 401 || status === 403) return true;
   return /oauth|access token|refresh token|scope|permission|not authorized|authorization/i.test(String(error?.message || ''));
-}
-
-function engagementCredentialError(message) {
-  const error = new Error(message);
-  error.code = 'ENGAGEMENT_CREDENTIALS_NOT_READY';
-  return error;
-}
-
-function xRequiredScopes(policy) {
-  const required = new Set();
-  if (policy.autoReply === true || policy.autoDmReply === true) {
-    required.add('tweet.read');
-    required.add('users.read');
-    required.add('offline.access');
-  }
-  if (policy.autoReply === true) required.add('tweet.write');
-  if (policy.autoDmReply === true) {
-    required.add('dm.read');
-    required.add('dm.write');
-  }
-  return [...required];
-}
-
-function assertXEngagementCredential(identity, policy) {
-  const scopes = new Set(String(identity?.session?.scope || '').split(/\s+/).filter(Boolean));
-  const missing = xRequiredScopes(policy).filter((scope) => !scopes.has(scope));
-  if (missing.length) throw engagementCredentialError(`X engagement OAuth2 is missing required scopes: ${missing.join(', ')}.`);
-  if ((policy.autoReply === true || policy.autoDmReply === true) && identity?.session?.hasRefreshToken !== true) {
-    throw engagementCredentialError('X engagement automation requires an offline.access refresh token for unattended long-running operation.');
-  }
 }
 
 async function instagramEvents(accountId, account, history, policy) {
@@ -475,9 +452,12 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
   if (globalPolicy.enabled !== true) return { state: 'disabled', accounts: [] };
   const accounts = await loadAccounts();
   const history = await readHistory();
-  const allowedAccounts = Array.isArray(globalPolicy.allowedAccounts) ? new Set(globalPolicy.allowedAccounts.map(String)) : null;
   const ids = Object.entries(accounts)
-    .filter(([id, account]) => account.enabled === true && account.mode !== 'pause' && (!accountFilter || id === accountFilter) && (!allowedAccounts || allowedAccounts.has(id)))
+    .filter(([id, account]) => {
+      if (account.enabled !== true || account.mode === 'pause' || (accountFilter && id !== accountFilter)) return false;
+      if (!allowedEngagementAccount(globalPolicy, id)) return false;
+      return dryRun || liveEngagementAccount(globalPolicy, id);
+    })
     .map(([id]) => id);
   const report = [];
 
@@ -536,7 +516,7 @@ export const __test = {
   xEvents,
   credentialNotReady,
   engagementAuthFailure,
-  xRequiredScopes,
+  xRequiredScopes: requiredXEngagementScopes,
   assertXEngagementCredential,
   privateSafeDecision,
   safeEventError,
