@@ -11,6 +11,7 @@ const POLICY = `${ROOT}config/engagement-policy.json`;
 const MUTABLE = [
   `${ROOT}data/engagement-state.json`,
   `${ROOT}data/engagement-audit.jsonl`,
+  `${ROOT}data/engagement-delivery-ledger.json`,
   `${ROOT}data/usage.jsonl`,
   `${ROOT}data/usage-state.json`,
   `${ROOT}data/x-oauth2-state.json`,
@@ -38,6 +39,27 @@ function json(body, status = 200, headers = {}) {
     status,
     headers: { 'content-type': 'application/json', ...headers }
   });
+}
+
+function deliveryLedgerTransport() {
+  let remote = null;
+  let revision = 0;
+  const endpoint = 'https://api.github.com/repos/sunpotflower4460-cpu/SNS-AI/contents/data/engagement-delivery-ledger.json';
+  return (href, method, options = {}) => {
+    if (!String(href).startsWith(endpoint)) return null;
+    if (method === 'GET') {
+      if (!remote) return json({ message: 'Not Found' }, 404);
+      return json({ content: Buffer.from(`${JSON.stringify(remote)}\n`).toString('base64'), sha: `ledger-${revision}` });
+    }
+    if (method === 'PUT') {
+      const request = JSON.parse(String(options.body || '{}'));
+      assert.equal(request.branch, 'sns-ai-state');
+      remote = JSON.parse(Buffer.from(request.content, 'base64').toString('utf8'));
+      revision += 1;
+      return json({ content: { sha: `ledger-${revision}` } });
+    }
+    return json({ message: 'Method Not Allowed' }, 405);
+  };
 }
 
 function openAiDecision(text) {
@@ -141,11 +163,14 @@ test('X engagement runtime auto-replies routine inbound, persists opt-out, escal
     const issueBodies = [];
     const sentPosts = [];
     const sentDms = [];
+    const ledger = deliveryLedgerTransport();
     let issueNumber = 100;
 
     globalThis.fetch = async (url, options = {}) => {
       const href = String(url);
       const method = String(options.method || 'GET').toUpperCase();
+      const ledgerResponse = ledger(href, method, options);
+      if (ledgerResponse) return ledgerResponse;
       if (href === 'https://api.x.com/2/oauth2/token' && method === 'POST') return json(refreshedXSession());
       if (href.startsWith('https://api.x.com/2/users/me')) return json({ data: { id: '1', username: 'owner' } });
       if (href.startsWith('https://api.x.com/2/users/1/mentions')) {
@@ -301,11 +326,14 @@ test('Instagram engagement runtime polls recent comments and conversations and r
     await writeFile(`${ROOT}data/history.jsonl`, `${JSON.stringify({ account: 'music-tools-x', status: 'published', providerPostId: '777', at: old, text: 'post' })}\n`, 'utf8');
     const commentReplies = [];
     const dmReplies = [];
+    const ledger = deliveryLedgerTransport();
 
     globalThis.fetch = async (url, options = {}) => {
       const parsed = new URL(String(url));
       const href = parsed.toString();
       const method = String(options.method || 'GET').toUpperCase();
+      const ledgerResponse = ledger(href, method, options);
+      if (ledgerResponse) return ledgerResponse;
       if (parsed.origin === 'https://graph.instagram.com' && parsed.pathname === '/v25.0/777/comments' && method === 'GET') {
         return json({ data: [
           { id: '7001', from: { id: '2000', username: 'listener' }, text: '初心者にも向いていますか？', timestamp: old },
