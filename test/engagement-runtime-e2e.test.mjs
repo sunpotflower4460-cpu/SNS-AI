@@ -117,7 +117,7 @@ test('X engagement runtime auto-replies routine inbound, ignores noise, escalate
     globalThis.fetch = async (url, options = {}) => {
       const href = String(url);
       const method = String(options.method || 'GET').toUpperCase();
-      if (href === 'https://api.x.com/2/users/me') return json({ data: { id: '1', username: 'owner' } });
+      if (href.startsWith('https://api.x.com/2/users/me')) return json({ data: { id: '1', username: 'owner' } });
       if (href.startsWith('https://api.x.com/2/users/1/mentions')) {
         return json({
           data: [
@@ -206,7 +206,10 @@ test('Instagram engagement runtime polls recent comments and conversations and r
       const href = parsed.toString();
       const method = String(options.method || 'GET').toUpperCase();
       if (parsed.origin === 'https://graph.instagram.com' && parsed.pathname === '/v25.0/777/comments' && method === 'GET') {
-        return json({ data: [{ id: '7001', from: { id: '2000', username: 'listener' }, text: '初心者にも向いていますか？', timestamp: old }] });
+        return json({ data: [
+          { id: '7001', from: { id: '2000', username: 'listener' }, text: '初心者にも向いていますか？', timestamp: old },
+          { id: '7002', from: { id: '1000', username: 'owner' }, text: '自分自身の返信', timestamp: old }
+        ] });
       }
       if (parsed.origin === 'https://graph.instagram.com' && parsed.pathname === '/v25.0/1000/conversations' && method === 'GET') {
         return json({ data: [{ id: '8001', updated_time: old }] });
@@ -236,6 +239,7 @@ test('Instagram engagement runtime polls recent comments and conversations and r
     assert.equal(result.accounts[0]?.state, 'ok', JSON.stringify(result.accounts[0]));
     assert.equal(result.accounts[0].warnings.length, 0);
     assert.equal(result.accounts[0].events.filter((row) => row.status === 'sent').length, 2);
+    assert.equal(result.accounts[0].events.length, 2);
     assert.equal(commentReplies.length, 1);
     assert.equal(dmReplies.length, 1);
     assert.equal(commentReplies[0].message.length > 0, true);
