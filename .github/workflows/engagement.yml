@@ -51,6 +51,8 @@ jobs:
           npm run check
           npm run secret-scan
 
+      # The shared helper restores/persists only privacy-safe engagement runtime files, including
+      # data/engagement-state.json and data/engagement-audit.jsonl, on sns-ai-state rather than main.
       - name: Restore durable engagement state
         shell: bash
         run: bash scripts/engagement-durable-state.sh restore
