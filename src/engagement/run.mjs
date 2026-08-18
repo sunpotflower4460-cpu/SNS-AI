@@ -137,7 +137,6 @@ async function instagramEvents(accountId, account, history) {
   } catch (error) {
     warnings.push(`Instagram DMs unavailable: ${String(error?.message || error).slice(0, 180)}`);
   }
-
   return { events: output, warnings };
 }
 
@@ -152,6 +151,21 @@ async function ensureNeedsHumanLabel() {
   });
 }
 
+function privacySafeHumanFields(event, decision) {
+  if (event.public === true) {
+    return {
+      reason: String(decision.reason || 'Human judgment required.').slice(0, 500),
+      summary: String(decision.humanSummary || 'SNS-AIが自動返信を避けました。').slice(0, 600),
+      question: String(decision.humanQuestion || 'どのように対応しますか？').slice(0, 500)
+    };
+  }
+  return {
+    reason: 'A private inbound interaction requires human judgment. Private message content and AI paraphrases are intentionally omitted.',
+    summary: `非公開${String(event.platform || '').toUpperCase()} DMで人間判断が必要です。内容は公開リポジトリへ転記していません。`,
+    question: 'SNSアプリで該当DMを確認し、対応方針だけこのチャットで指定してください。'
+  };
+}
+
 async function createHumanIssue({ accountId, event, key, decision, policy }) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
@@ -162,6 +176,7 @@ async function createHumanIssue({ accountId, event, key, decision, policy }) {
   if (found) return found;
   await ensureNeedsHumanLabel();
   const excerptLimit = Math.max(0, Number(policy?.humanEscalation?.publicExcerptMaxChars ?? 800));
+  const safeHuman = privacySafeHumanFields(event, decision);
   const body = {
     kind: 'sns-ai-engagement-human',
     schemaVersion: 1,
@@ -170,9 +185,9 @@ async function createHumanIssue({ accountId, event, key, decision, policy }) {
     interactionKind: event.kind,
     eventKey: key,
     category: decision.category || 'unknown',
-    reason: String(decision.reason || 'Human judgment required.').slice(0, 500),
-    summary: String(decision.humanSummary || 'SNS-AIが自動返信を避けました。').slice(0, 600),
-    question: String(decision.humanQuestion || 'どのように対応しますか？').slice(0, 500),
+    reason: safeHuman.reason,
+    summary: safeHuman.summary,
+    question: safeHuman.question,
     publicInteraction: event.public === true,
     publicExcerpt: event.public === true ? String(event.text || '').slice(0, excerptLimit) : null,
     privateContentOmitted: event.public !== true,
@@ -254,11 +269,25 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: dryRun ? 'dry-run-waiting' : 'waiting', dueAt };
   }
 
+  if (allowed.platformApprovalRequired) {
+    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'x-ai-reply-approval-required' });
+    return { status: dryRun ? 'dry-run-platform-gated' : 'platform-gated' };
+  }
+
   const maxPerDay = event.kind === 'dm' ? Number(policy.maxAutomatedDmRepliesPerDay ?? 12) : Number(policy.maxAutomatedRepliesPerDay ?? 12);
   const sentToday = await countSentSince(accountId, event.kind, new Date(Date.now() - 24 * 60 * 60_000));
   if (Number.isFinite(maxPerDay) && maxPerDay >= 0 && sentToday >= maxPerDay) {
     if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'daily-cap' });
     return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
+  }
+
+  const cooldownMinutes = event.kind === 'dm' ? Number(policy.dmCooldownMinutes ?? 30) : Number(policy.replyCooldownMinutes ?? 30);
+  if (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0) {
+    const recent = await countSentSince(accountId, event.kind, new Date(Date.now() - cooldownMinutes * 60_000));
+    if (recent > 0) {
+      if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'cooldown' });
+      return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
+    }
   }
 
   const decision = await classifyAndDraftEngagement({ accountId, account, event, policy });
@@ -345,7 +374,9 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
           if (!dryRun) await appendEngagementAudit({ account: accountId, eventKey: eventKey(accountId, event), platform: event.platform, kind: event.kind, status: 'error', code: error?.code || null });
         }
       }
-      report.push({ account: accountId, state: 'ok', warnings: collected.warnings, events: rows });
+      const eventErrors = rows.filter((row) => row.status === 'error').length;
+      const state = collected.warnings.length || eventErrors ? 'degraded' : 'ok';
+      report.push({ account: accountId, state, warnings: collected.warnings, eventErrors, events: rows });
     } catch (error) {
       if (credentialNotReady(error)) {
         report.push({ account: accountId, state: 'waiting_for_engagement_credentials', message: 'Engagement OAuth credentials/scopes are not ready yet.' });
@@ -354,7 +385,14 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
       report.push({ account: accountId, state: 'error', message: String(error?.message || error).slice(0, 300) });
     }
   }
-  return { state: ids.length ? 'ok' : 'nothing_enabled', accounts: report };
+  const overallState = !ids.length
+    ? 'nothing_enabled'
+    : report.some((row) => row.state === 'error')
+      ? 'error'
+      : report.some((row) => row.state === 'degraded')
+        ? 'degraded'
+        : 'ok';
+  return { state: overallState, accounts: report };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -373,7 +411,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     result = await runEngagement({ accountFilter: args.account || null, dryRun: bool(args['dry-run']) });
   }
   console.log(JSON.stringify(result, null, 2));
-  if (result.accounts?.some((row) => row.state === 'error')) process.exitCode = 1;
+  if (['error', 'degraded'].includes(result.state) || result.accounts?.some((row) => ['error', 'degraded'].includes(row.state))) process.exitCode = 1;
 }
 
 export const __test = {
@@ -383,5 +421,6 @@ export const __test = {
   terminal,
   instagramMediaIds,
   xEvents,
-  credentialNotReady
+  credentialNotReady,
+  privacySafeHumanFields
 };
