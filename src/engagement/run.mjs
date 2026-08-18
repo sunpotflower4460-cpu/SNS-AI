@@ -6,7 +6,7 @@ import { githubContext, githubRequest } from '../lib/github.mjs';
 import { validateDraftText } from '../lib/safety.mjs';
 import { moderateText } from '../lib/openai.mjs';
 import { verifyXOAuth2Credential } from '../providers/x.mjs';
-import { classifyAndDraftEngagement } from './ai.mjs';
+import { classifyAndDraftEngagement, hardHumanCategory } from './ai.mjs';
 import { assertAutomatedEngagementAllowed, effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
 import { listXMentions, listXDirectMessages, sendXReply, sendXDirectMessage } from './providers/x.mjs';
 import {
@@ -326,6 +326,22 @@ function safeEventError(error, event) {
   return `Private ${event.kind} processing failed (${String(error?.code || 'ENGAGEMENT_ERROR').slice(0, 80)}); private provider/user/message details omitted.`;
 }
 
+function deterministicHumanDecision(category, { optedOut: actorOptedOut = false } = {}) {
+  return {
+    action: 'human',
+    confidence: 1,
+    category,
+    response: '',
+    reason: 'A deterministic high-risk engagement guard requires human judgment before normal automation limits are applied.',
+    humanSummary: actorOptedOut
+      ? '自動返信を停止している相手から、人間判断が必要な重要カテゴリの連絡を検出しました。自動返信は行いません。'
+      : '高リスクまたは所有者判断が必要な問い合わせを検出しました。',
+    humanQuestion: actorOptedOut
+      ? '自動返信は行わず、この連絡を確認した上で人間として対応するか判断してください。'
+      : 'この問い合わせへの対応方針を指定してください。'
+  };
+}
+
 async function processEvent(accountId, account, event, globalPolicy, dryRun) {
   const policy = effectiveEngagementPolicy(globalPolicy, account);
   const key = eventKey(accountId, event);
@@ -334,22 +350,37 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
   if (terminal(prior?.status)) return { status: prior.status, skipped: true };
 
   const actor = await actorStatus(accountId, aKey);
-  if (actor?.optedOut === true) {
-    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'opted_out', kind: event.kind, platform: event.platform, actorKey: aKey, reason: 'actor-opt-out' });
-    return { status: dryRun ? 'dry-run-opted-out' : 'opted_out', persistent: true };
-  }
-
-  event.userOptedOut = optedOut(event.text);
+  const explicitOptOut = optedOut(event.text);
+  const hardCategory = hardHumanCategory(event.text);
+  event.userOptedOut = explicitOptOut;
   event.alreadyAutoResponded = prior?.status === 'sent';
   event.keywordDiscoveryOnly = false;
   event.sensitive = false;
   event.asksForHuman = false;
 
-  if (event.userOptedOut) {
-    if (!dryRun) {
-      await markActorOptOut(accountId, aKey);
-      await markEngagementEvent(accountId, key, { status: 'opted_out', kind: event.kind, platform: event.platform, actorKey: aKey, reason: 'explicit-opt-out' });
-    }
+  if (explicitOptOut && !dryRun) await markActorOptOut(accountId, aKey);
+
+  // High-risk or explicit-human interactions must not be hidden by an earlier opt-out, actor cooldown,
+  // human-like delay, or daily auto-reply cap. We surface them immediately for owner judgment, while an
+  // opted-out actor still receives no automated response unless the owner later explicitly chooses one.
+  if (hardCategory) {
+    const actorOptedOut = actor?.optedOut === true || explicitOptOut;
+    const decision = deterministicHumanDecision(hardCategory, { optedOut: actorOptedOut });
+    if (dryRun) return { status: 'dry-run-human', decision: privateSafeDecision(event, decision) };
+    const issue = await createHumanIssue({ accountId, event, key, decision, policy });
+    await markEngagementEvent(accountId, key, {
+      status: 'human', kind: event.kind, platform: event.platform, actorKey: aKey, category: hardCategory,
+      issueNumber: issue.number || null, public: event.public === true, actorOptedOut
+    });
+    await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'human', category: hardCategory, public: event.public === true, actorOptedOut });
+    return { status: 'human', issueNumber: issue.number || null };
+  }
+
+  if (actor?.optedOut === true || explicitOptOut) {
+    if (!dryRun) await markEngagementEvent(accountId, key, {
+      status: 'opted_out', kind: event.kind, platform: event.platform, actorKey: aKey,
+      reason: explicitOptOut ? 'explicit-opt-out' : 'actor-opt-out'
+    });
     return { status: dryRun ? 'dry-run-opted-out' : 'opted_out', persistent: Boolean(aKey) };
   }
 
@@ -508,5 +539,6 @@ export const __test = {
   xRequiredScopes,
   assertXEngagementCredential,
   privateSafeDecision,
-  safeEventError
+  safeEventError,
+  deterministicHumanDecision
 };
