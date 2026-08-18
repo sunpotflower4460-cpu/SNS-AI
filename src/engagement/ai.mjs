@@ -41,6 +41,7 @@ function parseJson(text) {
 export function hardHumanCategory(text) {
   const value = String(text || '');
   if (/弁護士|訴訟|法的措置|契約書|legal notice|lawsuit|attorney/i.test(value)) return 'legal';
+  if (/診断|処方|服用|薬(?:を|の|が|は)|副作用|治療|症状.*(?:どう|相談)|medical advice|diagnos(?:e|is)|prescription|dosage/i.test(value)) return 'medical';
   if (/返金|払い戻し|請求.*(?:違|誤)|chargeback|refund dispute/i.test(value)) return 'refund_or_payment_dispute';
   if (/個人情報|住所|電話番号|パスワード|乗っ取|不正アクセス|privacy|password|hacked/i.test(value)) return 'privacy_or_personal_data';
   if (/脅迫|殺す|危害|harass|threat/i.test(value)) return 'harassment_or_threat';
@@ -60,6 +61,15 @@ function normalizeResult(raw = {}) {
     humanQuestion: String(raw.humanQuestion || '').trim().slice(0, 500),
     confidence: Math.max(0, Math.min(1, Number(raw.confidence) || 0))
   };
+}
+
+export function withRequiredXOptOut(text, event, policy = {}) {
+  const response = String(text || '').trim();
+  const notice = String(policy.xAutomatedResponseOptOutText || '').trim();
+  if (!response || !notice) return response;
+  if (String(event?.platform || '').toLowerCase() !== 'x' || !['reply', 'dm'].includes(String(event?.kind || '').toLowerCase())) return response;
+  if (response.includes(notice)) return response;
+  return `${response}\n\n${notice}`;
 }
 
 export async function classifyAndDraftEngagement({ accountId, account, event, policy = {} }) {
@@ -86,6 +96,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
     'Replies should be concise, natural, helpful, and in the account voice. Do not sound like a customer-service robot. Do not mention that an AI generated the reply unless directly relevant.',
     'Do not use engagement bait. Do not pressure users into purchases or DMs. Do not send unsolicited follow-up messages.',
     'For praise or reactions that need no answer, ignore is acceptable. For genuine questions, prefer reply when safe.',
+    'For X, a configured opt-out notice is appended deterministically after generation; do not remove, paraphrase, or duplicate it inside the drafted response.',
     'humanSummary and humanQuestion are only for the account owner. They must be useful but privacy-minimized. For private DMs, summarize the decision needed without quoting the message or reproducing names, handles, email addresses, phone numbers, addresses, IDs, tokens, or other unnecessary private details.',
     'reason must also avoid reproducing secrets or unnecessary private-message details.',
     'Return only the required JSON object.'
@@ -131,6 +142,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
 
   if (result.action === 'reply') {
     if (!result.response) throw new Error('Engagement AI selected reply without response text.');
+    result.response = withRequiredXOptOut(result.response, event, policy);
     result.response = validateDraftText(account, result.response);
     await moderateText(result.response, account, accountId);
   }
