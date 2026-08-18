@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { assertAutomatedEngagementAllowed } from '../src/engagement/policy.mjs';
-import { eventKey } from '../src/engagement/store.mjs';
+import { actorKey, eventKey, __test as storeTest } from '../src/engagement/store.mjs';
 import { hardHumanCategory, __test as aiTest } from '../src/engagement/ai.mjs';
 import { __test as runTest } from '../src/engagement/run.mjs';
 
@@ -45,11 +45,15 @@ test('deterministic delay stays human-like and stable for an interaction', () =>
   assert.ok(dm >= 12 && dm <= 50);
 });
 
-test('privacy-safe event keys do not embed provider ids or message text', () => {
-  const key = eventKey('music-tools-x', { platform: 'x', kind: 'dm', id: '123456789', text: 'private message' });
-  assert.match(key, /^[a-f0-9]{32}$/);
-  assert.equal(key.includes('123456789'), false);
-  assert.equal(key.includes('private'), false);
+test('privacy-safe event and actor keys do not embed provider ids or message text', () => {
+  const event = { platform: 'x', kind: 'dm', id: '123456789', authorId: '998877', text: 'private message' };
+  const eKey = eventKey('music-tools-x', event);
+  const aKey = actorKey('music-tools-x', event);
+  assert.match(eKey, /^[a-f0-9]{32}$/);
+  assert.match(aKey, /^[a-f0-9]{32}$/);
+  assert.equal(eKey.includes('123456789'), false);
+  assert.equal(aKey.includes('998877'), false);
+  assert.equal(eKey.includes('private'), false);
 });
 
 test('opt-out phrases are detected before generation', () => {
@@ -58,8 +62,29 @@ test('opt-out phrases are detected before generation', () => {
   assert.equal(runTest.optedOut('ありがとう！'), false);
 });
 
+test('actor compaction preserves opted-out actors ahead of routine actor state', () => {
+  const actors = {
+    normal: { optedOut: false, updatedAt: '2099-01-02T00:00:00Z' },
+    opted: { optedOut: true, updatedAt: '2020-01-01T00:00:00Z' }
+  };
+  const compacted = storeTest.compactActors(actors);
+  assert.equal(Object.keys(compacted)[0], 'opted');
+});
+
+test('sent-log compaction drops stale rows while retaining recent cap evidence', () => {
+  const now = Date.parse('2026-08-18T00:00:00Z');
+  const rows = [
+    { at: '2026-08-01T00:00:00Z', kind: 'reply' },
+    { at: '2026-08-17T00:00:00Z', kind: 'reply' }
+  ];
+  assert.deepEqual(storeTest.compactSentLog(rows, now), [{ at: '2026-08-17T00:00:00Z', kind: 'reply' }]);
+});
+
 test('deterministic high-risk categories force human handling before model judgment', () => {
   assert.equal(hardHumanCategory('返金トラブルについて確認したいです'), 'refund_or_payment_dispute');
+  assert.equal(hardHumanCategory('医師として診断して薬を教えてください'), 'medical');
+  assert.equal(hardHumanCategory('カードの不正決済トラブルです'), 'financial_dispute');
+  assert.equal(hardHumanCategory('アカウントが乗っ取られて二段階認証で困っています'), 'account_security');
   assert.equal(hardHumanCategory('契約書を送るのでスポンサー契約したいです'), 'legal');
   assert.equal(hardHumanCategory('普通におすすめを教えてください'), null);
 });
@@ -71,6 +96,25 @@ test('AI parser accepts strict JSON and extracts fenced JSON fallback', () => {
   assert.equal(normalized.action, 'human');
   assert.equal(normalized.confidence, 1);
   assert.equal(normalized.humanSummary, 'summary');
+});
+
+test('X engagement readiness requires write/read/DM/offline scopes and a refresh token', () => {
+  assert.deepEqual(new Set(runTest.xRequiredScopes({ autoReply: true, autoDmReply: true })), new Set(['tweet.read', 'users.read', 'offline.access', 'tweet.write', 'dm.read', 'dm.write']));
+  assert.throws(() => runTest.assertXEngagementCredential({ session: { scope: 'tweet.read users.read tweet.write', hasRefreshToken: true } }, policy), /missing required scopes/i);
+  assert.throws(() => runTest.assertXEngagementCredential({ session: { scope: 'tweet.read users.read tweet.write dm.read dm.write offline.access', hasRefreshToken: false } }, policy), /refresh token/i);
+  assert.doesNotThrow(() => runTest.assertXEngagementCredential({ session: { scope: 'tweet.read users.read tweet.write dm.read dm.write offline.access', hasRefreshToken: true } }, policy));
+});
+
+test('private dry-run decisions and failures omit free-text/provider details', () => {
+  const event = { public: false, kind: 'dm' };
+  const safe = runTest.privateSafeDecision(event, {
+    action: 'human', confidence: 0.4, category: 'privacy_or_personal_data', response: 'secret response', reason: 'phone 090...', humanSummary: 'private name', humanQuestion: 'private question'
+  });
+  assert.deepEqual(safe, { action: 'human', confidence: 0.4, category: 'privacy_or_personal_data', privateContentOmitted: true });
+  const error = Object.assign(new Error('failed for participant 123 and private@example.com'), { code: 'SEND_FAIL' });
+  const safeError = runTest.safeEventError(error, event);
+  assert.doesNotMatch(safeError, /123|private@example/);
+  assert.match(safeError, /SEND_FAIL/);
 });
 
 test('X event normalization excludes the account itself and keeps inbound routes ephemeral', () => {
