@@ -18,7 +18,8 @@ jobs:
       startsWith(github.event.issue.title, '[preflight]') ||
       startsWith(github.event.issue.title, '[dry-run]') ||
       startsWith(github.event.issue.title, '[engagement-dry-run]') ||
-      startsWith(github.event.issue.title, '[engagement-run]')
+      startsWith(github.event.issue.title, '[engagement-run]') ||
+      startsWith(github.event.issue.title, '[engagement-resolve]')
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -31,6 +32,7 @@ jobs:
       ISSUE_TITLE: ${{ github.event.issue.title }}
       ISSUE_BODY: ${{ github.event.issue.body }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
+      COMMAND_OUTPUT: /tmp/sns-chatops-output.txt
 
     steps:
       - name: Authorize command actor
@@ -59,16 +61,25 @@ jobs:
         shell: bash
         run: |
           node --input-type=module <<'NODE'
-          import { appendFileSync } from 'node:fs';
+          import { appendFileSync, writeFileSync } from 'node:fs';
           const title = process.env.ISSUE_TITLE || '';
           let body = {};
           try { body = process.env.ISSUE_BODY ? JSON.parse(process.env.ISSUE_BODY) : {}; }
           catch { throw new Error('ChatOps issue body must be valid JSON.'); }
-          const match = title.match(/^\[(preflight|dry-run|engagement-dry-run|engagement-run)\](?:\s+(.+))?$/);
+          const match = title.match(/^\[(preflight|dry-run|engagement-dry-run|engagement-run|engagement-resolve)\](?:\s+(.+))?$/);
           if (!match) throw new Error('Unsupported ChatOps title.');
           const command = match[1];
-          const account = String(body.account || match[2] || '').trim();
+          const account = String(body.account || match[2] || '').trim().split(/\s+/)[0];
           if (!account || !/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
+          if (command === 'engagement-resolve') {
+            const eventKey = String(body.eventKey || '').trim();
+            const action = String(body.action || 'reply').trim().toLowerCase();
+            const text = String(body.text || '');
+            if (!/^[a-f0-9]{32}$/.test(eventKey)) throw new Error('engagement-resolve requires a valid eventKey.');
+            if (!['reply', 'ignore'].includes(action)) throw new Error('engagement-resolve action must be reply or ignore.');
+            if (action === 'reply' && !text.trim()) throw new Error('engagement-resolve reply requires text.');
+            writeFileSync('engagement-resolve.json', JSON.stringify({ account, eventKey, action, text }));
+          }
           appendFileSync(process.env.GITHUB_OUTPUT, `command=${command}\naccount=${account}\n`);
           NODE
 
@@ -80,21 +91,41 @@ jobs:
 
       - name: Execute Preflight
         if: steps.command.outputs.command == 'preflight'
+        shell: bash
         run: |
-          npm run doctor -- --strict --account "${{ steps.command.outputs.account }}"
-          node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}"
+          set -o pipefail
+          {
+            npm run doctor -- --strict --account "${{ steps.command.outputs.account }}"
+            node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}"
+          } 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Execute Autopilot Dry Run
         if: steps.command.outputs.command == 'dry-run'
-        run: node src/orchestrate.mjs --account "${{ steps.command.outputs.account }}" --force --dry-run
+        shell: bash
+        run: |
+          set -o pipefail
+          node src/orchestrate.mjs --account "${{ steps.command.outputs.account }}" --force --dry-run 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Execute Engagement Dry Run
         if: steps.command.outputs.command == 'engagement-dry-run'
-        run: node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}" --dry-run
+        shell: bash
+        run: |
+          set -o pipefail
+          node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}" --dry-run 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Execute Engagement Run
         if: steps.command.outputs.command == 'engagement-run'
-        run: node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}"
+        shell: bash
+        run: |
+          set -o pipefail
+          node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}" 2>&1 | tee "$COMMAND_OUTPUT"
+
+      - name: Execute Engagement Resolution
+        if: steps.command.outputs.command == 'engagement-resolve'
+        shell: bash
+        run: |
+          set -o pipefail
+          node src/engagement/run.mjs --resolve-file engagement-resolve.json 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Persist safe runtime state
         if: always()
@@ -112,10 +143,29 @@ jobs:
           done
           exit 1
 
+      - name: Prepare safe result comment
+        if: success()
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          let text = '';
+          try { text = readFileSync(process.env.COMMAND_OUTPUT, 'utf8'); } catch {}
+          text = text.slice(-10000)
+            .replace(/sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{12,}/g, '[REDACTED_OPENAI_KEY]')
+            .replace(/github_pat_[A-Za-z0-9_]{20,}/g, '[REDACTED_GITHUB_TOKEN]')
+            .replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED_GITHUB_TOKEN]')
+            .replace(/Bearer\s+[A-Za-z0-9._~-]{12,}/gi, 'Bearer [REDACTED]');
+          const body = text.trim()
+            ? `✅ SNS ChatOps command completed successfully.\n\n<details><summary>Result</summary>\n\n\`\`\`text\n${text}\n\`\`\`\n</details>`
+            : '✅ SNS ChatOps command completed successfully.';
+          writeFileSync('/tmp/chatops-comment.md', body);
+          NODE
+
       - name: Close successful command
         if: success()
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "✅ SNS ChatOps command completed successfully."
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/chatops-comment.md
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"
 
       - name: Explain failed command
