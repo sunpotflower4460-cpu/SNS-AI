@@ -22,6 +22,13 @@ function strictNonNegativeInteger(errors, id, label, value) {
   }
 }
 
+function strictNonNegativeNumber(errors, id, label, value) {
+  if (value == null) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    errors.push(`${id}: ${label} must be a non-negative finite number`);
+  }
+}
+
 function strictBoolean(errors, id, label, value) {
   if (value == null) return;
   if (typeof value !== 'boolean') errors.push(`${id}: ${label} must be a boolean`);
@@ -77,6 +84,13 @@ export function validateStrictConfig(config) {
     }
 
     const safety = merged(config, account, 'safety');
+    // These two are the fail-closed knobs: src/lib/safety.mjs coerces a non-number maxPostsPerDay to 0
+    // (blocks every slot) and a non-number minMinutesBetweenPosts to Infinity (never posts again). The
+    // resulting `rate-limited` status is deliberately not fatal, so a `"2"` typed as a string here would
+    // leave every workflow green while nothing is ever published. The loose validator's Number() coercion
+    // accepts strings, so this strict type check is the only thing that catches it.
+    strictNonNegativeInteger(errors, id, 'safety.maxPostsPerDay', safety.maxPostsPerDay);
+    strictNonNegativeNumber(errors, id, 'safety.minMinutesBetweenPosts', safety.minMinutesBetweenPosts);
     strictNonNegativeInteger(errors, id, 'safety.maxLinks', safety.maxLinks);
     strictNonNegativeInteger(errors, id, 'safety.maxHashtags', safety.maxHashtags);
     strictBoolean(errors, id, 'safety.moderation', safety.moderation);

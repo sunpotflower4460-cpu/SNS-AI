@@ -55,8 +55,22 @@ function approvalMarker(accountId, slotId) {
   return { kind: 'sns-ai-approval', version: 1, account: String(accountId), slotId: String(slotId) };
 }
 
+// The publish workflow triggers ONLY on the `approved` label (see the `issues: [labeled]` trigger and
+// the `github.event.label.name == 'approved'` condition in .github/workflows/publish.yml). Nothing else
+// - not a comment, not closing the issue - publishes anything. Since the whole issue body must stay
+// parseable (trustedApprovalPayload and publish.yml both run JSON.parse over it in full), these
+// operator instructions live INSIDE the JSON as a leading field rather than as prose appended after it.
+// Declared first so it renders at the top of the issue, where a human actually looks.
+const APPROVAL_INSTRUCTIONS = [
+  'TO PUBLISH: add the "approved" label to this issue.',
+  'Commenting on or closing this issue does NOT publish anything.',
+  'TO REJECT: close this issue without adding the label.',
+  'Only the repository owner, or a user listed in the SNS_COMMAND_ADMINS repository variable, can publish.',
+  'Everything below is the generated draft and its provenance metadata; do not edit it.'
+];
+
 function markedApprovalPayload(payload, accountId, slotId) {
-  return { ...payload, _snsAi: approvalMarker(accountId, slotId) };
+  return { _howToPublish: APPROVAL_INSTRUCTIONS, ...payload, _snsAi: approvalMarker(accountId, slotId) };
 }
 
 export function trustedApprovalPayload(issue) {

@@ -123,7 +123,10 @@ After the external setup above is complete:
 2. run **SNS Live Preflight** for `music-tools-x`
 3. run **SNS Autopilot** manually with `force=true` and `dry_run=true`
 4. inspect the generated post and cited research sources
-5. approve exactly one controlled real post
+5. approve exactly one controlled real post — **approval Issueに `approved` labelを付ける**
+   - labelを付ける操作だけが投稿を実行します。Issueへのコメントやcloseでは何も起きません。
+   - 却下する場合はlabelを付けずにcloseします。
+   - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです。
 6. verify `data/history.jsonl`, provider post ID and subsequent metrics collection
 7. review several approval posts for tone, factuality and topic balance
 8. only then change `mode` to `auto`

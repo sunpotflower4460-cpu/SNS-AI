@@ -1,5 +1,5 @@
 import { findNearDuplicate } from './duplicate.mjs';
-import { validateDraftText } from './safety.mjs';
+import { platformTextLimit, validateDraftText, xWeightedLength } from './safety.mjs';
 import { rankCandidates, shouldExplore } from './strategy-rank.mjs';
 import { consumeUsage } from '../ops/budget.mjs';
 
@@ -127,6 +127,32 @@ export async function moderateText(text, account, accountId) {
   return { flagged: false };
 }
 
+// X does not count characters the way a human (or a model) counts them: CJK and other full-width
+// characters weigh 2, and every URL is counted as a fixed 23 no matter how long it really is. The prompt
+// used to hand the model the raw `generation.maxChars` (280), so for a Japanese account the model aimed at
+// 280 Japanese characters while validateDraftText rejected anything over ~140. Every candidate was then
+// discarded, all `maxAttempts` burned real Responses calls, the slot failed, and the resilience circuit
+// opened - for a purely cosmetic misunderstanding. The weights below are derived from xWeightedLength
+// itself rather than restated, so the prompt can never drift from the validator that enforces it.
+const CJK_PROBE_WEIGHT = xWeightedLength('あ');
+const URL_PROBE_WEIGHT = xWeightedLength('https://example.com');
+
+function lengthBudgetBrief(account) {
+  const limit = platformTextLimit(account);
+  if (account.platform !== 'x') return { unit: 'characters', limit };
+  return {
+    unit: 'X weighted characters',
+    limit,
+    rules: [
+      `Japanese/Chinese/Korean and other full-width characters each count as ${CJK_PROBE_WEIGHT}.`,
+      'Latin letters, digits, spaces and ASCII punctuation each count as 1.',
+      `Every URL counts as exactly ${URL_PROBE_WEIGHT}, whatever its real length.`
+    ],
+    approximateFullWidthCharacterBudget: Math.floor(limit / CJK_PROBE_WEIGHT),
+    note: 'A candidate over this budget is discarded before publishing. Stay inside it.'
+  };
+}
+
 function generationPrompt(accountId, account, history, context, feedback) {
   const recent = history.slice(0, Number(account.generation?.historyWindow ?? 30)).map((entry) => ({ at: entry.at, text: entry.text, features: entry.features || null }));
   const humanFeedback = (context.humanFeedback || []).map((row) => ({
@@ -143,11 +169,15 @@ function generationPrompt(accountId, account, history, context, feedback) {
       'Never let performance optimization override explicit human feedback, account identity, safety rules, or factual accuracy.',
       'mediaDecision: none when text alone is best; library for existing account assets; search only for a licensed/trusted media service; generate for a new original visual.',
       'Avoid repeating recent posts in topic, hook, structure, and wording.',
+      account.platform === 'x'
+        ? `Length is measured in X weighted characters, not raw characters: full-width/CJK characters count as ${CJK_PROBE_WEIGHT} and every URL counts as ${URL_PROBE_WEIGHT}. Respect lengthBudget, not the raw character count.`
+        : '',
       experiment ? `Controlled experiment: candidates should use features.${experiment.dimension} exactly as "${experiment.variant}" while keeping other choices natural.` : ''
     ].filter(Boolean).join('\n'),
     user: JSON.stringify({
       promptVersion: PROMPT_VERSION,
       accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', generation: account.generation || {},
+      lengthBudget: lengthBudgetBrief(account),
       objectives: account.objectives || {}, recentPosts: recent, humanFeedback, learnedStrategy: context.strategy || null, trendBrief: context.trends || null,
       experiment,
       candidateCount: Number(account.generation?.candidateCount ?? 5), retryFeedback: feedback || ''
@@ -166,12 +196,17 @@ export async function generatePost(accountId, account, history = [], context = {
     const prompt = generationPrompt(accountId, account, history, context, feedback);
     const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch: Boolean(account.research?.webSearch), accountId, account, operation: 'post-generation', dryRun });
     const valid = [];
+    // Why the discard reasons are kept: when every candidate is rejected the retry prompt used to say only
+    // "they were invalid or repetitive", so the model had no idea WHICH rule it broke and typically broke it
+    // again on all remaining attempts. Telling it the actual validator message makes the retry informative
+    // instead of a paid re-roll.
+    const discardReasons = new Set();
     for (const candidate of generated.candidates || []) {
       try {
         candidate.text = validateDraftText(account, candidate.text);
         const duplicate = findNearDuplicate(candidate.text, history, threshold); if (duplicate) continue;
         valid.push(candidate);
-      } catch { /* discard invalid candidate */ }
+      } catch (error) { discardReasons.add(String(error?.message || 'invalid candidate')); }
     }
     lastFallback = valid;
     const experimentMatched = experiment ? valid.filter((candidate) => String(candidate.features?.[experiment.dimension] || '') === String(experiment.variant)) : valid;
@@ -185,9 +220,13 @@ export async function generatePost(accountId, account, history = [], context = {
         experimentApplied: Boolean(experiment && String(winner.features?.[experiment.dimension] || '') === String(experiment.variant)),
         model, attempt, candidatesConsidered: ranked.length };
     }
-    feedback = experiment
-      ? `Generate original candidates that satisfy the controlled experiment exactly: features.${experiment.dimension} must equal "${experiment.variant}". Also avoid recent duplicates.`
-      : 'All previous candidates were invalid, repetitive, or too similar to recent posts. Change the topic angle, hook, structure, and wording substantially.';
+    const rejections = [...discardReasons].slice(0, 3);
+    feedback = [
+      experiment
+        ? `Generate original candidates that satisfy the controlled experiment exactly: features.${experiment.dimension} must equal "${experiment.variant}". Also avoid recent duplicates.`
+        : 'All previous candidates were invalid, repetitive, or too similar to recent posts. Change the topic angle, hook, structure, and wording substantially.',
+      rejections.length ? `Previous candidates were rejected for: ${rejections.join(' | ')}` : ''
+    ].filter(Boolean).join(' ');
   }
   if (lastFallback.length) throw new Error('Candidates existed but none could satisfy ranking/experiment constraints.');
   throw new Error(`Could not generate a sufficiently original post after ${attempts} attempts.`);
@@ -206,3 +245,5 @@ export async function generateTrendBrief(accountId, account) {
     system: 'Research current public information for one social account. Prefer recent, credible sources. Return trends that are actually relevant; do not force a trend. Risk includes misinformation, sensitivity, legal, and brand risk.',
     user: JSON.stringify({ promptVersion: PROMPT_VERSION, accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', topics: account.profile?.topics || [] }, null, 2) });
 }
+
+export const __test = { generationPrompt, lengthBudgetBrief };

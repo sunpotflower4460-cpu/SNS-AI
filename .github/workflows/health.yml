@@ -34,7 +34,12 @@ jobs:
           npm run secret-scan
       - name: Generate readiness report
         id: health_run
-        run: npm run doctor -- --write
+        # --strict is what makes this job actually able to fail. Without it, doctor always exits 0, so
+        # a readiness BLOCKER (expired/revoked credential, missing secret, a deprecated media backend)
+        # left this daily job green and Failure Watch never opened an issue - the alarm could not ring.
+        # The "Persist readiness only when it changed" step below is `if: always()`, so the report is
+        # still committed on a failing run and the operator can see exactly which blocker fired.
+        run: npm run doctor -- --write --strict
       - name: Report stuck durable publish claims
         # This is an independent diagnostic, not dependent on the preceding steps' outcomes - a
         # persistent config/static-check failure (or a readiness-report failure) must not silently

@@ -106,6 +106,9 @@ Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを�
 - [ ] generated draftを確認
 - [ ] media利用時controlled generation success
 - [ ] approval modeで実投稿1件success
+  - **投稿を実行する操作は「approval Issueに `approved` labelを付ける」ことだけです。** Issueへのコメントやcloseでは何も起きません。却下する場合はlabelを付けずにcloseします。
+  - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです（`.github/workflows/publish.yml`のActor authorization step）。
+  - label付与後に何も起きない場合は、labelを一度外して付け直してください（共有concurrency group `sns-ai-write`が混み合っていた場合、pending runがキャンセルされることがまれにあります）。
 - [ ] `data/history.jsonl`へproviderPostId保存
 - [ ] Metrics Collector success
 - [ ] `data/metrics.jsonl`へsnapshot保存
