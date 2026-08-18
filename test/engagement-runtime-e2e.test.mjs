@@ -65,12 +65,14 @@ async function withFixture(platform, task) {
     GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY
   };
   const realFetch = globalThis.fetch;
+  const credentialKey = `engagement-e2e-${platform}`;
   try {
     const config = JSON.parse(snap.get(CONFIG));
     const row = config.accounts['music-tools-x'];
     row.enabled = true;
     row.mode = 'auto';
     row.platform = platform;
+    row.credentialKey = credentialKey;
     row.research = { ...(row.research || {}), webSearch: false, trendIntelligence: false };
     row.budgets = { ...(row.budgets || {}), enabled: false };
     row.safety = { ...(row.safety || {}), moderation: true };
@@ -83,14 +85,14 @@ async function withFixture(platform, task) {
     delete process.env.GH_TOKEN;
     process.env.GITHUB_REPOSITORY = 'sunpotflower4460-cpu/SNS-AI';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify(platform === 'x' ? {
-      'music-tools-x': {
+      [credentialKey]: {
         oauth2AccessToken: 'x-access-token',
         oauth2ExpiresAt: '2099-01-01T00:00:00.000Z',
         oauth2Scope: 'tweet.read tweet.write users.read dm.read dm.write offline.access',
         oauth2ClientId: 'client-id'
       }
     } : {
-      'music-tools-x': { accessToken: 'ig-access-token', igUserId: '1000', apiVersion: 'v25.0' }
+      [credentialKey]: { accessToken: 'ig-access-token', igUserId: '1000', apiVersion: 'v25.0' }
     });
 
     return await task();
@@ -162,6 +164,7 @@ test('X engagement runtime auto-replies routine inbound, ignores noise, escalate
 
     const result = await runEngagement({ accountFilter: 'music-tools-x' });
     assert.equal(result.state, 'ok');
+    assert.equal(result.accounts[0]?.state, 'ok', JSON.stringify(result.accounts[0]));
     const rows = result.accounts[0].events;
     assert.equal(rows.filter((row) => row.status === 'sent').length, 2);
     assert.equal(rows.filter((row) => row.status === 'ignored').length, 1);
@@ -186,6 +189,7 @@ test('X engagement runtime auto-replies routine inbound, ignores noise, escalate
     await assert.rejects(() => resolveHumanEngagement({ accountId: 'music-tools-x', key: privateKey, action: 'reply', text: 'test' }), { code: 'PRIVATE_ENGAGEMENT_MANUAL_SEND' });
 
     const second = await runEngagement({ accountFilter: 'music-tools-x' });
+    assert.equal(second.accounts[0]?.state, 'ok', JSON.stringify(second.accounts[0]));
     assert.equal(second.accounts[0].events.every((row) => row.skipped === true), true);
   });
 });
@@ -229,6 +233,7 @@ test('Instagram engagement runtime polls recent comments and conversations and r
 
     const result = await runEngagement({ accountFilter: 'music-tools-x' });
     assert.equal(result.state, 'ok');
+    assert.equal(result.accounts[0]?.state, 'ok', JSON.stringify(result.accounts[0]));
     assert.equal(result.accounts[0].warnings.length, 0);
     assert.equal(result.accounts[0].events.filter((row) => row.status === 'sent').length, 2);
     assert.equal(commentReplies.length, 1);
