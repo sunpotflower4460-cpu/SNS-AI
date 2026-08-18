@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { assertAutomatedEngagementAllowed } from '../src/engagement/policy.mjs';
-import { hardHumanCategory, withRequiredXOptOut } from '../src/engagement/ai.mjs';
+import { clearXReplyIntent, hardHumanCategory, withRequiredXOptOut } from '../src/engagement/ai.mjs';
 import {
   assertXEngagementCredential,
   assertXEngagementPlatformCompliance
@@ -25,7 +25,8 @@ const basePolicy = {
   requireXAutomatedAccountLabel: true,
   xAutomatedAccountLabelConfirmed: false,
   requireXAutomatedResponseOptOut: true,
-  xAutomatedResponseOptOutText: '自動返信停止は「自動返信不要」でOKです。'
+  xAutomatedResponseOptOutText: '自動返信停止は「自動返信不要」でOKです。',
+  requireXClearReplyIntent: true
 };
 
 const readyIdentity = {
@@ -110,6 +111,15 @@ test('required X opt-out notice fails closed and is appended exactly once to rep
   assert.equal(withRequiredXOptOut('ok', { platform: 'instagram', kind: 'reply' }, basePolicy), 'ok');
 });
 
+test('X public auto-replies require clear user response intent instead of a mention alone', () => {
+  assert.equal(clearXReplyIntent('このプラグイン、どこで買えますか？'), true);
+  assert.equal(clearXReplyIntent('おすすめを教えてください'), true);
+  assert.equal(clearXReplyIntent('Can you explain the difference?'), true);
+  assert.equal(clearXReplyIntent('今日このアカウント見かけた'), false);
+  assert.equal(clearXReplyIntent('すごい！'), false);
+  assert.equal(clearXReplyIntent('これは微妙だった'), false);
+});
+
 test('medical dosage questions remain deterministic human escalations', () => {
   assert.equal(hardHumanCategory('この薬は一日に何錠服用すればいいですか？'), 'medical');
 });
@@ -132,5 +142,6 @@ test('production X engagement policy stays non-live until one-time external gate
   assert.equal(config.requireXAutomatedAccountLabel, true);
   assert.equal(config.xAutomatedAccountLabelConfirmed, false);
   assert.equal(config.requireXAutomatedResponseOptOut, true);
+  assert.equal(config.requireXClearReplyIntent, true);
   assert.match(config.xAutomatedResponseOptOutText, /自動返信不要/);
 });
