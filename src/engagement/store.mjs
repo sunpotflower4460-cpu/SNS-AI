@@ -5,16 +5,26 @@ import { appendJsonl, readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 const STATE_FILE = fileURLToPath(new URL('../../data/engagement-state.json', import.meta.url));
 const AUDIT_FILE = fileURLToPath(new URL('../../data/engagement-audit.jsonl', import.meta.url));
 const MAX_EVENTS_PER_ACCOUNT = 600;
+const MAX_ACTIVE_ACTORS_PER_ACCOUNT = 5000;
+const MAX_SENT_LOG_PER_ACCOUNT = 5000;
+const SENT_LOG_RETENTION_MS = 8 * 24 * 60 * 60_000;
+
+function hash(parts) {
+  return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
+}
 
 export function eventKey(accountId, event) {
-  return createHash('sha256')
-    .update(`${accountId}|${event.platform || ''}|${event.kind || ''}|${event.id || ''}`)
-    .digest('hex')
-    .slice(0, 32);
+  return hash([accountId, event.platform || '', event.kind || '', event.id || '']);
+}
+
+export function actorKey(accountId, event) {
+  const actorId = String(event?.authorId || event?.participantId || event?.username || '').trim();
+  if (!actorId) return null;
+  return hash([accountId, event.platform || '', 'actor', actorId]);
 }
 
 export async function loadEngagementState() {
-  return await readJson(STATE_FILE, { schemaVersion: 1, accounts: {} });
+  return await readJson(STATE_FILE, { schemaVersion: 2, accounts: {} });
 }
 
 function compactEvents(events = {}) {
@@ -23,15 +33,62 @@ function compactEvents(events = {}) {
     .slice(0, MAX_EVENTS_PER_ACCOUNT));
 }
 
+function compactActors(actors = {}) {
+  const entries = Object.entries(actors)
+    .sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')));
+  // An explicit "do not auto-reply" is a durable preference, not disposable cache. Never silently forget
+  // it just because the account has interacted with many other people. Only routine cooldown actor state
+  // is bounded; opted-out pseudonymous hashes remain until an explicit future opt-in/removal path exists.
+  const optedOut = entries.filter(([, row]) => row?.optedOut === true);
+  const active = entries.filter(([, row]) => row?.optedOut !== true).slice(0, MAX_ACTIVE_ACTORS_PER_ACCOUNT);
+  return Object.fromEntries([...optedOut, ...active]);
+}
+
+function compactSentLog(rows = [], now = Date.now()) {
+  return rows
+    .filter((row) => {
+      const at = new Date(row?.at || 0).getTime();
+      return Number.isFinite(at) && now - at <= SENT_LOG_RETENTION_MS;
+    })
+    .slice(-MAX_SENT_LOG_PER_ACCOUNT);
+}
+
+function ensureAccount(state, accountId) {
+  state.schemaVersion = 2;
+  state.accounts ||= {};
+  const account = state.accounts[accountId] || {};
+  account.events ||= {};
+  account.actors ||= {};
+  account.sentLog = Array.isArray(account.sentLog) ? account.sentLog : [];
+  state.accounts[accountId] = account;
+  return account;
+}
+
 export async function eventStatus(accountId, key) {
   const state = await loadEngagementState();
   return state.accounts?.[accountId]?.events?.[key] || null;
 }
 
+export async function actorStatus(accountId, key) {
+  if (!key) return null;
+  const state = await loadEngagementState();
+  return state.accounts?.[accountId]?.actors?.[key] || null;
+}
+
 export async function countSentSince(accountId, kind, since) {
   const state = await loadEngagementState();
   const threshold = new Date(since).getTime();
-  return Object.values(state.accounts?.[accountId]?.events || {}).filter((row) => {
+  const account = state.accounts?.[accountId] || {};
+  const sentLog = Array.isArray(account.sentLog) ? account.sentLog : [];
+  if (sentLog.length) {
+    return sentLog.filter((row) => {
+      if (row?.kind !== kind || !row?.at) return false;
+      const at = new Date(row.at).getTime();
+      return Number.isFinite(at) && at >= threshold;
+    }).length;
+  }
+  // Backward-compatible migration path for schemaVersion 1 state.
+  return Object.values(account.events || {}).filter((row) => {
     if (row?.status !== 'sent' || row?.kind !== kind || !row?.sentAt) return false;
     const at = new Date(row.sentAt).getTime();
     return Number.isFinite(at) && at >= threshold;
@@ -40,10 +97,7 @@ export async function countSentSince(accountId, kind, since) {
 
 export async function markEngagementEvent(accountId, key, detail = {}) {
   const state = await loadEngagementState();
-  state.schemaVersion = 1;
-  state.accounts ||= {};
-  const account = state.accounts[accountId] || { events: {} };
-  account.events ||= {};
+  const account = ensureAccount(state, accountId);
   const now = new Date().toISOString();
   account.events[key] = {
     ...(account.events[key] || {}),
@@ -52,7 +106,52 @@ export async function markEngagementEvent(accountId, key, detail = {}) {
     firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
   };
   account.events = compactEvents(account.events);
-  state.accounts[accountId] = account;
+  account.actors = compactActors(account.actors);
+  account.sentLog = compactSentLog(account.sentLog);
+  await writeJsonAtomic(STATE_FILE, state);
+  return account.events[key];
+}
+
+export async function markActorOptOut(accountId, key) {
+  if (!key) return null;
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = new Date().toISOString();
+  account.actors[key] = {
+    ...(account.actors[key] || {}),
+    optedOut: true,
+    optedOutAt: account.actors[key]?.optedOutAt || now,
+    updatedAt: now
+  };
+  account.actors = compactActors(account.actors);
+  await writeJsonAtomic(STATE_FILE, state);
+  return account.actors[key];
+}
+
+export async function markEngagementSent(accountId, key, actor, detail = {}) {
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = detail.sentAt || new Date().toISOString();
+  account.events[key] = {
+    ...(account.events[key] || {}),
+    ...detail,
+    status: 'sent',
+    sentAt: now,
+    updatedAt: now,
+    firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
+  };
+  if (actor) {
+    const priorActor = account.actors[actor] || {};
+    account.actors[actor] = {
+      ...priorActor,
+      lastSentAt: { ...(priorActor.lastSentAt || {}), [detail.kind]: now },
+      updatedAt: now
+    };
+  }
+  account.sentLog.push({ at: now, kind: detail.kind, eventKey: key, actorKey: actor || null });
+  account.events = compactEvents(account.events);
+  account.actors = compactActors(account.actors);
+  account.sentLog = compactSentLog(account.sentLog, new Date(now).getTime());
   await writeJsonAtomic(STATE_FILE, state);
   return account.events[key];
 }
@@ -65,4 +164,11 @@ export async function appendEngagementAudit(entry) {
   });
 }
 
-export const __test = { compactEvents, MAX_EVENTS_PER_ACCOUNT };
+export const __test = {
+  compactEvents,
+  compactActors,
+  compactSentLog,
+  MAX_EVENTS_PER_ACCOUNT,
+  MAX_ACTIVE_ACTORS_PER_ACCOUNT,
+  MAX_SENT_LOG_PER_ACCOUNT
+};
