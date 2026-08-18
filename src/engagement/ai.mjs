@@ -41,7 +41,7 @@ function parseJson(text) {
 export function hardHumanCategory(text) {
   const value = String(text || '');
   if (/弁護士|訴訟|法的措置|契約書|legal notice|lawsuit|attorney/i.test(value)) return 'legal';
-  if (/医師|診断|治療|処方|薬を(?:飲|使)|症状.*(?:どう|相談)|medical advice|diagnos|prescription/i.test(value)) return 'medical';
+  if (/医師|診断|治療|処方|服用|薬(?:を|の|が|は)|副作用|症状.*(?:どう|相談)|medical advice|diagnos(?:e|is)?|prescription|dosage/i.test(value)) return 'medical';
   if (/返金|払い戻し|請求.*(?:違|誤)|chargeback|refund dispute/i.test(value)) return 'refund_or_payment_dispute';
   if (/決済トラブル|カード.*(?:不正|身に覚え)|送金トラブル|金融.*(?:争い|トラブル)|payment dispute|financial dispute/i.test(value)) return 'financial_dispute';
   if (/アカウント.*(?:乗っ取|不正|侵入)|ログイン.*(?:不正|できない).*認証|二段階認証|2FA|account security|compromised account/i.test(value)) return 'account_security';
@@ -73,6 +73,15 @@ function normalizeResult(raw = {}) {
   };
 }
 
+export function withRequiredXOptOut(text, event, policy = {}) {
+  const response = String(text || '').trim();
+  const notice = String(policy.xAutomatedResponseOptOutText || '').trim();
+  if (!response || !notice) return response;
+  if (String(event?.platform || '').toLowerCase() !== 'x' || !['reply', 'dm'].includes(String(event?.kind || '').toLowerCase())) return response;
+  if (response.includes(notice)) return response;
+  return `${response}\n\n${notice}`;
+}
+
 export async function classifyAndDraftEngagement({ accountId, account, event, policy = {}, dryRun = false }) {
   const hardCategory = hardHumanCategory(event.text);
   if (hardCategory) {
@@ -98,6 +107,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
     'Replies should be concise, natural, helpful, and in the account voice. Do not sound like a customer-service robot. Do not mention that an AI generated the reply unless directly relevant.',
     'Do not use engagement bait. Do not pressure users into purchases or DMs. Do not send unsolicited follow-up messages.',
     'For praise or reactions that need no answer, ignore is acceptable. For genuine questions, prefer reply when safe.',
+    'For X, a configured opt-out notice is appended deterministically after generation. Keep the drafted response concise enough to leave room for that notice, and do not duplicate or paraphrase the notice yourself.',
     'Use a short ASCII snake_case category token only. Never put names, handles, IDs, contact details, message text, or secrets in category.',
     'humanSummary and humanQuestion are only for the account owner. They must be useful but privacy-minimized. For private DMs, summarize the decision needed without quoting the message or reproducing names, handles, email addresses, phone numbers, addresses, IDs, tokens, or other unnecessary private details.',
     'reason must also avoid reproducing secrets or unnecessary private-message details.',
@@ -109,6 +119,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
     platform: account.platform,
     profile: account.profile || {},
     instructions: account.instructions || '',
+    xAutomatedResponseOptOutText: event.platform === 'x' ? String(policy.xAutomatedResponseOptOutText || '') : '',
     interaction: {
       kind: event.kind,
       text: event.text,
@@ -149,6 +160,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
 
   if (result.action === 'reply') {
     if (!result.response) throw new Error('Engagement AI selected reply without response text.');
+    result.response = withRequiredXOptOut(result.response, event, policy);
     result.response = validateDraftText(account, result.response);
     if (!dryRun) await moderateText(result.response, account, accountId);
   }
