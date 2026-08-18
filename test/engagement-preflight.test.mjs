@@ -32,7 +32,10 @@ function response(body, status = 200, headers = {}) {
   });
 }
 
-async function withPreflightFixture(task, { scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access' } = {}) {
+async function withPreflightFixture(task, {
+  scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access',
+  stateId = 'engagement-preflight-full'
+} = {}) {
   const savedFiles = await snapshot([CONFIG, POLICY, OAUTH_STATE]);
   const savedEnv = {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -78,7 +81,8 @@ async function withPreflightFixture(task, { scopes = 'tweet.read tweet.write use
         oauth2RefreshToken: 'oauth2-refresh-token',
         oauth2ExpiresAt: '2099-01-01T00:00:00.000Z',
         oauth2Scope: scopes,
-        oauth2ClientId: 'client-id'
+        oauth2ClientId: 'client-id',
+        oauth2StateId: stateId
       }
     });
 
@@ -148,7 +152,7 @@ test('Live Preflight proves X engagement scopes before liveAccounts activation w
       'tweet.read', 'tweet.write', 'users.read', 'dm.read', 'dm.write', 'offline.access'
     ]));
     assert.equal(wasPostAttempted(), false);
-  });
+  }, { stateId: 'engagement-preflight-full' });
 });
 
 test('Live Preflight blocks activation when X engagement OAuth is missing a required DM scope', async () => {
@@ -161,5 +165,8 @@ test('Live Preflight blocks activation when X engagement OAuth is missing a requ
     assert.equal(report.state, 'blocked');
     assert.equal(report.accounts[0].ok, false);
     assert.match(report.accounts[0].error, /dm\.write/i);
-  }, { scopes: 'tweet.read tweet.write users.read dm.read offline.access' });
+  }, {
+    scopes: 'tweet.read tweet.write users.read dm.read offline.access',
+    stateId: 'engagement-preflight-missing-dm-write'
+  });
 });
