@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "enabled": true,
   "allowedAccounts": [
     "music-tools-x"
@@ -9,6 +9,9 @@
   "autoReply": true,
   "autoDmReply": true,
   "approvalRequired": false,
+  "requireXAiReplyBotApproval": true,
+  "xAiReplyBotApprovalConfirmed": false,
+  "xAutomatedResponseOptOutText": "自動返信を止めたい場合は「自動返信不要」と送ってください。",
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
   "replyDelayMinutes": [
