@@ -11,6 +11,7 @@
     "check": "node src/ops/check-all.mjs",
     "validate": "node src/validate-strict-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
+    "engagement": "node src/engagement/run.mjs",
     "metrics": "node src/analytics/collector.mjs",
     "learn": "node src/learning/learn.mjs",
     "trends": "node src/research/trends.mjs",
