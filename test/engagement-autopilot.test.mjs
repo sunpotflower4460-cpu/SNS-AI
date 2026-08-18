@@ -89,6 +89,15 @@ test('deterministic high-risk categories force human handling before model judgm
   assert.equal(hardHumanCategory('普通におすすめを教えてください'), null);
 });
 
+test('business keywords escalate only when they actually request a commitment', () => {
+  assert.equal(hardHumanCategory('この案件についてどう思いますか？'), null);
+  assert.equal(hardHumanCategory('スポンサー機能って何ですか？'), null);
+  assert.equal(hardHumanCategory('最近の企業提携ニュースをどう見ますか？'), null);
+  assert.equal(hardHumanCategory('案件の依頼をしたいので条件を相談できますか？'), 'binding_partnership_or_contract');
+  assert.equal(hardHumanCategory('スポンサー契約の相談をしたいです'), 'binding_partnership_or_contract');
+  assert.equal(hardHumanCategory('We would like to partner with you.'), 'binding_partnership_or_contract');
+});
+
 test('AI parser accepts strict JSON and extracts fenced JSON fallback', () => {
   assert.deepEqual(aiTest.parseJson('{"action":"ignore"}'), { action: 'ignore' });
   assert.deepEqual(aiTest.parseJson('```json\n{"action":"reply"}\n```'), { action: 'reply' });
