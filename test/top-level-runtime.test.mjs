@@ -236,7 +236,9 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
     config.accounts['example-x'].mode = 'pause';
     await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     const nothingEnabled = await runLivePreflight();
-    assert.equal(nothingEnabled.ok, true);
+    // Deliberately ok:false. With nothing enabled, preflight contacts neither OpenAI nor the provider
+    // nor the durable-state branch, so a green result would assert readiness it never verified.
+    assert.equal(nothingEnabled.ok, false);
     assert.equal(nothingEnabled.state, 'nothing_enabled');
     await assert.rejects(runLivePreflight({ accountFilter: 'missing-account' }), /Unknown account/);
 

@@ -174,11 +174,24 @@ export async function buildReadinessReport({ accountFilter, now = Date.now() } =
   }
 
   const enabledRows = rows.filter((row) => row.enabled && row.mode !== 'pause');
+  // `every` on an empty array is true, so with zero enabled accounts this reported ready:true while
+  // nothing at all had been configured - no credentials read, no models checked. The go-live checklist
+  // asks the operator to confirm "Doctor ready", and that box ticked itself before any key existed.
+  // Readiness now means "a live account is actually ready", never "there is nothing to check".
+  const ready = configErrors.length === 0 && enabledRows.length > 0 && enabledRows.every((row) => row.ready);
+  // `state` and `ready` answer different questions and must not be collapsed. `ready` is the checklist
+  // answer ("is a live account actually good to go?"), which zero enabled accounts can never satisfy.
+  // `state` is the alarm signal that drives the strict exit code, and a deliberately dormant repo is not
+  // an alarm - only configErrors or an enabled-but-broken account are. Config errors are checked before
+  // the account count so a typo can never hide behind "nothing is enabled yet".
+  const state = configErrors.length || enabledRows.some((row) => !row.ready)
+    ? 'blocked'
+    : (enabledRows.length === 0 ? 'waiting_for_accounts' : 'ready');
   return {
     schemaVersion: 7,
     accountFilter: accountFilter || null,
-    ready: configErrors.length === 0 && enabledRows.every((row) => row.ready),
-    state: enabledRows.length === 0 ? 'waiting_for_accounts' : (configErrors.length || enabledRows.some((row) => !row.ready) ? 'blocked' : 'ready'),
+    ready,
+    state,
     configErrors,
     environment: {
       openaiApiKeyPresent: openaiPresent,

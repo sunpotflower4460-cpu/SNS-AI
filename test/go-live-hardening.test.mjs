@@ -128,3 +128,36 @@ test('the generation prompt states X weighted length, so a Japanese account is n
   assert.equal(JSON.parse(ig.user).lengthBudget.unit, 'characters');
   assert.doesNotMatch(ig.system, /weighted characters/);
 });
+
+test('readiness is not vacuously true when no account is enabled', async () => {
+  // enabledRows.every(...) on an empty array is true, so doctor reported ready:true and live-preflight
+  // returned ok:true before a single credential existed - while checking nothing at all. The go-live
+  // checklist asks the operator to confirm "Doctor ready" and "Live Preflight ready", so both boxes
+  // ticked themselves. This is the committed state of the repo today (all three accounts disabled).
+  const { buildReadinessReport } = await import('../src/ops/doctor.mjs');
+  const { buildStrictReadinessReport } = await import('../src/ops/doctor-strict.mjs');
+  const { runLivePreflight } = await import('../src/ops/live-preflight.mjs');
+
+  const config = JSON.parse(await readFile(fileURLToPath(new URL('../config/accounts.json', import.meta.url)), 'utf8'));
+  const enabled = Object.values(config.accounts || {}).filter((account) => account?.enabled === true && account.mode !== 'pause');
+  assert.equal(enabled.length, 0, 'this test describes the dormant repo state; re-check it once an account is enabled');
+
+  const report = await buildReadinessReport();
+  assert.equal(report.ready, false, 'readiness with zero enabled accounts must not be reported as ready');
+  assert.equal(report.state, 'waiting_for_accounts');
+
+  const strict = await buildStrictReadinessReport();
+  assert.equal(strict.ready, false);
+  assert.equal(strict.state, 'waiting_for_accounts');
+
+  const preflight = await runLivePreflight();
+  assert.equal(preflight.ok, false, 'preflight proves nothing with no account selected, so it must not claim ok');
+  assert.equal(preflight.state, 'nothing_enabled');
+  assert.equal(preflight.openai.checked, false);
+  assert.equal(preflight.durableState.checked, false);
+
+  // But a dormant repo is NOT an alarm: health.yml runs `doctor --strict` daily, and failing it here
+  // would have Failure Watch open an issue every day about a repo that is intentionally not live yet.
+  // Only `blocked` - a config error, or an enabled-but-broken account - may fail the strict exit.
+  assert.notEqual(strict.state, 'blocked');
+});

@@ -158,7 +158,11 @@ export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
+  // ok:false with nothing enabled. Preflight with no selected account touches neither OpenAI, nor the
+  // provider credentials, nor the sns-ai-state branch - so `ok: true` here meant "I proved nothing", and
+  // the checklist item "Live Preflight ready" passed before a single key was registered. The `state`
+  // still says nothing_enabled so the operator sees this is a not-yet rather than a failure.
+  if (!selected.length) return { ok: false, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
