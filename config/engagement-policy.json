@@ -15,6 +15,7 @@
   "xAutomatedAccountLabelConfirmed": false,
   "requireXAutomatedResponseOptOut": true,
   "xAutomatedResponseOptOutText": "自動返信停止は「自動返信不要」でOKです。",
+  "requireXClearReplyIntent": true,
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
   "replyDelayMinutes": [
