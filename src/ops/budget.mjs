@@ -129,9 +129,14 @@ async function readDurableState() {
   try {
     const remote = await githubRequest(`/repos/${owner}/${repo}/contents/${DURABLE_PATH}?ref=${encodeURIComponent(branch)}`);
     const decoded = Buffer.from(String(remote.content || '').replace(/\n/g, ''), 'base64').toString('utf8');
-    return { state: normalizedState(JSON.parse(decoded)), sha: remote.sha || null };
+    return { state: normalizedState(JSON.parse(decoded)), sha: remote.sha || null, bootstrapped: false };
   } catch (error) {
-    if (Number(error?.status) === 404) return { state: emptyState(), sha: null };
+    if (Number(error?.status) === 404) {
+      // First migration to the durable counter must not reset today's already-recorded local usage to
+      // zero. Seed the first durable write/read from the tracked legacy state; once the durable file
+      // exists it becomes authoritative for every connected workflow.
+      return { state: await loadLocalState(), sha: null, bootstrapped: true };
+    }
     throw error;
   }
 }
