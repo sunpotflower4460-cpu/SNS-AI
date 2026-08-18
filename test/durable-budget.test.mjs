@@ -170,6 +170,16 @@ test('production cost-consuming workflows opt into the shared durable counter', 
   }
 });
 
+test('report-producing workflows read the same durable usage counter', async () => {
+  for (const name of ['learning.yml', 'metrics.yml', 'intelligence.yml']) {
+    const text = await readFile(`${ROOT}.github/workflows/${name}`, 'utf8');
+    assert.match(text, /node src\/reports\/generate\.mjs/);
+    assert.match(text, /SNS_DURABLE_BUDGETS:\s*['"]?true['"]?/);
+    assert.match(text, /SNS_DURABLE_STATE_BRANCH:\s*sns-ai-state/);
+    assert.match(text, /GITHUB_REPOSITORY:\s*\$\{\{ github\.repository \}\}/);
+  }
+});
+
 test('durable state helpers stay opt-in and recognize GitHub CAS conflicts', () => {
   const saved = process.env.SNS_DURABLE_BUDGETS;
   try {
