@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openaiRequest } from '../lib/openai.mjs';
 import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
-import { recordUsage } from '../ops/budget.mjs';
 
 const PLATFORMS = {
   x: {
@@ -12,6 +11,23 @@ const PLATFORMS = {
   instagram: {
     domains: ['developers.facebook.com', 'developers.meta.com', 'developers.instagram.com', 'help.instagram.com'],
     focus: 'Instagram API publishing, content publishing permissions, automation/developer rules, branded content/disclosure rules relevant to automated publishing and insights'
+  }
+};
+
+// Policy Watch is a repository-level autonomous task rather than a social account operation. Give it a
+// dedicated, deliberately small daily namespace so manual reruns and transient OpenAI retries cannot bypass
+// the same durable budget mechanism used by account workflows. The default weekly run needs two successful
+// platform checks; 12 allows both platforms plus bounded retries while still failing closed on a runaway loop.
+const POLICY_WATCH_ACCOUNT_ID = '_system-policy-watch';
+const POLICY_WATCH_ACCOUNT = {
+  timezone: 'UTC',
+  budgets: {
+    enabled: true,
+    openaiCallsPerDay: 12,
+    webSearchCallsPerDay: 12,
+    mediaCallsPerDay: 0,
+    imageGenerationsPerDay: 0,
+    videoGenerationsPerDay: 0
   }
 };
 
@@ -88,8 +104,13 @@ async function researchPlatform(platform, previous) {
     ],
     text: { format: { type: 'json_schema', name: 'platform_policy_watch', schema, strict: true } }
   };
-  const response = await openaiRequest('/responses', body, { retries: 2 });
-  await recordUsage('_system', { timezone: 'UTC' }, 'openai', { operation: `policy-watch:${platform}` });
+  const response = await openaiRequest('/responses', body, {
+    retries: 2,
+    accountId: POLICY_WATCH_ACCOUNT_ID,
+    account: POLICY_WATCH_ACCOUNT,
+    operation: `policy-watch:${platform}`,
+    webSearch: true
+  });
   const parsed = parseJson(outputText(response));
   const merged = new Map();
   for (const source of citations(response)) if (allowedSource(source.url, config.domains)) merged.set(source.url, source);
@@ -133,3 +154,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(JSON.stringify(report, null, 2));
   if (report.some((row) => row.status === 'failed')) process.exitCode = 1;
 }
+
+export const __test = { POLICY_WATCH_ACCOUNT_ID, POLICY_WATCH_ACCOUNT };
