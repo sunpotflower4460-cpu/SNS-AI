@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { assertAutomatedEngagementAllowed } from '../src/engagement/policy.mjs';
 import { hardHumanCategory, withRequiredXOptOut } from '../src/engagement/ai.mjs';
+import { __test as runTest } from '../src/engagement/run.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const basePolicy = {
@@ -65,6 +66,22 @@ test('X automated responses always carry one clear opt-out notice after generati
 
 test('medical-advice requests are deterministically escalated before model judgment', () => {
   assert.equal(hardHumanCategory('この薬は一日に何錠服用すればいいですか？'), 'medical');
+});
+
+test('private human escalation cannot persist AI paraphrases of the private DM', () => {
+  const safe = runTest.privacySafeHumanFields(
+    { platform: 'x', kind: 'dm', public: false },
+    {
+      reason: 'ユーザーは秘密のパスワード ABC123 を相談しています',
+      humanSummary: 'DMには住所 東京都... が書かれています',
+      humanQuestion: '電話番号 090-0000-0000 へ連絡しますか？'
+    }
+  );
+  const serialized = JSON.stringify(safe);
+  assert.equal(serialized.includes('ABC123'), false);
+  assert.equal(serialized.includes('東京都'), false);
+  assert.equal(serialized.includes('090-0000-0000'), false);
+  assert.match(safe.summary, /内容は公開リポジトリへ転記していません/);
 });
 
 test('engagement dry-run details are kept out of public Actions and ChatOps output', async () => {
