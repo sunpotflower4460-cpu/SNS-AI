@@ -18,7 +18,7 @@ export function eventKey(accountId, event) {
 }
 
 export function actorKey(accountId, event) {
-  const actorId = String(event?.authorId || event?.participantId || '').trim();
+  const actorId = String(event?.authorId || event?.participantId || event?.username || '').trim();
   if (!actorId) return null;
   return hash([accountId, event.platform || '', 'actor', actorId]);
 }
