@@ -13,7 +13,15 @@ import {
   deliveryNeedsHuman,
   markDelivery
 } from './delivery-ledger.mjs';
-import { assertAutomatedEngagementAllowed, effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
+import {
+  assertAutomatedEngagementAllowed,
+  effectiveEngagementPolicy,
+  loadEngagementPolicy,
+  replyScopeFor,
+  safeConfidenceThreshold,
+  safeCooldownMinutes,
+  safeDailyAutomationCap
+} from './policy.mjs';
 import {
   allowedEngagementAccount,
   assertXEngagementCredential,
@@ -38,7 +46,8 @@ import {
   eventStatus,
   markActorOptOut,
   markEngagementEvent,
-  markEngagementSent
+  markEngagementSent,
+  reserveInboundFetch
 } from './store.mjs';
 
 function parseArgs(argv) {
@@ -82,11 +91,38 @@ function userMap(includes) {
   return new Map((includes?.users || []).map((user) => [String(user.id), user]));
 }
 
-function xEvents(accountId, ownId, mentions, dms) {
+// The mentions timeline returns every @-mention, including cold mentions from strangers who have never
+// touched our content. Replying to those is unsolicited outreach - exactly what this repo's own
+// `prohibitedGrowthAutomation: ["cold_keyword_reply"]` forbids - and it is not what the operator opted
+// into. `collectEvents` was already receiving `history` but the X branch ignored it, while the
+// Instagram branch correctly scoped itself to our own media ids.
+//
+// A mention counts as in-scope when it sits in a thread rooted at one of our own published posts:
+// `conversation_id` is the root tweet id, which also catches deeper replies further down our thread,
+// and `referenced_tweets` catches a direct reply. Both fields are already requested in
+// buildXMentionsUrl's tweet.fields, so this costs no extra API call.
+function inOwnThread(post, ownPostIds) {
+  if (!ownPostIds.size) return false;
+  if (post?.conversation_id && ownPostIds.has(String(post.conversation_id))) return true;
+  return (post?.referenced_tweets || []).some((ref) => ref?.id && ownPostIds.has(String(ref.id)));
+}
+
+function xOwnPostIds(history, accountId, limit = 200) {
+  const ids = new Set();
+  for (const row of [...history].reverse()) {
+    if (row?.account !== accountId || row?.status !== 'published' || !row?.providerPostId) continue;
+    ids.add(String(row.providerPostId));
+    if (ids.size >= limit) break;
+  }
+  return ids;
+}
+
+function xEvents(accountId, ownId, mentions, dms, { ownPostIds = new Set(), replyScope = 'own-posts' } = {}) {
   const users = userMap(mentions?.includes);
   const output = [];
   for (const post of mentions?.data || []) {
     if (!post?.id || !post?.author_id || String(post.author_id) === String(ownId)) continue;
+    if (replyScope === 'own-posts' && !inOwnThread(post, ownPostIds)) continue;
     output.push({
       id: String(post.id), platform: 'x', kind: 'reply', inbound: true, public: true,
       text: String(post.text || ''), createdAt: post.created_at || null,
@@ -133,6 +169,7 @@ async function instagramEvents(accountId, account, history, policy) {
   if (policy.autoReply === true) {
     for (const mediaId of instagramMediaIds(history, accountId)) {
       try {
+        await reserveFetch(accountId, policy, 'instagram-comments');
         const response = await listInstagramComments({ accessToken, mediaId, apiVersion });
         for (const comment of response?.data || []) {
           const authorId = String(comment?.from?.id || '');
@@ -144,6 +181,7 @@ async function instagramEvents(accountId, account, history, policy) {
           });
         }
       } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('Instagram comment engagement authorization/permission is not ready.');
         warnings.push(`Instagram comments temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('comments');
@@ -154,9 +192,11 @@ async function instagramEvents(accountId, account, history, policy) {
 
   if (policy.autoDmReply === true) {
     try {
+      await reserveFetch(accountId, policy, 'instagram-conversations');
       const conversations = await listInstagramConversations({ accessToken, igUserId: ownId, apiVersion });
       for (const conversation of (conversations?.data || []).slice(0, 25)) {
         if (!conversation?.id) continue;
+        await reserveFetch(accountId, policy, 'instagram-conversation-messages');
         const detail = await listInstagramConversationMessages({ accessToken, conversationId: conversation.id, apiVersion });
         for (const message of detail?.messages?.data || []) {
           const senderId = String(message?.from?.id || '');
@@ -170,6 +210,7 @@ async function instagramEvents(accountId, account, history, policy) {
         }
       }
     } catch (error) {
+      if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
       if (engagementAuthFailure(error)) throw engagementCredentialError('Instagram DM engagement authorization/permission is not ready.');
       warnings.push(`Instagram DMs temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
       unavailableChannels.push('dms');
@@ -359,6 +400,18 @@ async function sendResponseWithDeliveryGuard({ accountId, account, event, key, t
   return { state: 'sent', result };
 }
 
+// Reserved immediately before EACH individual provider-read request, not once per collection. A
+// single X collection reads both mentions and DM events; a single Instagram collection reads one
+// comment set per own media id, plus conversations and one call per conversation - checking/recording
+// only once per collection let a configured cap of N permit far more than N real, billed requests.
+// Uses the same fail-closed coercion as the reply caps: a malformed maxInboundFetchesPerDay stops
+// polling rather than uncapping it. Pagination internal to a single logical read (see paginateX) is
+// accounted as that one read - it already carries its own page-count safety cap.
+async function reserveFetch(accountId, policy, channel) {
+  const limit = safeDailyAutomationCap(policy.maxInboundFetchesPerDay, 48);
+  return reserveInboundFetch(accountId, limit, { channel });
+}
+
 async function collectEvents(accountId, account, history, globalPolicy) {
   const policy = effectiveEngagementPolicy(globalPolicy, account);
   if (account.platform === 'x') {
@@ -369,22 +422,35 @@ async function collectEvents(accountId, account, history, globalPolicy) {
     let mentions = { data: [] };
     let dms = { data: [] };
     if (policy.autoReply === true) {
-      try { mentions = await listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 }); }
-      catch (error) {
+      try {
+        await reserveFetch(accountId, policy, 'x-mentions');
+        mentions = await listXMentions({ credential: account.credential, userId: identity.id, maxResults: 100 });
+      } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('X mention engagement authorization/permission is not ready.');
         warnings.push(`X mentions temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('mentions');
       }
     }
     if (policy.autoDmReply === true) {
-      try { dms = await listXDirectMessages({ credential: account.credential, maxResults: 100 }); }
-      catch (error) {
+      try {
+        await reserveFetch(accountId, policy, 'x-dms');
+        dms = await listXDirectMessages({ credential: account.credential, maxResults: 100 });
+      } catch (error) {
+        if (error.code === 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED') throw error;
         if (engagementAuthFailure(error)) throw engagementCredentialError('X DM engagement authorization/permission is not ready.');
         warnings.push(`X DMs temporarily unavailable: ${String(error?.message || error).slice(0, 180)}`);
         unavailableChannels.push('dms');
       }
     }
-    return { events: xEvents(accountId, identity.id, mentions, dms), warnings, unavailableChannels };
+    return {
+      events: xEvents(accountId, identity.id, mentions, dms, {
+        ownPostIds: xOwnPostIds(history, accountId),
+        replyScope: replyScopeFor(policy)
+      }),
+      warnings,
+      unavailableChannels
+    };
   }
   if (account.platform === 'instagram') return instagramEvents(accountId, account, history, policy);
   return { events: [], warnings: [], unavailableChannels: [] };
@@ -477,9 +543,16 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     return { status: dryRun ? 'dry-run-waiting' : 'waiting', dueAt };
   }
 
-  const cooldownMinutes = Number(event.kind === 'dm' ? policy.dmCooldownMinutes ?? 30 : policy.replyCooldownMinutes ?? 30);
+  const cooldownMinutes = safeCooldownMinutes(event.kind === 'dm' ? policy.dmCooldownMinutes : policy.replyCooldownMinutes, 30);
   const lastSent = actor?.lastSentAt?.[event.kind] ? new Date(actor.lastSentAt[event.kind]).getTime() : NaN;
-  if (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0 && Number.isFinite(lastSent)) {
+  // A malformed cooldown coerces to Infinity. Checked before `lastSent` so it blocks even the FIRST
+  // automated reply to an actor: with an uninterpretable rate limit we do not know it is safe to send
+  // anything, so nothing is sent. Mirrors safeMinMinutesBetweenPosts -> Infinity on the posting side.
+  if (!Number.isFinite(cooldownMinutes)) {
+    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, actorKey: aKey, reason: 'invalid-cooldown-config' });
+    return { status: dryRun ? 'dry-run-deferred' : 'deferred', reason: 'invalid-cooldown-config' };
+  }
+  if (cooldownMinutes > 0 && Number.isFinite(lastSent)) {
     const cooldownDue = lastSent + cooldownMinutes * 60_000;
     if (cooldownDue > Date.now()) {
       dueAt = new Date(Math.max(new Date(dueAt).getTime() || 0, cooldownDue)).toISOString();
@@ -488,15 +561,19 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
     }
   }
 
-  const maxPerDay = event.kind === 'dm' ? Number(policy.maxAutomatedDmRepliesPerDay ?? 12) : Number(policy.maxAutomatedRepliesPerDay ?? 12);
+  // A malformed cap coerces to 0, which blocks every automated response for this kind rather than
+  // making the daily limit disappear.
+  const maxPerDay = safeDailyAutomationCap(event.kind === 'dm' ? policy.maxAutomatedDmRepliesPerDay : policy.maxAutomatedRepliesPerDay, 12);
   const sentToday = await countSentSince(accountId, event.kind, new Date(Date.now() - 24 * 60 * 60_000));
-  if (Number.isFinite(maxPerDay) && maxPerDay >= 0 && sentToday >= maxPerDay) {
+  if (sentToday >= maxPerDay) {
     if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, actorKey: aKey, reason: 'daily-cap' });
     return { status: dryRun ? 'dry-run-deferred' : 'deferred', reason: 'daily-cap' };
   }
 
   const decision = await classifyAndDraftEngagement({ accountId, account, event, policy, dryRun });
-  const threshold = Number(policy.minAutoReplyConfidence ?? 0.82);
+  // A malformed threshold coerces to Infinity, so no confidence can clear it and every candidate is
+  // escalated to a human instead of auto-sent.
+  const threshold = safeConfidenceThreshold(policy.minAutoReplyConfidence, 0.82);
   const humanCategory = new Set((policy.humanRequiredCategories || []).map((value) => String(value).toLowerCase())).has(String(decision.category || '').toLowerCase());
   if (decision.action === 'human' || humanCategory || (decision.action === 'reply' && decision.confidence < threshold) || allowed.approvalRequired) {
     if (dryRun) return { status: 'dry-run-human', decision: privateSafeDecision(event, decision) };
@@ -637,7 +714,10 @@ export const __test = {
   optedOut,
   terminal,
   instagramMediaIds,
+  instagramEvents,
   xEvents,
+  xOwnPostIds,
+  inOwnThread,
   credentialNotReady,
   engagementAuthFailure,
   xRequiredScopes: requiredXEngagementScopes,

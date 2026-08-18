@@ -29,9 +29,84 @@ function strictAccountList(policy, key) {
   return normalized;
 }
 
+export const REPLY_SCOPES = new Set(['own-posts', 'all-mentions']);
+
+// Which inbound X mentions are eligible for an automated reply.
+//   own-posts    - only mentions inside a thread rooted at one of our own published posts
+//   all-mentions - every @-mention, including cold mentions from strangers
+// Defaults to the narrow scope, and anything unrecognised also resolves to it, so a typo can never
+// widen automated outreach. Broadening is a deliberate, explicit config change.
+export function replyScopeFor(policy = {}) {
+  const value = String(policy.replyScope || '').trim().toLowerCase();
+  return REPLY_SCOPES.has(value) ? value : 'own-posts';
+}
+
+// Fail-closed coercion for the three knobs that decide how much automation is allowed to happen.
+// Mirrors safeMaxPostsPerDay/safeMinMinutesBetweenPosts in src/lib/safety.mjs: a malformed limit must
+// REDUCE automation, never silently remove the limit.
+//
+// Before this, run.mjs used a bare Number(), so `"twelve"` became NaN and every guard that reads it
+// (`sentToday >= maxPerDay`, `confidence < threshold`, `cooldownDue > Date.now()`) evaluated false -
+// unlimited automated replies, no confidence floor, and no per-actor cooldown, all from one typo.
+//
+// The runtime coercion is required IN ADDITION to validateEngagementPolicy, because
+// effectiveEngagementPolicy merges an unvalidated per-account `account.engagement` object over the
+// validated global policy file - an account-level override never passes through file validation.
+export function safeDailyAutomationCap(value, fallback) {
+  if (value == null) return fallback;
+  // Must be an integer: this gates a COUNT comparison (`used >= cap`). A fractional cap like 0.5 is
+  // not "essentially zero" - since `used` only ever takes integer values, `0 >= 0.5` is false, so a
+  // configured cap below one would still let exactly one reply/read through before blocking.
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+export function safeCooldownMinutes(value, fallback) {
+  if (value == null) return fallback;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : Number.POSITIVE_INFINITY;
+}
+
+export function safeConfidenceThreshold(value, fallback) {
+  if (value == null) return fallback;
+  // Confidence is a 0..1 score, so an unreachable threshold routes every candidate to a human instead
+  // of auto-sending. Anything outside that range is treated as malformed.
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : Number.POSITIVE_INFINITY;
+}
+
+function strictLimit(policy, key, { integer = false, min = 0, max = Number.POSITIVE_INFINITY } = {}) {
+  const value = policy[key];
+  if (value == null) return;
+  const invalid = typeof value !== 'number'
+    || !Number.isFinite(value)
+    || value < min
+    || value > max
+    || (integer && !Number.isInteger(value));
+  if (invalid) {
+    throw new Error(`config/engagement-policy.json ${key} must be a ${integer ? 'non-negative integer' : `number in ${min}..${max}`}.`);
+  }
+}
+
+function strictFlag(policy, key) {
+  if (policy[key] == null) return;
+  if (typeof policy[key] !== 'boolean') throw new Error(`config/engagement-policy.json ${key} must be a boolean.`);
+}
+
 export function validateEngagementPolicy(policy) {
   if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
   if (Number(policy.schemaVersion || 0) >= 4) {
+    // The automation limits are the safety envelope for unattended operation. Reject a malformed value
+    // at load time so the operator sees the typo, rather than discovering it through unlimited replies.
+    for (const key of ['enabled', 'inboundOnly', 'autoReply', 'autoDmReply', 'approvalRequired', 'oneAutomatedResponsePerInteraction']) {
+      strictFlag(policy, key);
+    }
+    strictLimit(policy, 'maxAutomatedRepliesPerDay', { integer: true });
+    strictLimit(policy, 'maxAutomatedDmRepliesPerDay', { integer: true });
+    strictLimit(policy, 'replyCooldownMinutes');
+    strictLimit(policy, 'dmCooldownMinutes');
+    strictLimit(policy, 'minAutoReplyConfidence', { max: 1 });
+    strictLimit(policy, 'maxInboundFetchesPerDay', { integer: true });
+    if (policy.replyScope != null && !REPLY_SCOPES.has(String(policy.replyScope))) {
+      throw new Error(`config/engagement-policy.json replyScope must be one of ${[...REPLY_SCOPES].join(', ')}.`);
+    }
     strictAccountList(policy, 'allowedAccounts');
     strictAccountList(policy, 'liveAccounts');
     strictAccountList(policy, 'xAutomationProfileComplianceConfirmedAccounts');

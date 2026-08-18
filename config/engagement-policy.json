@@ -6,9 +6,11 @@
   ],
   "liveAccounts": [],
   "inboundOnly": true,
+  "replyScope": "own-posts",
+  "maxInboundFetchesPerDay": 48,
   "autoReply": true,
-  "autoDmReply": true,
-  "approvalRequired": false,
+  "autoDmReply": false,
+  "approvalRequired": true,
   "xAutomationProfileComplianceConfirmedAccounts": [],
   "xAiReplyBotApprovalRequiredAccounts": [
     "music-tools-x"
@@ -26,7 +28,7 @@
     50
   ],
   "maxAutomatedRepliesPerDay": 12,
-  "maxAutomatedDmRepliesPerDay": 8,
+  "maxAutomatedDmRepliesPerDay": 0,
   "replyCooldownMinutes": 30,
   "dmCooldownMinutes": 30,
   "privateContentPersistence": "never",

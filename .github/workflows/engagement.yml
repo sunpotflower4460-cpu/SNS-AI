@@ -1,8 +1,17 @@
 name: SNS Engagement Autopilot
 
 on:
-  schedule:
-    - cron: '7,17,27,37,47,57 * * * *'
+  # Manual only, on purpose. X moved to pay-per-use in February 2026, so every poll for new inbound
+  # interactions is billed whether or not anything arrived. A 10-minute cron is 144 paid reads a day
+  # even on a day with zero replies, on an account that has not yet published anything.
+  #
+  # Run this by hand while confirming the real per-request price and the actual reply volume. To move
+  # to unattended polling afterwards, restore the schedule below and pick an interval that matches the
+  # traffic - replies cluster in the hours right after a post, so a narrow window beats round-the-clock
+  # polling. `maxInboundFetchesPerDay` in config/engagement-policy.json remains the hard stop either way.
+  #
+  # schedule:
+  #   - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
     inputs:
       account:

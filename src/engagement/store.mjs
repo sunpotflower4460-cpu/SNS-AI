@@ -60,8 +60,61 @@ function ensureAccount(state, accountId) {
   account.events ||= {};
   account.actors ||= {};
   account.sentLog = Array.isArray(account.sentLog) ? account.sentLog : [];
+  account.fetchLog = Array.isArray(account.fetchLog) ? account.fetchLog : [];
   state.accounts[accountId] = account;
   return account;
+}
+
+// Reading inbound interactions is itself a billed operation on X's pay-per-use pricing, and it is
+// billed on every poll whether or not anything new arrived. Nothing else in the system bounds it:
+// OpenAI spend is capped inside openaiRequest via the account's budgets, but provider READS go
+// straight through xOAuth2FetchJson/fetchJson with no counter at all. This log is what
+// maxInboundFetchesPerDay is enforced against.
+export async function countFetchesSince(accountId, since) {
+  const state = await loadEngagementState();
+  const threshold = new Date(since).getTime();
+  const rows = state.accounts?.[accountId]?.fetchLog;
+  if (!Array.isArray(rows)) return 0;
+  return rows.filter((row) => {
+    const at = new Date(row?.at || 0).getTime();
+    return Number.isFinite(at) && at >= threshold;
+  }).length;
+}
+
+export async function recordInboundFetch(accountId, detail = {}) {
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = detail.at || new Date().toISOString();
+  account.fetchLog.push({ at: now, channel: detail.channel || null });
+  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+  await writeJsonAtomic(STATE_FILE, state);
+  return account.fetchLog.length;
+}
+
+// A single X or Instagram collection can make several distinct provider reads (mentions AND dm_events;
+// one comments call per own media id, plus conversations and one call per conversation) - checking and
+// recording once per COLLECTION let a configured cap of N permit far more than N real, billed requests.
+// This checks and appends in one load/write instead of two, so the check and the record cannot observe
+// different states, and it is called immediately before each individual provider-read request rather
+// than once before the whole collection.
+export async function reserveInboundFetch(accountId, limit, detail = {}) {
+  const state = await loadEngagementState();
+  const account = ensureAccount(state, accountId);
+  const now = detail.at || new Date().toISOString();
+  const since = new Date(now).getTime() - 24 * 60 * 60_000;
+  const used = account.fetchLog.filter((row) => {
+    const at = new Date(row?.at || 0).getTime();
+    return Number.isFinite(at) && at >= since;
+  }).length;
+  if (used >= limit) {
+    const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
+    error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
+    throw error;
+  }
+  account.fetchLog.push({ at: now, channel: detail.channel || null });
+  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+  await writeJsonAtomic(STATE_FILE, state);
+  return { allowed: true, used: used + 1, limit };
 }
 
 export async function eventStatus(accountId, key) {
@@ -165,9 +218,9 @@ export async function appendEngagementAudit(entry) {
 }
 
 export const __test = {
+  compactSentLog,
   compactEvents,
   compactActors,
-  compactSentLog,
   MAX_EVENTS_PER_ACCOUNT,
   MAX_ACTIVE_ACTORS_PER_ACCOUNT,
   MAX_SENT_LOG_PER_ACCOUNT

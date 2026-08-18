@@ -114,6 +114,13 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false,
     const policy = JSON.parse(snap.get(POLICY));
     policy.allowedAccounts = ['music-tools-x'];
     policy.liveAccounts = live ? ['music-tools-x'] : [];
+    // These tests exercise the send machinery end to end, so the fixture opts into automatic sending
+    // explicitly. The committed policy deliberately does NOT - it keeps approvalRequired on and DM off
+    // for launch (locked by test/affiliate-engagement-foundation.test.mjs). Keeping the two separate
+    // means the runtime stays covered without the shipped configuration having to be permissive.
+    policy.approvalRequired = false;
+    policy.autoDmReply = true;
+    policy.maxAutomatedDmRepliesPerDay = 8;
     if (platform === 'x') {
       policy.xAiReplyBotApprovalRequiredAccounts = ['music-tools-x'];
       policy.xAiReplyBotApprovalConfirmedAccounts = live ? ['music-tools-x'] : [];
@@ -175,6 +182,11 @@ test('X engagement runtime auto-replies routine inbound, persists opt-out, escal
     const ledger = deliveryLedgerTransport();
     let issueNumber = 100;
 
+    // Automated replies are scoped to threads rooted at our own published posts, so the run needs a
+    // published post to attach the inbound mentions to. Without it nothing is eligible - which is the
+    // correct behaviour for an account that has never posted.
+    await writeFile(`${ROOT}data/history.jsonl`, `${JSON.stringify({ account: 'music-tools-x', status: 'published', providerPostId: '777', at: old, text: 'post' })}\n`, 'utf8');
+
     globalThis.fetch = async (url, options = {}) => {
       const href = String(url);
       const method = String(options.method || 'GET').toUpperCase();
@@ -185,11 +197,11 @@ test('X engagement runtime auto-replies routine inbound, persists opt-out, escal
       if (href.startsWith('https://api.x.com/2/users/1/mentions')) {
         return json({
           data: [
-            { id: '10', author_id: '2', text: 'このプラグインは初心者にも向いていますか？', created_at: old },
-            { id: '11', author_id: '3', text: 'ありがとう！', created_at: old },
-            { id: '12', author_id: '4', text: '返金トラブルについて正式に対応してください', created_at: old },
-            { id: '13', author_id: '7', text: '今後、自動返信は不要です', created_at: old },
-            { id: '14', author_id: '7', text: 'その後の別の質問です', created_at: old }
+            { id: '10', author_id: '2', text: 'このプラグインは初心者にも向いていますか？', created_at: old, conversation_id: '777' },
+            { id: '11', author_id: '3', text: 'ありがとう！', created_at: old, conversation_id: '777' },
+            { id: '12', author_id: '4', text: '返金トラブルについて正式に対応してください', created_at: old, conversation_id: '777' },
+            { id: '13', author_id: '7', text: '今後、自動返信は不要です', created_at: old, conversation_id: '777' },
+            { id: '14', author_id: '7', text: 'その後の別の質問です', created_at: old, conversation_id: '777' }
           ],
           includes: { users: [
             { id: '2', username: 'listener' }, { id: '3', username: 'thanks' }, { id: '4', username: 'dispute' }, { id: '7', username: 'optout' }

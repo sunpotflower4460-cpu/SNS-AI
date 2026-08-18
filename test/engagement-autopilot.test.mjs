@@ -223,10 +223,12 @@ test('private dry-run decisions and failures omit free-text/provider details', (
 });
 
 test('X event normalization excludes the account itself and keeps inbound routes ephemeral', () => {
+  // The mention here sits in a thread rooted at our own post 'own-1', which is what makes it eligible
+  // at all - see the cold-mention test below.
   const events = runTest.xEvents('music-tools-x', '1', {
     data: [
-      { id: '10', author_id: '2', text: 'hello', created_at: '2026-08-18T00:00:00Z' },
-      { id: '11', author_id: '1', text: 'self', created_at: '2026-08-18T00:00:00Z' }
+      { id: '10', author_id: '2', text: 'hello', created_at: '2026-08-18T00:00:00Z', conversation_id: 'own-1' },
+      { id: '11', author_id: '1', text: 'self', created_at: '2026-08-18T00:00:00Z', conversation_id: 'own-1' }
     ],
     includes: { users: [{ id: '2', username: 'listener' }] }
   }, {
@@ -234,11 +236,50 @@ test('X event normalization excludes the account itself and keeps inbound routes
       { id: '20', event_type: 'MessageCreate', sender_id: '3', text: 'private', created_at: '2026-08-18T00:00:00Z' },
       { id: '21', event_type: 'MessageCreate', sender_id: '1', text: 'self dm', created_at: '2026-08-18T00:00:00Z' }
     ]
-  });
+  }, { ownPostIds: new Set(['own-1']) });
   assert.equal(events.length, 2);
   assert.equal(events[0].public, true);
   assert.equal(events[1].public, false);
   assert.equal(events[1].participantId, '3');
+});
+
+test('X mentions outside our own threads are discarded instead of auto-replied', () => {
+  // The mentions timeline returns every @-mention. Auto-replying to a stranger who never touched our
+  // content is unsolicited outreach, which this repo's own policy lists under
+  // prohibitedGrowthAutomation as "cold_keyword_reply". collectEvents already had `history` available
+  // but the X branch ignored it, so cold mentions were being turned into reply events.
+  const mentions = {
+    data: [
+      { id: '30', author_id: '2', text: 'reply on our post', created_at: '2026-08-18T00:00:00Z', conversation_id: 'own-1' },
+      { id: '31', author_id: '2', text: 'deeper in our thread', created_at: '2026-08-18T00:00:00Z', conversation_id: 'own-1', referenced_tweets: [{ type: 'replied_to', id: '30' }] },
+      { id: '32', author_id: '4', text: 'direct reply to our post', created_at: '2026-08-18T00:00:00Z', referenced_tweets: [{ type: 'replied_to', id: 'own-2' }] },
+      { id: '33', author_id: '5', text: 'hey @us check out my thing', created_at: '2026-08-18T00:00:00Z', conversation_id: 'stranger-root' }
+    ],
+    includes: { users: [] }
+  };
+  const ownPostIds = new Set(['own-1', 'own-2']);
+
+  const scoped = runTest.xEvents('music-tools-x', '1', mentions, { data: [] }, { ownPostIds });
+  assert.deepEqual(scoped.map((event) => event.id), ['30', '31', '32'], 'only mentions inside our own threads are eligible');
+
+  // With no published posts yet there is nothing to be a reply to, so nothing is eligible.
+  const noHistory = runTest.xEvents('music-tools-x', '1', mentions, { data: [] }, { ownPostIds: new Set() });
+  assert.deepEqual(noHistory, [], 'an account with no published posts must not auto-reply to anyone');
+
+  // The broad scope stays available, but only as a deliberate opt-in.
+  const broad = runTest.xEvents('music-tools-x', '1', mentions, { data: [] }, { ownPostIds, replyScope: 'all-mentions' });
+  assert.deepEqual(broad.map((event) => event.id), ['30', '31', '32', '33']);
+});
+
+test('own X post ids come from published history only', () => {
+  const ids = runTest.xOwnPostIds([
+    { account: 'music-tools-x', status: 'published', providerPostId: 'a' },
+    { account: 'other-account', status: 'published', providerPostId: 'b' },
+    { account: 'music-tools-x', status: 'failed', providerPostId: 'c' },
+    { account: 'music-tools-x', status: 'published', providerPostId: null },
+    { account: 'music-tools-x', status: 'published', providerPostId: 'd' }
+  ], 'music-tools-x');
+  assert.deepEqual([...ids].sort(), ['a', 'd'], 'other accounts, failed posts and missing ids are excluded');
 });
 
 test('Instagram media discovery deduplicates recent published provider ids', () => {
