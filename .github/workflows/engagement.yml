@@ -75,7 +75,9 @@ jobs:
           fi
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
-          git add "${paths[@]}" 2>/dev/null || true
+          for path in "${paths[@]}"; do
+            [[ -e "$path" ]] && git add "$path"
+          done
           git diff --cached --quiet && exit 0
           git commit -m "chore: persist SNS engagement state"
           for attempt in 1 2 3; do
