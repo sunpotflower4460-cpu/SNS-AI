@@ -4,6 +4,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { localDateKey } from '../src/lib/schedule.mjs';
 import { assertUsageBudget, consumeUsage, recordUsage, usageToday, __test } from '../src/ops/budget.mjs';
+import { __test as policyWatchTest } from '../src/research/policy-watch.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const STATE_FILE = `${ROOT}data/usage-state.json`;
@@ -125,14 +126,29 @@ test('durable budget CAS retries against a concurrent workflow without losing it
   });
 });
 
-test('durable recordUsage shares the same counter even when no account budget is enforced', async () => {
+test('durable recordUsage shares the same counter for non-enforced audit namespaces', async () => {
   await withSandbox(async () => {
     enableDurable();
     const remote = installRemote(null);
-    const row = await recordUsage('_system', { timezone: 'UTC' }, 'openai', { operation: 'policy-watch' });
+    const row = await recordUsage('_audit', { timezone: 'UTC' }, 'openai', { operation: 'audit-only' });
     assert.equal(row.countToday, 1);
-    assert.equal(remote.remote.accounts._system.counts.openai, 1);
+    assert.equal(remote.remote.accounts._audit.counts.openai, 1);
   });
+});
+
+test('policy watch uses a bounded system budget through openaiRequest before each web-search call', async () => {
+  assert.equal(policyWatchTest.POLICY_WATCH_ACCOUNT_ID, '_system-policy-watch');
+  assert.equal(policyWatchTest.POLICY_WATCH_ACCOUNT.budgets.enabled, true);
+  assert.ok(policyWatchTest.POLICY_WATCH_ACCOUNT.budgets.openaiCallsPerDay >= 6);
+  assert.equal(
+    policyWatchTest.POLICY_WATCH_ACCOUNT.budgets.webSearchCallsPerDay,
+    policyWatchTest.POLICY_WATCH_ACCOUNT.budgets.openaiCallsPerDay
+  );
+  const source = await readFile(`${ROOT}src/research/policy-watch.mjs`, 'utf8');
+  assert.doesNotMatch(source, /recordUsage\(/);
+  assert.match(source, /accountId:\s*POLICY_WATCH_ACCOUNT_ID/);
+  assert.match(source, /account:\s*POLICY_WATCH_ACCOUNT/);
+  assert.match(source, /webSearch:\s*true/);
 });
 
 test('explicit durable mode fails closed when GitHub runtime metadata is unavailable', async () => {
