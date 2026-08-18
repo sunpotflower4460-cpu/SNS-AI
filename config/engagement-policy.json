@@ -9,6 +9,7 @@
   "autoReply": true,
   "autoDmReply": true,
   "approvalRequired": false,
+  "xAutomationProfileComplianceConfirmedAccounts": [],
   "xAiReplyBotApprovalRequiredAccounts": [
     "music-tools-x"
   ],
