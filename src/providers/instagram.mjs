@@ -40,15 +40,72 @@ async function waitForContainer({ base, containerId, accessToken, timeoutMinutes
   throw new Error(`Instagram container did not finish processing within ${Math.max(1, Number(timeoutMinutes))} minute(s).`);
 }
 
+// `fields=id,username` is satisfied by instagram_business_basic alone, so the old check proved only
+// that the token was valid - not that the account is Professional, and not that
+// instagram_business_content_publish was ever granted. Both only surfaced at the first real publish,
+// after a full paid generation had already been spent.
+//
+// content_publishing_limit is the right probe: it is read-only, costs nothing, requires the publish
+// permission, and returns the account's remaining 24h quota, which is worth seeing anyway. Its failure
+// is classified rather than assumed - only an explicit permission/OAuth error is treated as proof of a
+// missing scope, because a false blocker here would stop a working account from launching.
+const PROFESSIONAL_ACCOUNT_TYPES = new Set(['BUSINESS', 'MEDIA_CREATOR', 'CREATOR']);
+
+function permissionDenied(error) {
+  const code = Number(error?.body?.error?.code);
+  if (code === 10 || code === 200 || (code >= 200 && code <= 299)) return true;
+  return /permission|scope|not authorized|insufficient/i.test(String(error?.message || ''));
+}
+
+async function accountProfile(base, credential) {
+  try {
+    return await fetchJson(`${base}/${credential.igUserId}?fields=id,username,account_type`, {
+      method: 'GET',
+      headers: authHeaders(credential.accessToken)
+    });
+  } catch (error) {
+    // account_type is not guaranteed on every API variant; never let an unknown field break the
+    // identity check the rest of preflight depends on.
+    if (Number(error?.status) !== 400) throw error;
+    return fetchJson(`${base}/${credential.igUserId}?fields=id,username`, {
+      method: 'GET',
+      headers: authHeaders(credential.accessToken)
+    });
+  }
+}
+
 export async function verifyInstagramCredential({ credential, apiVersion = 'v25.0' }) {
   if (!credential?.igUserId) throw new Error('Instagram credential is missing "igUserId".');
   const base = `https://graph.instagram.com/${apiVersion}`;
-  const body = await fetchJson(`${base}/${credential.igUserId}?fields=id,username`, {
-    method: 'GET',
-    headers: authHeaders(credential.accessToken)
-  });
+  const body = await accountProfile(base, credential);
   if (!body?.id) throw new Error('Instagram credential check returned no account id.');
-  return { id: body.id, username: body.username || null };
+
+  const accountType = body.account_type ? String(body.account_type).toUpperCase() : null;
+  if (accountType && !PROFESSIONAL_ACCOUNT_TYPES.has(accountType)) {
+    throw new Error(`Instagram account_type is ${accountType}; content publishing requires a Professional (Business or Creator) account.`);
+  }
+
+  let publishAccess = { checked: true, ok: true, quota: null, error: null };
+  try {
+    const limit = await fetchJson(`${base}/${credential.igUserId}/content_publishing_limit?fields=config,quota_usage`, {
+      method: 'GET',
+      headers: authHeaders(credential.accessToken)
+    });
+    const row = Array.isArray(limit?.data) ? limit.data[0] : limit;
+    publishAccess = {
+      checked: true,
+      ok: true,
+      quota: row ? { used: row.quota_usage ?? null, total: row.config?.quota_total ?? null } : null,
+      error: null
+    };
+  } catch (error) {
+    if (permissionDenied(error)) {
+      throw new Error(`Instagram token cannot read content_publishing_limit, which requires instagram_business_content_publish: ${error.message}`);
+    }
+    publishAccess = { checked: true, ok: false, quota: null, error: error.message };
+  }
+
+  return { id: body.id, username: body.username || null, accountType, publishAccess };
 }
 
 export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image', credential, apiVersion = 'v25.0', dryRun = false }) {

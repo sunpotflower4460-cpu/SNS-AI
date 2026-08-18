@@ -253,9 +253,13 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
           assert.equal(options.headers.Authorization, 'Bearer github-test-token');
           return jsonResponse({ private: privateRepo });
         }
-        if (target === 'https://graph.instagram.com/v25.0/ig-user-123?fields=id,username') {
+        if (target === 'https://graph.instagram.com/v25.0/ig-user-123?fields=id,username,account_type') {
           assert.equal(options.headers.Authorization, 'Bearer ig-access-token');
-          return jsonResponse({ id: 'ig-user-123', username: 'integration_ig' });
+          return jsonResponse({ id: 'ig-user-123', username: 'integration_ig', account_type: 'BUSINESS' });
+        }
+        if (target === 'https://graph.instagram.com/v25.0/ig-user-123/content_publishing_limit?fields=config,quota_usage') {
+          assert.equal(options.headers.Authorization, 'Bearer ig-access-token');
+          return jsonResponse({ data: [{ quota_usage: 3, config: { quota_total: 100 } }] });
         }
         if (target.includes('/media_publish') || target.endsWith('/media')) postAttempted = true;
         throw new Error(`Unexpected mocked URL: ${target}`);
@@ -269,6 +273,8 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
       assert.equal(ready.mediaHosting.ok, true);
       assert.equal(ready.mediaHosting.private, false);
       assert.equal(ready.accounts[0].identity.username, 'integration_ig');
+      assert.equal(ready.accounts[0].identity.accountType, 'BUSINESS');
+      assert.deepEqual(ready.accounts[0].identity.publishAccess.quota, { used: 3, total: 100 });
       assert.equal(ready.accounts[0].builtInMedia.kind, 'image');
       assert.equal(ready.accounts[0].builtInMedia.hostingReady, true);
       assert.equal(postAttempted, false, 'preflight must never publish');

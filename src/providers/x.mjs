@@ -148,10 +148,33 @@ async function uploadVideo(mediaUrl, credentials) {
   return mediaId;
 }
 
+// X historically reports the token's permission level in an `x-access-level` response header
+// (`read`, `read-write`, `read-write-directmessages`). A token minted while the app was still set to
+// "Read" authenticates perfectly against GET /2/users/me - which is the ENTIRE preflight for a
+// text-only account - and only fails at the first real POST /2/tweets, with a 403 carrying no
+// error.code, which then trips the resilience circuit and pauses the account.
+//
+// The header is not a documented part of the v2 contract, so this is strictly opportunistic: absence
+// yields `unknown` and changes nothing. Only an explicit read-only value is treated as a finding, and
+// that value is unambiguous when present.
+function readAccessLevel(headerValue) {
+  const value = String(headerValue || '').trim().toLowerCase();
+  if (!value) return { level: 'unknown', canWrite: null };
+  return { level: value, canWrite: value.includes('write') };
+}
+
 export async function verifyXCredential(credential) {
-  const body = await fetchJson(VERIFY_USER_URL, { method: 'GET', headers: { Authorization: oauthHeader('GET', VERIFY_USER_URL, credential) } });
+  let accessLevel = { level: 'unknown', canWrite: null };
+  const body = await fetchJson(VERIFY_USER_URL, {
+    method: 'GET',
+    headers: { Authorization: oauthHeader('GET', VERIFY_USER_URL, credential) },
+    onResponse: (response) => { accessLevel = readAccessLevel(response.headers?.get?.('x-access-level')); }
+  });
   if (!body?.data?.id) throw new Error('X credential check returned no authenticated user.');
-  return { id: body.data.id, username: body.data.username || null, name: body.data.name || null };
+  if (accessLevel.canWrite === false) {
+    throw new Error(`X access token is ${accessLevel.level}, not read-write. Set the app to "Read and write" and then REGENERATE the access token and secret - changing the permission alone does not upgrade an existing token.`);
+  }
+  return { id: body.data.id, username: body.data.username || null, name: body.data.name || null, accessLevel: accessLevel.level, writeVerified: accessLevel.canWrite };
 }
 
 export async function verifyXOAuth2Credential(credential) {

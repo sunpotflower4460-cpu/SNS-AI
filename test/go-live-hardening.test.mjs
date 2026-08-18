@@ -161,3 +161,95 @@ test('readiness is not vacuously true when no account is enabled', async () => {
   // Only `blocked` - a config error, or an enabled-but-broken account - may fail the strict exit.
   assert.notEqual(strict.state, 'blocked');
 });
+
+test('X credential verification rejects a read-only access token instead of passing preflight', async () => {
+  // A token minted while the X app was still set to "Read" authenticates perfectly against
+  // GET /2/users/me, which for a text-only account is the ENTIRE preflight. The failure only appears at
+  // the first real POST /2/tweets as a 403 with no error.code, which trips the resilience circuit.
+  const { verifyXCredential } = await import('../src/providers/x.mjs');
+  const previousFetch = globalThis.fetch;
+  const credential = {
+    consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'ats'
+  };
+  const respond = (accessLevel) => async () => new Response(
+    JSON.stringify({ data: { id: 'u1', username: 'example', name: 'Example' } }),
+    { status: 200, headers: accessLevel ? { 'content-type': 'application/json', 'x-access-level': accessLevel } : { 'content-type': 'application/json' } }
+  );
+  try {
+    globalThis.fetch = respond('read');
+    await assert.rejects(verifyXCredential(credential), /not read-write/, 'a read-only token must fail preflight');
+    await assert.rejects(verifyXCredential(credential), /REGENERATE/, 'the fix - regenerating the token - must be in the message');
+
+    globalThis.fetch = respond('read-write');
+    const rw = await verifyXCredential(credential);
+    assert.equal(rw.writeVerified, true);
+    assert.equal(rw.accessLevel, 'read-write');
+
+    // The header is not a documented part of the v2 contract, so its absence must never block a
+    // working account - it is reported as unknown and nothing else changes.
+    globalThis.fetch = respond(null);
+    const unknown = await verifyXCredential(credential);
+    assert.equal(unknown.writeVerified, null);
+    assert.equal(unknown.accessLevel, 'unknown');
+    assert.equal(unknown.id, 'u1');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('Instagram credential verification proves the publish permission and a Professional account', async () => {
+  // fields=id,username is satisfied by instagram_business_basic alone, so the old check proved neither
+  // that content publishing was granted nor that the account is Professional. Both would first surface
+  // at the real publish, after a paid generation.
+  const { verifyInstagramCredential } = await import('../src/providers/instagram.mjs');
+  const previousFetch = globalThis.fetch;
+  const credential = { igUserId: 'ig-1', accessToken: 'token' };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  try {
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes('content_publishing_limit')) return json({ data: [{ quota_usage: 2, config: { quota_total: 100 } }] });
+      return json({ id: 'ig-1', username: 'shop', account_type: 'BUSINESS' });
+    };
+    const ok = await verifyInstagramCredential({ credential });
+    assert.equal(ok.accountType, 'BUSINESS');
+    assert.deepEqual(ok.publishAccess.quota, { used: 2, total: 100 });
+
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes('content_publishing_limit')) return json({ error: { message: 'Application does not have permission for this action', code: 10 } }, 403);
+      return json({ id: 'ig-1', username: 'shop', account_type: 'BUSINESS' });
+    };
+    await assert.rejects(
+      verifyInstagramCredential({ credential }),
+      /instagram_business_content_publish/,
+      'a token without the publish permission must fail preflight, not the first real post'
+    );
+
+    globalThis.fetch = async () => json({ id: 'ig-1', username: 'me', account_type: 'PERSONAL' });
+    await assert.rejects(verifyInstagramCredential({ credential }), /Professional/, 'a personal account cannot publish via the API');
+
+    // A transient/unclassifiable failure must not be mistaken for a missing permission.
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes('content_publishing_limit')) return json({ error: { message: 'Please reduce the amount of data', code: 1 } }, 500);
+      return json({ id: 'ig-1', username: 'shop', account_type: 'MEDIA_CREATOR' });
+    };
+    const degraded = await verifyInstagramCredential({ credential });
+    assert.equal(degraded.publishAccess.ok, false);
+    assert.match(degraded.publishAccess.error, /reduce the amount of data/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('the preflight workflow can verify the approval channel it depends on', async () => {
+  // approval mode does POST /labels then POST /issues after a full paid generation. preflight.yml
+  // granted only `contents: write`, so the channel was structurally unverifiable; Issues being disabled
+  // on the repository produced the same silent dead end.
+  const yaml = await readFile(`${WORKFLOWS_DIR}preflight.yml`, 'utf8');
+  assert.match(yaml, /permissions:[\s\S]*?issues:\s*write/, 'preflight needs issues: write to verify the approval channel');
+
+  const names = (await readdir(WORKFLOWS_DIR)).filter((name) => name.endsWith('.yml'));
+  assert.ok(names.includes('publish.yml'), 'sanity: the workflow directory resolved correctly');
+});

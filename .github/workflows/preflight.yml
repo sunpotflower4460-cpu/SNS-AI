@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: write
+  # Read-only for preflight itself, but approval mode's first real run creates the `approved` label and
+  # the draft issue. Granting it here lets preflight verify the approval channel (Issues enabled, label
+  # readable) instead of discovering it is broken after a full paid generation.
+  issues: write
 
 concurrency:
   group: sns-ai-write
