@@ -101,8 +101,11 @@ jobs:
         run: |
           set -o pipefail
           {
-            npm run doctor -- --strict --account "${{ steps.command.outputs.account }}"
-            node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}"
+            status=0
+            npm run doctor -- --strict --account "${{ steps.command.outputs.account }}" || status=1
+            node src/ops/live-preflight.mjs --account "${{ steps.command.outputs.account }}" || status=1
+            node src/ops/x-automation-compliance.mjs --account "${{ steps.command.outputs.account }}" || status=1
+            exit "$status"
           } 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Execute Autopilot Dry Run
@@ -116,8 +119,13 @@ jobs:
         if: steps.command.outputs.command == 'engagement-dry-run'
         shell: bash
         run: |
-          set -o pipefail
-          node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}" --dry-run 2>&1 | tee "$COMMAND_OUTPUT"
+          private_output=/tmp/sns-engagement-dry-run-private.txt
+          if node src/engagement/run.mjs --account "${{ steps.command.outputs.account }}" --dry-run >"$private_output" 2>&1; then
+            printf '%s\n' 'Engagement dry-run completed. Detailed interaction output is intentionally suppressed because it can contain private-DM-derived response text or routing metadata.' > "$COMMAND_OUTPUT"
+          else
+            printf '%s\n' 'Engagement dry-run failed. Detailed interaction output is intentionally suppressed for privacy; inspect provider setup and rerun after fixing the external gate.' > "$COMMAND_OUTPUT"
+            exit 1
+          fi
 
       - name: Execute Engagement Run
         if: steps.command.outputs.command == 'engagement-run'
@@ -146,16 +154,20 @@ jobs:
             data/engagement-state.json \
             data/engagement-audit.jsonl \
             data/x-oauth2-state.json \
-            data/engagement-delivery-ledger.json
+            data/engagement-delivery-ledger.json \
+            data/durable-usage-state.json
 
       - name: Persist remaining safe runtime state
         if: always()
         shell: bash
         run: |
-          if [[ -z "$(git status --porcelain -- data/)" ]]; then exit 0; fi
+          paths=(data/usage.jsonl data/usage-state.json)
+          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then exit 0; fi
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
-          git add data/
+          for path in "${paths[@]}"; do
+            [[ -e "$path" ]] && git add "$path"
+          done
           git diff --cached --quiet && exit 0
           git commit -m "chore: persist SNS ChatOps state"
           for attempt in 1 2 3; do
@@ -191,4 +203,4 @@ jobs:
 
       - name: Explain failed command
         if: failure()
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "❌ SNS ChatOps command failed. Check the Actions log; no secret values are intentionally copied into this issue."
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "❌ SNS ChatOps command failed. Detailed private engagement output is never copied into this issue. Check configuration and provider readiness before retrying."

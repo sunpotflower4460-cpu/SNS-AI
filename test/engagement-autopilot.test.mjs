@@ -3,16 +3,23 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { assertAutomatedEngagementAllowed } from '../src/engagement/policy.mjs';
+import {
+  liveEngagementAccount,
+  xAiReplyApprovalReady,
+  xAiReplyApprovalRequired
+} from '../src/engagement/readiness.mjs';
 import { actorKey, eventKey, __test as storeTest } from '../src/engagement/store.mjs';
 import { hardHumanCategory, __test as aiTest } from '../src/engagement/ai.mjs';
 import { __test as runTest } from '../src/engagement/run.mjs';
+import { runXAutomationCompliance, xAutomationComplianceRow } from '../src/ops/x-automation-compliance.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
-const account = { id: 'music-tools-x', platform: 'x' };
+const account = { id: 'music-tools-x', platform: 'x', mode: 'approval' };
 const policy = {
   enabled: true,
   allowedAccounts: ['music-tools-x'],
+  liveAccounts: [],
   inboundOnly: true,
   autoReply: true,
   autoDmReply: true,
@@ -24,10 +31,99 @@ test('allowlisted inbound replies can run without routine approval', () => {
   const result = assertAutomatedEngagementAllowed({
     account,
     globalPolicy: policy,
-    event: { kind: 'reply', inbound: true }
+    event: { kind: 'reply', inbound: true, platform: 'x' }
   });
   assert.equal(result.allowed, true);
   assert.equal(result.approvalRequired, false);
+});
+
+test('X AI public replies remain gated per account until explicit platform approval is recorded', () => {
+  const gatedPolicy = {
+    ...policy,
+    xAiReplyBotApprovalRequiredAccounts: ['music-tools-x'],
+    xAiReplyBotApprovalConfirmedAccounts: []
+  };
+  assert.equal(xAiReplyApprovalRequired(gatedPolicy, 'music-tools-x'), true);
+  assert.equal(xAiReplyApprovalReady(gatedPolicy, 'music-tools-x'), false);
+  assert.equal(xAiReplyApprovalReady(gatedPolicy, 'other'), true);
+
+  const gated = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: gatedPolicy,
+    event: { kind: 'reply', inbound: true, platform: 'x' }
+  });
+  assert.equal(gated.allowed, true);
+  assert.equal(gated.platformApprovalRequired, true);
+  assert.equal(gated.approvalRequired, true);
+
+  const approvedPolicy = { ...gatedPolicy, xAiReplyBotApprovalConfirmedAccounts: ['music-tools-x'] };
+  const approved = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: approvedPolicy,
+    event: { kind: 'reply', inbound: true, platform: 'x' }
+  });
+  assert.equal(approved.platformApprovalRequired, false);
+  assert.equal(approved.approvalRequired, false);
+
+  const dm = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: gatedPolicy,
+    event: { kind: 'dm', inbound: true, platform: 'x' }
+  });
+  assert.equal(dm.platformApprovalRequired, false);
+  assert.equal(dm.approvalRequired, false);
+});
+
+test('live engagement fails closed if an X AI reply account is activated before approval', () => {
+  const gatedPolicy = {
+    ...policy,
+    liveAccounts: ['music-tools-x'],
+    xAiReplyBotApprovalRequiredAccounts: ['music-tools-x'],
+    xAiReplyBotApprovalConfirmedAccounts: []
+  };
+  assert.throws(() => liveEngagementAccount(gatedPolicy, 'music-tools-x'), (error) => error.code === 'ENGAGEMENT_PLATFORM_APPROVAL_REQUIRED');
+  assert.equal(liveEngagementAccount({ ...gatedPolicy, xAiReplyBotApprovalConfirmedAccounts: ['music-tools-x'] }, 'music-tools-x'), true);
+});
+
+test('X automation compliance preflight blocks missing profile disclosure and AI reply approval', async () => {
+  const gatedPolicy = {
+    ...policy,
+    xAutomationProfileComplianceConfirmedAccounts: [],
+    xAiReplyBotApprovalRequiredAccounts: ['music-tools-x'],
+    xAiReplyBotApprovalConfirmedAccounts: []
+  };
+  const blocked = xAutomationComplianceRow('music-tools-x', account, gatedPolicy);
+  assert.equal(blocked.ok, false);
+  assert.deepEqual(blocked.blockers.map((row) => row.code), [
+    'X_AUTOMATION_PROFILE_COMPLIANCE_UNCONFIRMED',
+    'X_AI_REPLY_APPROVAL_UNCONFIRMED'
+  ]);
+
+  const ready = xAutomationComplianceRow('music-tools-x', account, {
+    ...gatedPolicy,
+    xAutomationProfileComplianceConfirmedAccounts: ['music-tools-x'],
+    xAiReplyBotApprovalConfirmedAccounts: ['music-tools-x']
+  });
+  assert.equal(ready.ok, true);
+  assert.equal(ready.profileComplianceConfirmed, true);
+  assert.equal(ready.aiReplyApprovalConfirmed, true);
+
+  const instagram = xAutomationComplianceRow('ig', { id: 'ig', platform: 'instagram', mode: 'auto' }, gatedPolicy);
+  assert.equal(instagram.checked, false);
+  assert.equal(instagram.ok, true);
+
+  const realConfigReport = await runXAutomationCompliance({ accountFilter: 'music-tools-x' });
+  assert.equal(realConfigReport.ok, false);
+  assert.equal(realConfigReport.accounts[0].account, 'music-tools-x');
+  await assert.rejects(() => runXAutomationCompliance({ accountFilter: 'missing-account' }), /Unknown account/);
+});
+
+test('configured X opt-out notice is appended exactly once and not added off X', () => {
+  const notice = '自動返信を止めたい場合は「自動返信不要」と送ってください。';
+  const cfg = { xAutomatedResponseOptOutText: notice };
+  assert.equal(aiTest.withRequiredXOptOut('ありがとうございます！', { platform: 'x', kind: 'reply' }, cfg), `ありがとうございます！\n\n${notice}`);
+  assert.equal(aiTest.withRequiredXOptOut(`ありがとうございます！\n\n${notice}`, { platform: 'x', kind: 'reply' }, cfg), `ありがとうございます！\n\n${notice}`);
+  assert.equal(aiTest.withRequiredXOptOut('ありがとうございます！', { platform: 'instagram', kind: 'reply' }, cfg), 'ありがとうございます！');
 });
 
 test('cold engagement and non-allowlisted accounts remain fail-closed', () => {
@@ -162,7 +258,7 @@ test('engagement workflow persists only privacy-safe state files', async () => {
   assert.doesNotMatch(workflow, /engagement-inbox|dm-body|message-body/i);
 });
 
-test('chatops workflow exposes preflight, dry-run and public engagement resolution bridges', async () => {
+test('ChatOps suppresses engagement dry-run details and persists only explicit remaining state', async () => {
   const workflow = await readFile(`${ROOT}.github/workflows/chatops.yml`, 'utf8');
   assert.match(workflow, /\[preflight\]/);
   assert.match(workflow, /\[dry-run\]/);
@@ -170,5 +266,18 @@ test('chatops workflow exposes preflight, dry-run and public engagement resoluti
   assert.match(workflow, /--resolve-file engagement-resolve\.json/);
   assert.match(workflow, /orchestrate\.mjs.*--force --dry-run/s);
   assert.match(workflow, /live-preflight\.mjs/);
+  assert.match(workflow, /x-automation-compliance\.mjs/);
+  assert.match(workflow, /status=0[\s\S]*doctor[\s\S]*\|\| status=1[\s\S]*live-preflight[\s\S]*\|\| status=1/);
+  assert.match(workflow, /sns-engagement-dry-run-private\.txt/);
+  assert.match(workflow, /Detailed interaction output is intentionally suppressed/);
+  assert.match(workflow, /paths=\(data\/usage\.jsonl data\/usage-state\.json\)/);
+  assert.doesNotMatch(workflow, /git add data\//);
+  assert.match(workflow, /data\/durable-usage-state\.json/);
   assert.match(workflow, /REDACTED_OPENAI_KEY/);
+});
+
+test('Live Preflight runs the X automation compliance gate', async () => {
+  const workflow = await readFile(`${ROOT}.github/workflows/preflight.yml`, 'utf8');
+  assert.match(workflow, /Verify X automation compliance acknowledgements/);
+  assert.match(workflow, /x-automation-compliance\.mjs/);
 });

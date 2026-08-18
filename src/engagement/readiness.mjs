@@ -4,16 +4,41 @@ export function engagementCredentialError(message) {
   return error;
 }
 
+export function engagementPlatformApprovalError(accountId) {
+  const error = new Error(`X AI-powered automated public replies are not approved for ${accountId}. Record X's prior written and explicit approval before live engagement activation.`);
+  error.code = 'ENGAGEMENT_PLATFORM_APPROVAL_REQUIRED';
+  return error;
+}
+
 export function allowedEngagementAccount(policy = {}, accountId) {
   const allowed = Array.isArray(policy.allowedAccounts) ? new Set(policy.allowedAccounts.map(String)) : null;
   return !allowed || allowed.has(String(accountId));
 }
 
+export function xAiReplyApprovalRequired(policy = {}, accountId) {
+  const required = new Set(Array.isArray(policy.xAiReplyBotApprovalRequiredAccounts) ? policy.xAiReplyBotApprovalRequiredAccounts.map(String) : []);
+  return required.has(String(accountId));
+}
+
+export function xAiReplyApprovalReady(policy = {}, accountId) {
+  if (!xAiReplyApprovalRequired(policy, accountId)) return true;
+  const confirmed = new Set(Array.isArray(policy.xAiReplyBotApprovalConfirmedAccounts) ? policy.xAiReplyBotApprovalConfirmedAccounts.map(String) : []);
+  return confirmed.has(String(accountId));
+}
+
+export function assertXAiReplyApproval(policy = {}, accountId) {
+  if (!xAiReplyApprovalReady(policy, accountId)) throw engagementPlatformApprovalError(accountId);
+  return { ok: true, required: xAiReplyApprovalRequired(policy, accountId), confirmed: true };
+}
+
 export function liveEngagementAccount(policy = {}, accountId) {
-  if (Array.isArray(policy.liveAccounts)) return new Set(policy.liveAccounts.map(String)).has(String(accountId));
-  // Backward compatibility for policies created before schemaVersion 3. New production policy always
-  // declares liveAccounts explicitly so a config upgrade cannot accidentally activate engagement.
-  return allowedEngagementAccount(policy, accountId);
+  const live = Array.isArray(policy.liveAccounts)
+    ? new Set(policy.liveAccounts.map(String)).has(String(accountId))
+    : allowedEngagementAccount(policy, accountId);
+  // A misordered rollout must fail loudly instead of silently starting an X AI reply bot or creating
+  // one human Issue per inbound interaction. Dry-run callers short-circuit before this predicate.
+  if (live) assertXAiReplyApproval(policy, accountId);
+  return live;
 }
 
 export function requiredXEngagementScopes(policy = {}) {

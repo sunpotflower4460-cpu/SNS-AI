@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
+import { xAiReplyApprovalReady, xAiReplyApprovalRequired } from './readiness.mjs';
 
 const POLICY_FILE = new URL('../../config/engagement-policy.json', import.meta.url);
 const SUPPORTED_KINDS = new Set(['reply', 'dm']);
+const ACCOUNT_ID_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 
 function engagementError(code, message) {
   const error = new Error(message);
@@ -14,11 +16,42 @@ function plainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function strictAccountList(policy, key) {
+  const value = policy[key];
+  if (!Array.isArray(value)) throw new Error(`config/engagement-policy.json ${key} must be an array.`);
+  const normalized = value.map((item) => String(item));
+  if (normalized.some((item) => !ACCOUNT_ID_RE.test(item))) {
+    throw new Error(`config/engagement-policy.json ${key} contains an invalid account id.`);
+  }
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error(`config/engagement-policy.json ${key} must not contain duplicate account ids.`);
+  }
+  return normalized;
+}
+
+export function validateEngagementPolicy(policy) {
+  if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
+  if (Number(policy.schemaVersion || 0) >= 4) {
+    strictAccountList(policy, 'allowedAccounts');
+    strictAccountList(policy, 'liveAccounts');
+    strictAccountList(policy, 'xAutomationProfileComplianceConfirmedAccounts');
+    const required = strictAccountList(policy, 'xAiReplyBotApprovalRequiredAccounts');
+    const confirmed = strictAccountList(policy, 'xAiReplyBotApprovalConfirmedAccounts');
+    if (typeof policy.xAutomatedResponseOptOutText !== 'string' || !policy.xAutomatedResponseOptOutText.trim()) {
+      throw new Error('config/engagement-policy.json xAutomatedResponseOptOutText must be a non-empty string.');
+    }
+    const requiredSet = new Set(required);
+    const extraConfirmed = confirmed.filter((id) => !requiredSet.has(id));
+    if (extraConfirmed.length) {
+      throw new Error(`config/engagement-policy.json xAiReplyBotApprovalConfirmedAccounts contains account(s) not listed as required: ${extraConfirmed.join(', ')}.`);
+    }
+  }
+  return policy;
+}
+
 export async function loadEngagementPolicy() {
   const raw = await readFile(POLICY_FILE, 'utf8');
-  const policy = JSON.parse(raw);
-  if (!plainObject(policy)) throw new Error('config/engagement-policy.json must contain an object.');
-  return policy;
+  return validateEngagementPolicy(JSON.parse(raw));
 }
 
 export function effectiveEngagementPolicy(globalPolicy = {}, account = {}) {
@@ -42,13 +75,21 @@ export function normalizeEngagementEvent(value) {
   };
 }
 
+function xAiPublicReplyNeedsApproval(config, accountId, event) {
+  return String(event?.platform || '').toLowerCase() === 'x'
+    && event?.kind === 'reply'
+    && xAiReplyApprovalRequired(config, accountId)
+    && !xAiReplyApprovalReady(config, accountId);
+}
+
 export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
   const config = effectiveEngagementPolicy(globalPolicy, account);
   const normalized = normalizeEngagementEvent(event);
+  const accountId = String(account?.id || '');
   const allowedAccounts = Array.isArray(config.allowedAccounts) ? config.allowedAccounts.map(String) : null;
 
   if (config.enabled !== true) engagementError('ENGAGEMENT_DISABLED', 'Automated engagement is disabled for this account.');
-  if (allowedAccounts && !allowedAccounts.includes(String(account?.id || ''))) {
+  if (allowedAccounts && !allowedAccounts.includes(accountId)) {
     engagementError('ENGAGEMENT_ACCOUNT_NOT_ALLOWED', 'Automated engagement is not allowlisted for this account.');
   }
   if (config.inboundOnly !== false && !normalized.inbound) engagementError('ENGAGEMENT_UNSOLICITED', 'Cold or unsolicited automated engagement is not allowed.');
@@ -63,10 +104,13 @@ export function assertAutomatedEngagementAllowed({ account, event, globalPolicy 
   if (normalized.kind === 'reply' && config.autoReply !== true) engagementError('ENGAGEMENT_REPLY_DISABLED', 'Automated replies are disabled.');
   if (normalized.kind === 'dm' && config.autoDmReply !== true) engagementError('ENGAGEMENT_DM_DISABLED', 'Automated DM replies are disabled.');
 
+  const platformApprovalRequired = xAiPublicReplyNeedsApproval(config, accountId, normalized);
+
   return {
     allowed: true,
     kind: normalized.kind,
-    approvalRequired: config.approvalRequired !== false,
+    approvalRequired: platformApprovalRequired || config.approvalRequired !== false,
+    platformApprovalRequired,
     inboundOnly: config.inboundOnly !== false,
     oneAutomatedResponsePerInteraction: config.oneAutomatedResponsePerInteraction !== false
   };
@@ -76,4 +120,4 @@ export function prohibitedGrowthAutomation(action) {
   return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
 }
 
-export const __test = { SUPPORTED_KINDS, plainObject };
+export const __test = { SUPPORTED_KINDS, plainObject, strictAccountList, xAiPublicReplyNeedsApproval, ACCOUNT_ID_RE };
