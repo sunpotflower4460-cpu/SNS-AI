@@ -146,3 +146,31 @@ research / history / strategy
 ```
 
 Circuit Breaker、Anomaly Brake、daily budget、Failure Watchは`auto`後も有効です。
+
+## I. 返信エンゲージメント（投稿が安定してから）
+
+**投稿運用が安定するまでは有効化しないでください。** 返信は自分の投稿があって初めて発生します。
+
+現在の出荷時設定（`config/engagement-policy.json`）:
+
+- `approvalRequired: true` — 生成された返信は**必ず`[engagement-human]` Issue経由**。自動送信されません
+- `autoDmReply: false` — **DMは対象外**（日次上限も`0`）
+- `replyScope: "own-posts"` — **自分の投稿のスレッド内のみ**。無関係なメンションには返信しません
+- `maxInboundFetchesPerDay: 48` — 取得回数のハード上限。超えたら停止します
+- workflowは**手動実行のみ**（cronはコメントアウト済み）
+
+有効化の順序:
+
+- [ ] X API課金の実単価をダッシュボードで確認（2026年2月以降は従量課金。**取得1回ごとに課金されます**）
+- [ ] X OAuth2を設定 — scope `tweet.read` / `tweet.write` / `users.read` / `offline.access`、
+      refresh token取得、`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）
+  - **text-onlyのままでも返信を使うならOAuth2一式が必要です**（`docs/ACCOUNT_MUSIC_TOOLS_X.md`のtext-only前提とはここで変わります）
+- [ ] Instagramのコメント返信を使う場合、`instagram_business_manage_comments`のMeta App Review通過
+- [ ] `xAiReplyBotApprovalConfirmedAccounts`にアカウントを追加（X側のAI自動返信に関する承認記録）
+- [ ] `xAutomationProfileComplianceConfirmedAccounts`にアカウントを追加
+- [ ] `liveAccounts`にアカウントを追加 ← **これを追加するまで一切動きません**
+- [ ] **SNS Engagement Autopilot を手動実行**し、生成された`[engagement-human]` Issueの内容を確認
+- [ ] 数件を人の目で確認してから、必要なら`engagement.yml`のcronを復活させる
+
+`liveAccounts`が空の間は、workflowを実行してもアカウントがフィルタで除外され、
+外部APIを一切呼ばずに`nothing_enabled`で終了します（課金も発生しません）。

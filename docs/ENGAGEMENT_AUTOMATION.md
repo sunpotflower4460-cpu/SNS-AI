@@ -40,18 +40,33 @@ Removing an account from `liveAccounts` is the engagement kill switch. Removing 
 
 ## Current runtime
 
-`SNS Engagement Autopilot` polls every ten minutes at `07,17,27,37,47,57` minutes past the hour.
+`SNS Engagement Autopilot` runs **on manual dispatch only**. The ten-minute schedule is present in the
+workflow but commented out: X moved to pay-per-use pricing in February 2026, so every poll for new
+inbound interactions is billed whether or not anything arrived, and an unattended ten-minute cron is
+about 144 paid reads a day even on an account that has not published anything yet. Run it by hand until
+the real per-request price and the real reply volume are known, then restore the schedule with an
+interval that matches the traffic - replies cluster in the hours right after a post, so a narrow window
+beats round-the-clock polling.
 
 Current automatic response policy:
 
+- **every generated reply goes to a human `[engagement-human]` Issue before anything is sent**
+  (`approvalRequired: true`);
+- **DM automation is off** (`autoDmReply: false`, DM daily cap `0`). X DMs need a paid tier plus
+  `dm.read`/`dm.write`; Instagram DMs need Meta App Review. Turning the flag on alone is not enough;
 - inbound only;
+- **public replies are limited to threads rooted at our own published posts** (`replyScope: own-posts`);
+  cold mentions from people who never touched our content are discarded, not answered;
+- a hard daily ceiling on inbound *reads* (`maxInboundFetchesPerDay`, default 48), enforced before any
+  provider request is made, so polling cost cannot run away;
 - no keyword-search cold replies;
 - no proactive follow/unfollow;
 - no unsolicited bulk DMs;
 - one automated response per inbound interaction;
 - deterministic human-like delay: public replies 8–35 minutes, DMs 12–50 minutes;
 - confidence threshold before automatic sending;
-- daily hard caps: 12 public replies and 8 DM replies by default;
+- daily hard caps: 12 public replies by default (DM replies capped at 0 while DM automation is off);
+- every automation limit fails closed: a malformed cap/cooldown/threshold reduces automation rather than removing the limit, and `validateEngagementPolicy` rejects the malformed value at load time;
 - per-actor reply/DM cooldowns: 30 minutes by default;
 - opt-out persists per pseudonymous actor key, not just for one interaction, and explicit opt-outs are not evicted by routine actor-cache compaction;
 - high-risk/human-request categories are surfaced before normal delay/cooldown/daily-cap suppression, but opted-out users still receive no automatic response;
@@ -109,7 +124,7 @@ Implemented polling/sending paths:
 - public reply: `POST /2/tweets` with `reply.in_reply_to_tweet_id`;
 - one-to-one DM reply: `POST /2/dm_conversations/with/:participant_id/messages`.
 
-For the current policy with both public replies and DM replies enabled, unattended X engagement requires OAuth2 scopes:
+Scopes are derived from the policy (`requiredXEngagementScopes`). With DM automation off the `dm.*` scopes are not requested. With both public replies and DM replies enabled, unattended X engagement requires OAuth2 scopes:
 
 - `tweet.read`
 - `tweet.write`
