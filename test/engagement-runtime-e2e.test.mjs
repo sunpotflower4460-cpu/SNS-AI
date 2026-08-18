@@ -7,6 +7,7 @@ import { eventKey } from '../src/engagement/store.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const CONFIG = `${ROOT}config/accounts.json`;
+const POLICY = `${ROOT}config/engagement-policy.json`;
 const MUTABLE = [
   `${ROOT}data/engagement-state.json`,
   `${ROOT}data/engagement-audit.jsonl`,
@@ -63,8 +64,8 @@ function refreshedXSession() {
   };
 }
 
-async function withFixture(platform, task, { suffix = 'main', webSearch = false } = {}) {
-  const files = [CONFIG, ...MUTABLE];
+async function withFixture(platform, task, { suffix = 'main', webSearch = false, live = true } = {}) {
+  const files = [CONFIG, POLICY, ...MUTABLE];
   const snap = await snapshot(files);
   const env = {
     SOCIAL_CREDENTIALS_JSON: process.env.SOCIAL_CREDENTIALS_JSON,
@@ -87,6 +88,12 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false 
     row.budgets = { ...(row.budgets || {}), enabled: false };
     row.safety = { ...(row.safety || {}), moderation: true };
     await writeFile(CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+    const policy = JSON.parse(snap.get(POLICY));
+    policy.allowedAccounts = ['music-tools-x'];
+    policy.liveAccounts = live ? ['music-tools-x'] : [];
+    await writeFile(POLICY, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+
     for (const path of MUTABLE) await rm(path, { force: true });
 
     process.env.OPENAI_API_KEY = 'test-openai-key';
@@ -116,6 +123,17 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false 
     await restore(snap);
   }
 }
+
+test('live engagement stays dormant before explicit activation while dry-run remains available', async () => {
+  await withFixture('x', async () => {
+    let calls = 0;
+    globalThis.fetch = async () => { calls += 1; throw new Error('live network work must not start before activation'); };
+
+    const liveResult = await runEngagement({ accountFilter: 'music-tools-x' });
+    assert.equal(liveResult.state, 'nothing_enabled');
+    assert.equal(calls, 0);
+  }, { suffix: 'not-live', live: false });
+});
 
 test('X engagement runtime auto-replies routine inbound, persists opt-out, escalates exceptions, and supports public human resolution', async () => {
   await withFixture('x', async () => {
@@ -253,7 +271,7 @@ test('private X dry-run never exposes inbound DM or generated response text and 
     assert.equal(serialized.includes('特別回答'), false);
     assert.equal(serialized.includes('55'), false);
     assert.equal(result.accounts[0].events[0].decision.privateContentOmitted, true);
-  }, { suffix: 'private-dry', webSearch: true });
+  }, { suffix: 'private-dry', webSearch: true, live: false });
 });
 
 test('X engagement reports credential readiness instead of silently going green when required scopes are missing', async () => {
