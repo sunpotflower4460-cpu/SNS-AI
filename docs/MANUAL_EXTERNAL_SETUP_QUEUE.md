@@ -45,12 +45,11 @@ Do not add auto-follow, auto-unfollow, cold keyword replies or unsolicited bulk 
 When Instagram handling is intentionally started:
 
 1. Use/confirm an Instagram Professional account.
-2. Configure the Meta app/login flow and required comment/messaging permissions.
-3. Store the access token in GitHub Secrets.
-4. Test scheduled comment/conversation/message polling in dry-run before live activation.
-5. Add the Instagram account to `liveAccounts` only after the controlled verification succeeds.
-
-The repository currently supports scheduled polling of recent comments and Instagram Conversations/messages, so a webhook endpoint is not required for the existing polling runtime. Webhooks remain an optional future path for lower-latency event-driven ingestion.
+2. Configure the Meta app/login flow and required permissions, including `instagram_business_basic`, comment management when public comment handling is enabled, and message management when DM handling is enabled.
+3. Complete the webhook endpoint/subscription setup required by the current Meta messaging/app-review flow. The SNS-AI runtime currently polls Conversations/messages on a schedule rather than consuming webhook payloads, but that does not imply Meta's external app setup can skip webhook prerequisites.
+4. Store the access token in GitHub Secrets.
+5. Test scheduled comment/conversation/message polling in dry-run before live activation.
+6. Add the Instagram account to `liveAccounts` only after the controlled verification succeeds.
 
 ## Human-only decisions
 
