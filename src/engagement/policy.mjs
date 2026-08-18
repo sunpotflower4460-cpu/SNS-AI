@@ -45,8 +45,12 @@ export function normalizeEngagementEvent(value) {
 export function assertAutomatedEngagementAllowed({ account, event, globalPolicy = {} }) {
   const config = effectiveEngagementPolicy(globalPolicy, account);
   const normalized = normalizeEngagementEvent(event);
+  const allowedAccounts = Array.isArray(config.allowedAccounts) ? config.allowedAccounts.map(String) : null;
 
   if (config.enabled !== true) engagementError('ENGAGEMENT_DISABLED', 'Automated engagement is disabled for this account.');
+  if (allowedAccounts && !allowedAccounts.includes(String(account?.id || ''))) {
+    engagementError('ENGAGEMENT_ACCOUNT_NOT_ALLOWED', 'Automated engagement is not allowlisted for this account.');
+  }
   if (config.inboundOnly !== false && !normalized.inbound) engagementError('ENGAGEMENT_UNSOLICITED', 'Cold or unsolicited automated engagement is not allowed.');
   if (normalized.keywordDiscoveryOnly) engagementError('ENGAGEMENT_KEYWORD_COLD_REPLY', 'Keyword-search-only automated replies are not allowed.');
   if (normalized.userOptedOut) engagementError('ENGAGEMENT_OPTED_OUT', 'The user opted out of automated responses.');
