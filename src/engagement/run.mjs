@@ -100,20 +100,20 @@ async function instagramEvents(accountId, account, history) {
   return output;
 }
 
-async function createHumanIssue({ accountId, event, key, decision }) {
+async function createHumanIssue({ accountId, event, key, decision, policy }) {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
   const title = `[engagement-human] ${accountId} ${key}`;
   const existing = await githubRequest(`/repos/${owner}/${repo}/issues?state=open&per_page=100`);
   const found = (existing || []).find((issue) => issue.title === title && !issue.pull_request);
   if (found) return found;
-
+  const excerptLimit = Math.max(0, Number(policy?.humanEscalation?.publicExcerptMaxChars ?? 800));
   const body = {
     kind: 'sns-ai-engagement-human', schemaVersion: 1, account: accountId, platform: event.platform,
     interactionKind: event.kind, eventKey: key, category: decision.category || 'unknown',
     reason: String(decision.reason || 'Human judgment required.').slice(0, 500),
     publicInteraction: event.public === true,
-    publicExcerpt: event.public === true ? String(event.text || '').slice(0, 800) : null,
+    publicExcerpt: event.public === true ? String(event.text || '').slice(0, excerptLimit) : null,
     privateContentOmitted: event.public !== true,
     question: event.public === true
       ? 'この公開インタラクションはSNS-AIが自動判断を避けました。どう返すか、または返信しないかを決めてください。'
@@ -164,40 +164,42 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
   event.asksForHuman = false;
 
   if (event.userOptedOut) {
-    await markEngagementEvent(accountId, key, { status: 'opted_out', kind: event.kind, platform: event.platform });
-    return { status: 'opted_out' };
+    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'opted_out', kind: event.kind, platform: event.platform });
+    return { status: dryRun ? 'dry-run-opted-out' : 'opted_out' };
   }
 
   const allowed = assertAutomatedEngagementAllowed({ account, event, globalPolicy });
   const dueAt = prior?.dueAt || dueAtFor(event, key, policy);
   if (new Date(dueAt).getTime() > Date.now()) {
-    await markEngagementEvent(accountId, key, { status: 'waiting', dueAt, kind: event.kind, platform: event.platform });
-    return { status: 'waiting', dueAt };
+    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'waiting', dueAt, kind: event.kind, platform: event.platform });
+    return { status: dryRun ? 'dry-run-waiting' : 'waiting', dueAt };
   }
 
   const maxPerDay = event.kind === 'dm' ? Number(policy.maxAutomatedDmRepliesPerDay ?? 12) : Number(policy.maxAutomatedRepliesPerDay ?? 12);
   const sentToday = await countSentSince(accountId, event.kind, new Date(Date.now() - 24 * 60 * 60_000));
   if (Number.isFinite(maxPerDay) && maxPerDay >= 0 && sentToday >= maxPerDay) {
-    await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'daily-cap' });
-    return { status: 'deferred' };
+    if (!dryRun) await markEngagementEvent(accountId, key, { status: 'deferred', dueAt, kind: event.kind, platform: event.platform, reason: 'daily-cap' });
+    return { status: dryRun ? 'dry-run-deferred' : 'deferred' };
   }
 
   const decision = await classifyAndDraftEngagement({ accountId, account, event });
   const threshold = Number(policy.minAutoReplyConfidence ?? 0.82);
   if (decision.action === 'human' || (decision.action === 'reply' && decision.confidence < threshold) || allowed.approvalRequired) {
-    const issue = await createHumanIssue({ accountId, event, key, decision });
+    if (dryRun) return { status: 'dry-run-human', decision };
+    const issue = await createHumanIssue({ accountId, event, key, decision, policy });
     await markEngagementEvent(accountId, key, { status: 'human', dueAt, kind: event.kind, platform: event.platform, category: decision.category, issueNumber: issue.number || null });
     await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'human', category: decision.category, public: event.public === true });
     return { status: 'human', issueNumber: issue.number || null };
   }
   if (decision.action === 'ignore') {
+    if (dryRun) return { status: 'dry-run-ignore', decision };
     await markEngagementEvent(accountId, key, { status: 'ignored', dueAt, kind: event.kind, platform: event.platform, category: decision.category });
     await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'ignored', category: decision.category, public: event.public === true });
     return { status: 'ignored' };
   }
 
   const result = await sendResponse(account, event, decision.response, dryRun);
-  if (dryRun) return { status: 'dry-run', decision, result };
+  if (dryRun) return { status: 'dry-run-reply', decision, result };
   await markEngagementEvent(accountId, key, { status: 'sent', dueAt, sentAt: nowIso(), kind: event.kind, platform: event.platform, category: decision.category });
   await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'sent', category: decision.category, public: event.public === true });
   return { status: 'sent' };
@@ -215,9 +217,8 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
   const report = [];
 
   for (const accountId of ids) {
-    let account;
     try {
-      account = await resolveAccount(accountId);
+      const account = await resolveAccount(accountId);
       const events = await collectEvents(accountId, account, history);
       const rows = [];
       for (const event of events.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))) {
@@ -225,13 +226,13 @@ export async function runEngagement({ accountFilter = null, dryRun = false } = {
         try { rows.push({ eventKey: eventKey(accountId, event), ...(await processEvent(accountId, account, event, globalPolicy, dryRun)) }); }
         catch (error) {
           rows.push({ eventKey: eventKey(accountId, event), status: 'error', error: String(error?.message || error).slice(0, 300) });
-          await appendEngagementAudit({ account: accountId, eventKey: eventKey(accountId, event), platform: event.platform, kind: event.kind, status: 'error', code: error?.code || null });
+          if (!dryRun) await appendEngagementAudit({ account: accountId, eventKey: eventKey(accountId, event), platform: event.platform, kind: event.kind, status: 'error', code: error?.code || null });
         }
       }
       report.push({ account: accountId, state: 'ok', events: rows });
     } catch (error) {
       if (credentialNotReady(error)) {
-        report.push({ account: accountId, state: 'waiting_for_engagement_credentials', message: String(error.message || '').replace(/\S*(token|secret|key)=\S*/ig, '[redacted]') });
+        report.push({ account: accountId, state: 'waiting_for_engagement_credentials', message: 'Engagement OAuth credentials/scopes are not ready yet.' });
         continue;
       }
       report.push({ account: accountId, state: 'error', message: String(error?.message || error).slice(0, 300) });
