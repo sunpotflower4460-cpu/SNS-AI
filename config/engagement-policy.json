@@ -9,8 +9,10 @@
   "autoReply": true,
   "autoDmReply": true,
   "approvalRequired": false,
-  "requireXAiReplyBotApproval": true,
-  "xAiReplyBotApprovalConfirmed": false,
+  "xAiReplyBotApprovalRequiredAccounts": [
+    "music-tools-x"
+  ],
+  "xAiReplyBotApprovalConfirmedAccounts": [],
   "xAutomatedResponseOptOutText": "自動返信を止めたい場合は「自動返信不要」と送ってください。",
   "oneAutomatedResponsePerInteraction": true,
   "minAutoReplyConfidence": 0.82,
