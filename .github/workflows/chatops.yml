@@ -29,6 +29,7 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
       ISSUE_TITLE: ${{ github.event.issue.title }}
       ISSUE_BODY: ${{ github.event.issue.body }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -89,6 +90,10 @@ jobs:
           npm run check
           npm run secret-scan
 
+      - name: Restore durable engagement and OAuth state
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh restore
+
       - name: Execute Preflight
         if: steps.command.outputs.command == 'preflight'
         shell: bash
@@ -127,7 +132,22 @@ jobs:
           set -o pipefail
           node src/engagement/run.mjs --resolve-file engagement-resolve.json 2>&1 | tee "$COMMAND_OUTPUT"
 
-      - name: Persist safe runtime state
+      - name: Persist durable engagement and OAuth state
+        if: always()
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh persist
+
+      - name: Remove durable state workspace copies before main persistence
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            data/engagement-state.json \
+            data/engagement-audit.jsonl \
+            data/x-oauth2-state.json \
+            data/engagement-delivery-ledger.json
+
+      - name: Persist remaining safe runtime state
         if: always()
         shell: bash
         run: |
