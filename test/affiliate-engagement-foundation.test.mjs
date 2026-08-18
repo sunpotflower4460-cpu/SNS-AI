@@ -61,16 +61,32 @@ test('Impact request builder produces official media-partner deep-link endpoint 
   assert.throws(() => buildImpactTrackingLinkRequest({ accountSid: 'a', authToken: 'b', programId: 'c', deepLink: 'http://example.com' }), /HTTPS/);
 });
 
-test('global engagement policy is fail-closed and can be overridden only explicitly per account', async () => {
+test('global engagement policy enables only an explicit allowlist and remains inbound-only', async () => {
   const globalPolicy = await loadEngagementPolicy();
-  assert.equal(globalPolicy.enabled, false);
+  assert.equal(globalPolicy.enabled, true);
+  assert.deepEqual(globalPolicy.allowedAccounts, ['music-tools-x']);
   assert.equal(globalPolicy.inboundOnly, true);
-  assert.equal(globalPolicy.autoReply, false);
-  assert.equal(globalPolicy.autoDmReply, false);
-  const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { enabled: true, autoReply: true } });
+  assert.equal(globalPolicy.autoReply, true);
+  assert.equal(globalPolicy.autoDmReply, true);
+  assert.equal(globalPolicy.approvalRequired, false);
+
+  const allowed = assertAutomatedEngagementAllowed({
+    account: { id: 'music-tools-x' },
+    globalPolicy,
+    event: { kind: 'reply', inbound: true }
+  });
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.approvalRequired, false);
+  assert.throws(() => assertAutomatedEngagementAllowed({
+    account: { id: 'some-other-account' },
+    globalPolicy,
+    event: { kind: 'reply', inbound: true }
+  }), { code: 'ENGAGEMENT_ACCOUNT_NOT_ALLOWED' });
+
+  const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { autoReply: false } });
   assert.equal(effective.enabled, true);
-  assert.equal(effective.autoReply, true);
-  assert.equal(effective.autoDmReply, false);
+  assert.equal(effective.autoReply, false);
+  assert.equal(effective.autoDmReply, true);
   assert.equal(effective.inboundOnly, true);
 });
 
