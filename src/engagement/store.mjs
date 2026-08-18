@@ -5,7 +5,7 @@ import { appendJsonl, readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 const STATE_FILE = fileURLToPath(new URL('../../data/engagement-state.json', import.meta.url));
 const AUDIT_FILE = fileURLToPath(new URL('../../data/engagement-audit.jsonl', import.meta.url));
 const MAX_EVENTS_PER_ACCOUNT = 600;
-const MAX_ACTORS_PER_ACCOUNT = 5000;
+const MAX_ACTIVE_ACTORS_PER_ACCOUNT = 5000;
 const MAX_SENT_LOG_PER_ACCOUNT = 5000;
 const SENT_LOG_RETENTION_MS = 8 * 24 * 60 * 60_000;
 
@@ -34,14 +34,14 @@ function compactEvents(events = {}) {
 }
 
 function compactActors(actors = {}) {
-  return Object.fromEntries(Object.entries(actors)
-    .sort(([, a], [, b]) => {
-      const aOptedOut = a?.optedOut === true ? 1 : 0;
-      const bOptedOut = b?.optedOut === true ? 1 : 0;
-      if (aOptedOut !== bOptedOut) return bOptedOut - aOptedOut;
-      return String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || ''));
-    })
-    .slice(0, MAX_ACTORS_PER_ACCOUNT));
+  const entries = Object.entries(actors)
+    .sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')));
+  // An explicit "do not auto-reply" is a durable preference, not disposable cache. Never silently forget
+  // it just because the account has interacted with many other people. Only routine cooldown actor state
+  // is bounded; opted-out pseudonymous hashes remain until an explicit future opt-in/removal path exists.
+  const optedOut = entries.filter(([, row]) => row?.optedOut === true);
+  const active = entries.filter(([, row]) => row?.optedOut !== true).slice(0, MAX_ACTIVE_ACTORS_PER_ACCOUNT);
+  return Object.fromEntries([...optedOut, ...active]);
 }
 
 function compactSentLog(rows = [], now = Date.now()) {
@@ -169,6 +169,6 @@ export const __test = {
   compactActors,
   compactSentLog,
   MAX_EVENTS_PER_ACCOUNT,
-  MAX_ACTORS_PER_ACCOUNT,
+  MAX_ACTIVE_ACTORS_PER_ACCOUNT,
   MAX_SENT_LOG_PER_ACCOUNT
 };
