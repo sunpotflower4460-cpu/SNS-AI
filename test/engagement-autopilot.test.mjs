@@ -24,10 +24,50 @@ test('allowlisted inbound replies can run without routine approval', () => {
   const result = assertAutomatedEngagementAllowed({
     account,
     globalPolicy: policy,
-    event: { kind: 'reply', inbound: true }
+    event: { kind: 'reply', inbound: true, platform: 'x' }
   });
   assert.equal(result.allowed, true);
   assert.equal(result.approvalRequired, false);
+});
+
+test('X AI public replies remain gated until explicit platform approval is recorded', () => {
+  const gatedPolicy = {
+    ...policy,
+    requireXAiReplyBotApproval: true,
+    xAiReplyBotApprovalConfirmed: false
+  };
+  const gated = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: gatedPolicy,
+    event: { kind: 'reply', inbound: true, platform: 'x' }
+  });
+  assert.equal(gated.allowed, true);
+  assert.equal(gated.platformApprovalRequired, true);
+  assert.equal(gated.approvalRequired, true);
+
+  const approved = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: { ...gatedPolicy, xAiReplyBotApprovalConfirmed: true },
+    event: { kind: 'reply', inbound: true, platform: 'x' }
+  });
+  assert.equal(approved.platformApprovalRequired, false);
+  assert.equal(approved.approvalRequired, false);
+
+  const dm = assertAutomatedEngagementAllowed({
+    account,
+    globalPolicy: gatedPolicy,
+    event: { kind: 'dm', inbound: true, platform: 'x' }
+  });
+  assert.equal(dm.platformApprovalRequired, false);
+  assert.equal(dm.approvalRequired, false);
+});
+
+test('configured X opt-out notice is appended exactly once and not added off X', () => {
+  const notice = '自動返信を止めたい場合は「自動返信不要」と送ってください。';
+  const cfg = { xAutomatedResponseOptOutText: notice };
+  assert.equal(aiTest.withRequiredXOptOut('ありがとうございます！', { platform: 'x', kind: 'reply' }, cfg), `ありがとうございます！\n\n${notice}`);
+  assert.equal(aiTest.withRequiredXOptOut(`ありがとうございます！\n\n${notice}`, { platform: 'x', kind: 'reply' }, cfg), `ありがとうございます！\n\n${notice}`);
+  assert.equal(aiTest.withRequiredXOptOut('ありがとうございます！', { platform: 'instagram', kind: 'reply' }, cfg), 'ありがとうございます！');
 });
 
 test('cold engagement and non-allowlisted accounts remain fail-closed', () => {
