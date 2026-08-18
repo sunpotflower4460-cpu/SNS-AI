@@ -70,7 +70,7 @@ function normalizeResult(raw = {}) {
   };
 }
 
-export async function classifyAndDraftEngagement({ accountId, account, event, policy = {} }) {
+export async function classifyAndDraftEngagement({ accountId, account, event, policy = {}, dryRun = false }) {
   const hardCategory = hardHumanCategory(event.text);
   if (hardCategory) {
     return {
@@ -128,11 +128,11 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
 
   let response;
   try {
-    response = await openaiRequest('/responses', body, { accountId, account, operation: 'engagement-response', webSearch: Boolean(body.tools) });
+    response = await openaiRequest('/responses', body, { accountId, account, operation: 'engagement-response', webSearch: Boolean(body.tools), dryRun });
   } catch (error) {
     if (Number(error.status) !== 400) throw error;
     delete body.text;
-    response = await openaiRequest('/responses', body, { accountId, account, operation: 'engagement-response', webSearch: Boolean(body.tools) });
+    response = await openaiRequest('/responses', body, { accountId, account, operation: 'engagement-response', webSearch: Boolean(body.tools), dryRun });
   }
 
   const result = normalizeResult(parseJson(outputText(response)));
@@ -147,7 +147,7 @@ export async function classifyAndDraftEngagement({ accountId, account, event, po
   if (result.action === 'reply') {
     if (!result.response) throw new Error('Engagement AI selected reply without response text.');
     result.response = validateDraftText(account, result.response);
-    await moderateText(result.response, account, accountId);
+    if (!dryRun) await moderateText(result.response, account, accountId);
   }
   if (result.action === 'human') {
     result.response = '';
