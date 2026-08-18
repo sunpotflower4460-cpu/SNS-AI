@@ -114,6 +114,15 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false,
     const policy = JSON.parse(snap.get(POLICY));
     policy.allowedAccounts = ['music-tools-x'];
     policy.liveAccounts = live ? ['music-tools-x'] : [];
+    if (platform === 'x') {
+      policy.xAiReplyBotApprovalRequiredAccounts = ['music-tools-x'];
+      policy.xAiReplyBotApprovalConfirmedAccounts = live ? ['music-tools-x'] : [];
+      policy.xAutomationProfileComplianceConfirmedAccounts = live ? ['music-tools-x'] : [];
+    } else {
+      policy.xAiReplyBotApprovalRequiredAccounts = [];
+      policy.xAiReplyBotApprovalConfirmedAccounts = [];
+      policy.xAutomationProfileComplianceConfirmedAccounts = [];
+    }
     await writeFile(POLICY, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
 
     for (const path of MUTABLE) await rm(path, { force: true });
