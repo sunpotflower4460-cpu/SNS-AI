@@ -6,7 +6,8 @@ This file records tasks that cannot be completed safely from repository code alo
 
 - `music-tools-x` live posting remains disabled until the existing social credential/OpenAI preflight sequence is completed.
 - Affiliate publishing remains disabled.
-- Engagement automation remains disabled.
+- The engagement runtime is installed, but no live engagement occurs while `music-tools-x` itself is disabled.
+- X AI-powered public replies remain human-gated until the required written/explicit X approval is obtained and `xAiReplyBotApprovalConfirmed` is set to `true`.
 
 ## Affiliate applications
 
@@ -26,12 +27,16 @@ After each approval, capture only the identifiers/templates needed by `config/af
 
 When reply/DM handling is intentionally started:
 
-- re-check X Automation Rules;
+- re-check the current X Automation Rules;
+- obtain the prior written/explicit X approval required for an AI-powered automated public reply bot;
+- keep `xAiReplyBotApprovalConfirmed: false` until that approval actually exists, then set it to `true` once;
 - authorize the X app with the scopes required for the chosen functions;
 - DM automation currently needs OAuth 2.0 user authorization with `dm.write`, `dm.read`, `tweet.read`, and `users.read`;
 - verify the authenticated user/account ID;
-- begin with read-only ingestion, then approval-mode responses;
+- run read-only/dry-run ingestion and one controlled live rehearsal before steady-state AUTO;
 - retain opt-out handling and one automated response per user interaction.
+
+After those one-time gates are complete, routine high-confidence inbound replies/DMs are intended to run automatically. Per-message approval is not the steady-state operating model; only sensitive, owner-level, or low-confidence cases should escalate.
 
 Do not add auto-follow, auto-unfollow, cold keyword replies or unsolicited bulk DMs.
 
@@ -41,11 +46,13 @@ When Instagram handling is intentionally started:
 
 - use/confirm an Instagram professional account;
 - configure the Meta app/login flow and required business permissions;
-- configure Webhooks for comments/messages;
+- configure Webhooks for comments/messages when event-driven ingestion is desired;
 - store access tokens in GitHub Secrets;
 - test read-only comment/message ingestion first;
-- start public/private/DM responses in approval mode.
+- run a controlled response rehearsal before steady-state AUTO.
+
+After the controlled rehearsal, routine high-confidence inbound handling may be autonomous; sensitive/owner-level/low-confidence cases remain human exceptions.
 
 ## Human-only decisions
 
-Keep a human in the loop for account/app registrations, platform terms acceptance, affiliate applications, payment/tax profile setup, bank/payout details, app review/permission approval, OAuth consent, secret creation/rotation, and any partnership contract that adds obligations beyond a normal affiliate agreement.
+Keep a human in the loop for account/app registrations, platform terms acceptance, affiliate applications, payment/tax profile setup, bank/payout details, app review/permission approval, OAuth consent, secret creation/rotation, required platform approvals for AI reply automation, and any partnership contract that adds obligations beyond a normal affiliate agreement.
