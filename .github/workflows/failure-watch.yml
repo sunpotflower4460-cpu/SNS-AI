@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - SNS Autopilot
+      - SNS Engagement Autopilot
       - SNS Metrics Collector
       - SNS Trend Intelligence
       - SNS Daily Learning
