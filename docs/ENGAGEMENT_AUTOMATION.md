@@ -53,7 +53,7 @@ Current automatic response policy:
 - confidence threshold before automatic sending;
 - daily hard caps: 12 public replies and 8 DM replies by default;
 - per-actor reply/DM cooldowns: 30 minutes by default;
-- opt-out persists per pseudonymous actor key, not just for one interaction;
+- opt-out persists per pseudonymous actor key, not just for one interaction, and explicit opt-outs are not evicted by routine actor-cache compaction;
 - high-risk/human-request categories are surfaced before normal delay/cooldown/daily-cap suppression, but opted-out users still receive no automatic response;
 - private DM bodies are never persisted in repository state/audit/Issues;
 - private DM content is never used as a web-search query.
@@ -121,14 +121,14 @@ Implemented scheduled paths:
 - poll Instagram Conversations and recent conversation messages;
 - send inbound DM replies through the official messages route.
 
-The current runtime therefore does **not** require a webhook receiver to perform its scheduled polling loop. Meta Webhooks can still be added later if lower-latency/event-driven ingestion is desired.
+The runtime itself uses scheduled polling rather than consuming webhook events. However, Meta's current Conversations/messaging documentation assumes the app has completed the required platform setup, including a webhooks server/subscriptions in the messaging setup flow. Treat webhook setup as an external Meta-app prerequisite when required by the chosen login/app-review configuration; do not infer from the polling implementation that Meta setup can skip it.
 
 External setup for Instagram engagement includes:
 
 - Professional account;
 - Meta app/login setup;
-- comment-management permission for public comment handling;
-- messaging permission for DM handling;
+- `instagram_business_basic` plus the comment/messaging permissions required by the enabled functions;
+- webhook endpoint/subscriptions when required by the current Meta messaging setup/app review;
 - access token stored in GitHub Secrets;
 - controlled read/dry-run verification before adding an Instagram account to `liveAccounts`.
 
@@ -142,7 +142,7 @@ Official Meta API collection/reference:
 
 `data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result.
 
-Neither file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username.
+Neither file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username, and explicit opt-outs are retained rather than silently aged out with normal cooldown cache entries.
 
 ## Growth guardrails
 
