@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateEngagementPolicy } from '../src/engagement/policy.mjs';
+import {
+  replyScopeFor,
+  safeConfidenceThreshold,
+  safeCooldownMinutes,
+  safeDailyAutomationCap,
+  validateEngagementPolicy
+} from '../src/engagement/policy.mjs';
 
 function validPolicy() {
   return {
@@ -48,4 +54,59 @@ test('engagement policy v4 rejects approval confirmation for an account not decl
 test('legacy engagement policy shapes remain readable for migration compatibility', () => {
   const policy = { schemaVersion: 3, enabled: false };
   assert.equal(validateEngagementPolicy(policy), policy);
+});
+
+test('malformed automation limits reduce automation instead of removing the limit', () => {
+  // These three knobs are the entire safety envelope for unattended replying. run.mjs used a bare
+  // Number(), so "twelve" became NaN and every guard reading it evaluated false: `sentToday >= NaN`,
+  // `confidence < NaN` and `cooldownDue > Date.now()` are all false. One typo produced unlimited
+  // automated replies, no confidence floor and no per-actor cooldown - failing OPEN, the exact
+  // opposite of the posting side's safeMaxPostsPerDay/safeMinMinutesBetweenPosts.
+  for (const malformed of ['twelve', '', {}, [], true, Number.NaN, Infinity, -1]) {
+    assert.equal(safeDailyAutomationCap(malformed, 12), 0, `daily cap must block on ${JSON.stringify(malformed)}`);
+    assert.equal(safeCooldownMinutes(malformed, 30), Number.POSITIVE_INFINITY, `cooldown must defer on ${JSON.stringify(malformed)}`);
+    assert.equal(safeConfidenceThreshold(malformed, 0.82), Number.POSITIVE_INFINITY, `threshold must escalate on ${JSON.stringify(malformed)}`);
+  }
+  // A confidence threshold is a 0..1 score; anything outside that range cannot be honoured.
+  assert.equal(safeConfidenceThreshold(1.5, 0.82), Number.POSITIVE_INFINITY);
+
+  // Valid values are untouched, and an unset value falls back to the documented default.
+  assert.equal(safeDailyAutomationCap(12, 99), 12);
+  assert.equal(safeDailyAutomationCap(0, 99), 0);
+  assert.equal(safeCooldownMinutes(30, 99), 30);
+  assert.equal(safeCooldownMinutes(0, 99), 0);
+  assert.equal(safeConfidenceThreshold(0.82, 0.5), 0.82);
+  assert.equal(safeDailyAutomationCap(null, 12), 12);
+  assert.equal(safeCooldownMinutes(undefined, 30), 30);
+  assert.equal(safeConfidenceThreshold(null, 0.82), 0.82);
+});
+
+test('engagement policy validation rejects malformed automation limits at load time', () => {
+  const base = () => ({
+    schemaVersion: 4,
+    allowedAccounts: [], liveAccounts: [],
+    xAutomationProfileComplianceConfirmedAccounts: [],
+    xAiReplyBotApprovalRequiredAccounts: [], xAiReplyBotApprovalConfirmedAccounts: [],
+    xAutomatedResponseOptOutText: 'stop'
+  });
+  assert.doesNotThrow(() => validateEngagementPolicy(base()));
+
+  assert.throws(() => validateEngagementPolicy({ ...base(), maxAutomatedRepliesPerDay: 'twelve' }), /maxAutomatedRepliesPerDay/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), maxAutomatedRepliesPerDay: 1.5 }), /maxAutomatedRepliesPerDay/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), maxAutomatedDmRepliesPerDay: -1 }), /maxAutomatedDmRepliesPerDay/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), replyCooldownMinutes: '30min' }), /replyCooldownMinutes/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), minAutoReplyConfidence: 1.5 }), /minAutoReplyConfidence/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), autoReply: 'yes' }), /autoReply/);
+  assert.throws(() => validateEngagementPolicy({ ...base(), replyScope: 'everything' }), /replyScope/);
+
+  // A fractional cooldown is a legitimate duration, unlike a fractional post count.
+  assert.doesNotThrow(() => validateEngagementPolicy({ ...base(), replyCooldownMinutes: 0.5 }));
+});
+
+test('reply scope defaults to our own threads and never widens by accident', () => {
+  assert.equal(replyScopeFor({}), 'own-posts', 'unset must not mean "reply to every stranger"');
+  assert.equal(replyScopeFor({ replyScope: 'all-mentionz' }), 'own-posts', 'a typo must narrow, not widen');
+  assert.equal(replyScopeFor({ replyScope: null }), 'own-posts');
+  assert.equal(replyScopeFor({ replyScope: 'own-posts' }), 'own-posts');
+  assert.equal(replyScopeFor({ replyScope: 'all-mentions' }), 'all-mentions', 'the broad scope stays available as an explicit opt-in');
 });
