@@ -54,6 +54,13 @@ persist_state() {
     exit 1
   fi
 
+  # The audit is diagnostic metadata, not dedupe/opt-out state. Bound the working copy before every
+  # durable write so long-running engagement does not grow one JSONL file forever on sns-ai-state.
+  # Delivery ledger and engagement-state retention are managed separately and are intentionally untouched.
+  if [[ -e data/engagement-audit.jsonl ]]; then
+    node src/engagement/compact-audit.mjs
+  fi
+
   git fetch --no-tags origin "refs/heads/${state_branch}:refs/remotes/origin/${state_branch}"
   state_worktree="$(mktemp -d)"
   cleanup() {
