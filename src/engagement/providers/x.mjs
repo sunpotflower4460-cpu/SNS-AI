@@ -1,6 +1,8 @@
 import { xOAuth2FetchJson } from '../../providers/x-oauth2.mjs';
 
 const X_API = 'https://api.x.com/2';
+const DEFAULT_MAX_PAGES = 5;
+const ABSOLUTE_MAX_PAGES = 20;
 
 function id(value, label) {
   const text = String(value || '').trim();
@@ -12,6 +14,49 @@ function message(value, label = 'text') {
   const text = String(value || '').trim();
   if (!text) throw new Error(`${label} is required.`);
   return text;
+}
+
+function pageLimit(value = DEFAULT_MAX_PAGES) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) return DEFAULT_MAX_PAGES;
+  return Math.min(number, ABSOLUTE_MAX_PAGES);
+}
+
+function paginationTruncated(kind, maxPages) {
+  const error = new Error(`X ${kind} pagination exceeded the ${maxPages}-page safety cap; refusing to report the channel healthy while unread interactions remain.`);
+  error.code = 'ENGAGEMENT_PAGINATION_TRUNCATED';
+  return error;
+}
+
+function mergeXPages(pages) {
+  const data = pages.flatMap((page) => Array.isArray(page?.data) ? page.data : []);
+  const users = new Map();
+  for (const page of pages) {
+    for (const user of page?.includes?.users || []) {
+      const key = String(user?.id || '');
+      if (key) users.set(key, user);
+    }
+  }
+  const last = pages.at(-1) || {};
+  const meta = { ...(last.meta || {}), result_count: data.length };
+  delete meta.next_token;
+  delete meta.previous_token;
+  const output = { ...last, data, meta };
+  if (users.size) output.includes = { ...(last.includes || {}), users: [...users.values()] };
+  return output;
+}
+
+async function paginateX(fetchPage, { kind = 'engagement', maxPages = DEFAULT_MAX_PAGES } = {}) {
+  const limit = pageLimit(maxPages);
+  const pages = [];
+  let paginationToken = null;
+  for (let index = 0; index < limit; index += 1) {
+    const page = await fetchPage(paginationToken);
+    pages.push(page || {});
+    paginationToken = page?.meta?.next_token || null;
+    if (!paginationToken) return mergeXPages(pages);
+  }
+  throw paginationTruncated(kind, limit);
 }
 
 export function buildXMentionsUrl({ userId, sinceId, paginationToken, maxResults = 20 } = {}) {
@@ -43,12 +88,18 @@ export function buildXDmPayload({ text }) {
   return { text: message(text) };
 }
 
-export async function listXMentions({ credential, ...params }) {
-  return xOAuth2FetchJson(buildXMentionsUrl(params), { method: 'GET' }, credential);
+export async function listXMentions({ credential, maxPages = DEFAULT_MAX_PAGES, ...params }) {
+  return paginateX(
+    (paginationToken) => xOAuth2FetchJson(buildXMentionsUrl({ ...params, paginationToken }), { method: 'GET' }, credential),
+    { kind: 'mentions', maxPages }
+  );
 }
 
-export async function listXDirectMessages({ credential, ...params }) {
-  return xOAuth2FetchJson(buildXDmEventsUrl(params), { method: 'GET' }, credential);
+export async function listXDirectMessages({ credential, maxPages = DEFAULT_MAX_PAGES, ...params }) {
+  return paginateX(
+    (paginationToken) => xOAuth2FetchJson(buildXDmEventsUrl({ ...params, paginationToken }), { method: 'GET' }, credential),
+    { kind: 'DM events', maxPages }
+  );
 }
 
 export async function sendXReply({ credential, postId, text, dryRun = true }) {
@@ -68,4 +119,14 @@ export async function sendXDirectMessage({ credential, participantId, text, dryR
   }, credential);
 }
 
-export const __test = { X_API, id, message };
+export const __test = {
+  X_API,
+  DEFAULT_MAX_PAGES,
+  ABSOLUTE_MAX_PAGES,
+  id,
+  message,
+  pageLimit,
+  paginationTruncated,
+  mergeXPages,
+  paginateX
+};
