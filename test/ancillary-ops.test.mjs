@@ -260,9 +260,13 @@ test('maintenance applies the real account\'s configured retention to its dry-ru
   } finally { restoreEnv(env); }
 });
 
-test('stale approval maintenance closes only expired trusted approval issues', async () => {
+test('stale approval maintenance closes only expired trusted approval issues', async (t) => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
+  // Expiry now writes the slot state, so restore the real data/state.json this test shares.
+  const statePath = fileURLToPath(new URL('../data/state.json', import.meta.url));
+  const savedState = await readFile(statePath, 'utf8');
+  t.after(async () => { await writeFile(statePath, savedState, 'utf8'); });
   process.env.GH_TOKEN = 'gh-test-token'; delete process.env.GITHUB_TOKEN; process.env.GITHUB_REPOSITORY = 'owner/repo';
   try {
     const trustedBody = (slotId) => JSON.stringify({
@@ -287,6 +291,9 @@ test('stale approval maintenance closes only expired trusted approval issues', a
     const { expireStaleApprovals } = await import(`../src/ops/stale-approvals.mjs?active=${Date.now()}`);
     const result = await expireStaleApprovals({ maxAgeDays: 7 });
     assert.deepEqual(result.closed, [5]);
+    // Expiring the issue must also release the slot; leaving it at approval_pending made
+    // data/state.json claim a draft was still awaiting review long after the issue was closed.
+    assert.deepEqual(result.expiredSlots, [{ slotId: 'old', issue: 5, applied: true, currentStatus: 'expired' }]);
     assert.equal(calls.some((x) => x.target.endsWith('/issues/5/comments') && x.method === 'POST'), true);
     assert.equal(calls.some((x) => x.target.endsWith('/issues/5') && x.method === 'PATCH'), true);
     assert.equal(calls.some((x) => /\/issues\/(7|8|9|10)(?:\/|$)/.test(x.target) && x.method !== 'GET'), false);

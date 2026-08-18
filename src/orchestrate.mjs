@@ -170,7 +170,9 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         const result = await publish(payload); await recordCircuitSuccess(accountId, 'autopilot', account.resilience);
         report.push({ account: accountId, slot: slot.slotId, status: result?.idempotentReplay ? 'already-published' : 'published', result, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment });
       } catch (error) {
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED'];
+        // BUDGET_CONFIG_INVALID is a typo in budgets config, not a provider outage: opening the
+        // resilience circuit for it pauses the account for a cooldown and buries the real cause.
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'BUDGET_CONFIG_INVALID', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED'];
         // Same reasoning as the dry-run success path above: a dry run proves nothing about whether a
         // real publish would succeed, so a FAILED dry-run preview (a transient Responses API hiccup,
         // malformed model output, etc.) must not be able to open/increment the live circuit either -
@@ -231,6 +233,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
 // pauses (budget-exhausted, circuit-open, rate-limited, safety-brake, media-qa-failed,
 // media-too-large, provider-deprecated, already-handled) are deliberately excluded: those are the
 // system working as designed, not a bug to alert on.
+//
+// provider-deprecated in particular is NOT fatal here on purpose, but it is no longer silent: doctor
+// escalates a past-shutdown media backend from a warning to a readiness BLOCKER (see mediaReadiness in
+// src/ops/doctor.mjs), and health.yml now runs doctor with --strict, so Failure Watch raises exactly one
+// issue per day instead of one per autopilot poll. Making the status itself fatal would fail every
+// 10-minute run and train the operator to ignore the alarm.
 const FATAL_STATUSES = new Set(['failed', 'account-error', 'state-error', 'approval-reconcile-error']);
 export function hasFatalStatus(report) {
   return (report || []).some((entry) => FATAL_STATUSES.has(entry.status));

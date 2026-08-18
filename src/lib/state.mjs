@@ -60,12 +60,19 @@ export async function markSlot(slotId, status, detail = {}) {
 // IN-PROCESS caller of markSlot/markSlotIfUnhandled; it does not add cross-process locking beyond what
 // every other state.json writer here already relies on (the shared `sns-ai-write` Actions concurrency
 // group serializing real scheduled/CI runs).
-export async function markSlotIfUnhandled(slotId, status, detail = {}) {
+//
+// `handledStatuses` narrows that guard for the one caller that must legitimately supersede a handled
+// status: approval expiry. When the approval issue is closed as expired, `approval_pending` is no
+// longer true, so it has to be overridable - but `published`/`publishing`/`publish_unknown`/`skipped`
+// must still be untouchable, because they describe a real side effect that already happened. The
+// override is per-call and explicit; the default set is unchanged for every other caller.
+export async function markSlotIfUnhandled(slotId, status, detail = {}, { handledStatuses } = {}) {
+  const guarded = handledStatuses ? new Set(handledStatuses) : HANDLED_STATUSES;
   return serializeMutation(async () => {
     const state = await loadState();
     state.slots ||= {};
     const current = state.slots[slotId];
-    if (current && HANDLED_STATUSES.has(current.status)) return { applied: false, current };
+    if (current && guarded.has(current.status)) return { applied: false, current };
     const next = {
       status,
       at: new Date().toISOString(),

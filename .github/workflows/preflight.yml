@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: write
+  # approvalChannelCheck (src/ops/live-preflight.mjs) only ever issues GET requests - it verifies Issues
+  # are enabled and reads the `approved` label, it never creates either. `issues: read` is enough for
+  # that; the actual create happens later in autopilot.yml, which already has `issues: write`.
+  issues: read
 
 concurrency:
   group: sns-ai-write

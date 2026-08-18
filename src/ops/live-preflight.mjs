@@ -65,6 +65,30 @@ async function checkOpenAIModel(model) {
   }
 }
 
+const MEDIA_RELEASE_TAG = 'sns-ai-media';
+
+// Reading the hosting release proves the token can see it; it does NOT prove the token may create the
+// release or upload to uploads.github.com. Preflight deliberately does not create it - that is a real
+// mutation on a repository we are only inspecting - so the result is reported honestly instead of being
+// silently counted as proof. Only `private: true` blocks; unproven write is surfaced as a note.
+async function mediaReleaseProbe(token, repo) {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(MEDIA_RELEASE_TAG)}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' }
+    });
+    if (response.status === 404) {
+      return { exists: false, writeVerified: false, note: `Release "${MEDIA_RELEASE_TAG}" does not exist yet; the first media publish creates it. Upload permission is unproven until then.` };
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      return { exists: null, writeVerified: false, note: body?.message || `Media release lookup failed with ${response.status}` };
+    }
+    return { exists: true, writeVerified: false, note: `Release "${MEDIA_RELEASE_TAG}" exists and is readable; asset upload permission is still only proven by a real media publish.` };
+  } catch (error) {
+    return { exists: null, writeVerified: false, note: error.message };
+  }
+}
+
 async function repositoryHostingCheck(required) {
   if (!required) return { checked: false, ok: null, private: null, error: null };
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
@@ -76,14 +100,54 @@ async function repositoryHostingCheck(required) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return { checked: true, ok: false, private: null, error: body?.message || `GitHub repository check failed with ${response.status}` };
+    const release = body.private ? null : await mediaReleaseProbe(token, repo);
     return {
       checked: true,
       ok: body.private === false,
       private: Boolean(body.private),
+      release,
       error: body.private ? 'Built-in GitHub Release media hosting needs a public repository. Configure media.endpoint/CDN if this repository becomes private.' : null
     };
   } catch (error) {
     return { checked: true, ok: false, private: null, error: error.message };
+  }
+}
+
+// approval mode does `ensureApprovalLabel` (POST /labels on a 404) and then POST /issues - after a full
+// paid generation has already run. preflight.yml previously granted only `contents: write`, so this
+// whole channel was unverified and structurally unverifiable. Issues being disabled on the repository
+// produces the same silent dead end. Neither is a mutation to check, so preflight checks both.
+async function approvalChannelCheck(required) {
+  if (!required) return { checked: false, ok: null, error: null };
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) return { checked: true, ok: false, error: 'GitHub runtime metadata/token is unavailable for the approval channel check.' };
+  const headers = { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
+  try {
+    const repoResponse = await fetch(`https://api.github.com/repos/${repo}`, { headers });
+    const repoBody = await repoResponse.json().catch(() => ({}));
+    if (!repoResponse.ok) return { checked: true, ok: false, error: repoBody?.message || `Repository lookup failed with ${repoResponse.status}` };
+    if (repoBody.has_issues === false) {
+      return { checked: true, ok: false, issuesEnabled: false, labelExists: null, error: 'Issues are disabled on this repository, so approval drafts can never be created. Enable Issues in repository settings.' };
+    }
+    const labelResponse = await fetch(`https://api.github.com/repos/${repo}/labels/approved`, { headers });
+    if (labelResponse.status !== 200 && labelResponse.status !== 404) {
+      const labelBody = await labelResponse.json().catch(() => ({}));
+      return { checked: true, ok: false, issuesEnabled: true, labelExists: null, error: labelBody?.message || `Label lookup failed with ${labelResponse.status}` };
+    }
+    const labelExists = labelResponse.status === 200;
+    return {
+      checked: true,
+      ok: true,
+      issuesEnabled: true,
+      labelExists,
+      note: labelExists
+        ? 'Adding the "approved" label to a generated approval issue is what publishes it.'
+        : 'The "approved" label does not exist yet; the first approval run creates it (this needs `issues: write`).',
+      error: null
+    };
+  } catch (error) {
+    return { checked: true, ok: false, error: error.message };
   }
 }
 
@@ -158,7 +222,11 @@ export async function runLivePreflight({ accountFilter } = {}) {
   const accounts = await loadAccounts();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: true, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
+  // ok:false with nothing enabled. Preflight with no selected account touches neither OpenAI, nor the
+  // provider credentials, nor the sns-ai-state branch - so `ok: true` here meant "I proved nothing", and
+  // the checklist item "Live Preflight ready" passed before a single key was registered. The `state`
+  // still says nothing_enabled so the operator sees this is a not-yet rather than a failure.
+  if (!selected.length) return { ok: false, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
@@ -177,8 +245,10 @@ export async function runLivePreflight({ accountFilter } = {}) {
 
   const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
+  const approvalChannel = await approvalChannelCheck(selected.some(([, account]) => account.mode === 'approval'));
   const durableState = await durableStateBranchCheck();
   const durableReady = durableState.checked ? durableState.ok === true : true;
+  const approvalReady = approvalChannel.checked ? approvalChannel.ok === true : true;
 
   for (const [id, account] of selected) {
     try {
@@ -199,12 +269,20 @@ export async function runLivePreflight({ accountFilter } = {}) {
         }
       } else if (resolved.platform === 'instagram') {
         identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v25.0' });
+        // A hard permission/OAuth error already throws inside verifyInstagramCredential. publishAccess.ok
+        // === false is the OTHER outcome: content_publishing_limit failed for a reason that could not be
+        // classified as a missing scope (rate limit, transient 5xx, etc). That must still block readiness
+        // - publishing capability was never actually proven - it just must not be misreported as a scope
+        // problem the operator can't fix by granting a permission they already have.
+        if (identity.publishAccess?.ok === false) {
+          throw new Error(`Instagram publish-access probe failed: ${identity.publishAccess.error || 'unknown error'}`);
+        }
       } else throw new Error(`Unsupported platform: ${resolved.platform}`);
       const kind = builtInMediaKind(account);
       const ownModels = requiredModels(account);
       const ownModelFailures = modelChecks.filter((check) => ownModels.includes(check.model) && !check.ok);
       const mediaReady = !kind || mediaHosting.ok;
-      const accountReady = durableReady && mediaReady && ownModelFailures.length === 0;
+      const accountReady = durableReady && mediaReady && ownModelFailures.length === 0 && (account.mode !== 'approval' || approvalReady);
       rows.push({
         account: id,
         platform: resolved.platform,
@@ -228,12 +306,13 @@ export async function runLivePreflight({ accountFilter } = {}) {
   }
 
   const modelFailure = modelChecks.some((check) => !check.ok);
-  const ok = durableReady && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
+  const ok = durableReady && approvalReady && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError && !modelFailure : null, error: openaiError, models: modelChecks },
     mediaHosting,
+    approvalChannel,
     durableState,
     accounts: rows
   };

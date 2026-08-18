@@ -1,8 +1,13 @@
 import { loadConfig } from './lib/config.mjs';
 import { assertPublicHttpsUrl } from './lib/http.mjs';
 import { validateConfig } from './validate-config.mjs';
+import { X_MAX_IMAGE_BYTES } from './providers/x.mjs';
 
 const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint', 'generate', 'auto']);
+// The values resolveMedia() actually branches on for `strategy: auto`. A typo here does not error where
+// it is written - it falls through every branch and resurfaces later as the misleading
+// "Unsupported media strategy: auto" (see src/lib/media.mjs).
+const INSTAGRAM_DECISIONS = new Set(['none', 'library', 'search', 'generate']);
 
 function merged(config, account, key) {
   return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) };
@@ -19,6 +24,13 @@ function strictNonNegativeInteger(errors, id, label, value) {
   if (value == null) return;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     errors.push(`${id}: ${label} must be a non-negative integer`);
+  }
+}
+
+function strictNonNegativeNumber(errors, id, label, value) {
+  if (value == null) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    errors.push(`${id}: ${label} must be a non-negative finite number`);
   }
 }
 
@@ -58,6 +70,9 @@ export function validateStrictConfig(config) {
   for (const [id, account] of Object.entries(config.accounts || {})) {
     if (!account || typeof account !== 'object' || Array.isArray(account)) continue;
     strictBoolean(errors, id, 'enabled', account.enabled);
+    if (account.credentialKey != null && (typeof account.credentialKey !== 'string' || !account.credentialKey.trim())) {
+      errors.push(`${id}: credentialKey must be a non-empty string`);
+    }
 
     const generation = merged(config, account, 'generation');
     strictPositiveInteger(errors, id, 'generation.maxChars', generation.maxChars);
@@ -77,6 +92,13 @@ export function validateStrictConfig(config) {
     }
 
     const safety = merged(config, account, 'safety');
+    // These two are the fail-closed knobs: src/lib/safety.mjs coerces a non-number maxPostsPerDay to 0
+    // (blocks every slot) and a non-number minMinutesBetweenPosts to Infinity (never posts again). The
+    // resulting `rate-limited` status is deliberately not fatal, so a `"2"` typed as a string here would
+    // leave every workflow green while nothing is ever published. The loose validator's Number() coercion
+    // accepts strings, so this strict type check is the only thing that catches it.
+    strictNonNegativeInteger(errors, id, 'safety.maxPostsPerDay', safety.maxPostsPerDay);
+    strictNonNegativeNumber(errors, id, 'safety.minMinutesBetweenPosts', safety.minMinutesBetweenPosts);
     strictNonNegativeInteger(errors, id, 'safety.maxLinks', safety.maxLinks);
     strictNonNegativeInteger(errors, id, 'safety.maxHashtags', safety.maxHashtags);
     strictBoolean(errors, id, 'safety.moderation', safety.moderation);
@@ -121,6 +143,16 @@ export function validateStrictConfig(config) {
     if (!MEDIA_STRATEGIES.has(strategy)) errors.push(`${id}: unsupported media.strategy "${strategy}"`);
     strictBoolean(errors, id, 'media.internalImageGeneration', media.internalImageGeneration);
     strictBoolean(errors, id, 'media.internalVideoGeneration', media.internalVideoGeneration);
+    if (media.defaultInstagramDecision != null && !INSTAGRAM_DECISIONS.has(media.defaultInstagramDecision)) {
+      errors.push(`${id}: unsupported media.defaultInstagramDecision "${media.defaultInstagramDecision}" (expected ${[...INSTAGRAM_DECISIONS].join(', ')})`);
+    }
+    // Type-checked first so a malformed value (e.g. "15MB", null) can't slip past via Number() -> NaN,
+    // where `NaN > X_MAX_IMAGE_BYTES` is false and the guard below would silently pass.
+    strictNonNegativeInteger(errors, id, 'media.maxHostedImageBytes', media.maxHostedImageBytes);
+    if (account.platform === 'x' && strategy !== 'none' && (media.type || 'image') === 'image'
+      && typeof media.maxHostedImageBytes === 'number' && media.maxHostedImageBytes > X_MAX_IMAGE_BYTES) {
+      errors.push(`${id}: media.maxHostedImageBytes is ${media.maxHostedImageBytes}, above X's ${X_MAX_IMAGE_BYTES}-byte image upload limit; an image between the two can never be published`);
+    }
     if (strictObject(errors, id, 'media.qa', media.qa) && media.qa) {
       strictBoolean(errors, id, 'media.qa.enabled', media.qa.enabled);
       strictBoolean(errors, id, 'media.qa.selectedSemanticReview', media.qa.selectedSemanticReview);
@@ -142,6 +174,24 @@ export function validateStrictConfig(config) {
       }
     }
   }
+
+  // Two accounts sharing one credentialKey silently post both accounts' content through the same
+  // provider identity - the kind of mistake that is invisible in config review and obvious only after
+  // the wrong thing has been published. Grouped by the RESOLVED key (account.credentialKey || id, same
+  // fallback doctor.mjs uses at runtime) - an account with no explicit credentialKey still resolves to
+  // one keyed by its own id, and that can collide with another account's explicit credentialKey.
+  const byCredential = new Map();
+  for (const [id, account] of Object.entries(config.accounts || {})) {
+    if (!account || typeof account !== 'object') continue;
+    const explicit = typeof account.credentialKey === 'string' ? account.credentialKey.trim() : '';
+    const key = explicit || id;
+    if (!byCredential.has(key)) byCredential.set(key, []);
+    byCredential.get(key).push(id);
+  }
+  for (const [key, ids] of byCredential) {
+    if (ids.length > 1) errors.push(`credentialKey "${key}" is shared by ${ids.join(', ')}; each account needs its own credential entry`);
+  }
+
   return [...new Set(errors)];
 }
 

@@ -16,9 +16,18 @@ function positiveSetting(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+// A fractional threshold is meaningless against a failure COUNT: 0.5 would satisfy `failures >= 0.5`
+// on the very first failure and open the circuit immediately, pausing the account for a full cooldown.
+// The count is an integer, so the threshold is floored to one. cooldownMinutes is a duration, where a
+// fractional value is perfectly reasonable, so it keeps the plain positive check.
+function positiveIntegerSetting(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.max(1, Math.floor(number)) : fallback;
+}
+
 export function circuitSettings(config = {}) {
   return {
-    failureThreshold: positiveSetting(config?.failureThreshold, 3),
+    failureThreshold: positiveIntegerSetting(config?.failureThreshold, 3),
     cooldownMinutes: positiveSetting(config?.cooldownMinutes, 60)
   };
 }

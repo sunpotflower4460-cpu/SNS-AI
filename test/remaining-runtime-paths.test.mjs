@@ -253,6 +253,11 @@ test('approval mode creates an approval issue and X media preflight validates OA
           githubCalls.push('issue-lookup');
           return jsonResponse([]);
         }
+        // Preflight now verifies the approval channel before a paid generation can be wasted on an
+        // approval issue that could never be created.
+        if (target === 'https://api.github.com/repos/owner/repo') {
+          return jsonResponse({ private: false, has_issues: true });
+        }
         if (target === 'https://api.github.com/repos/owner/repo/labels/approved') {
           githubCalls.push('label-get');
           return jsonResponse({ message: 'Not Found' }, 404);
@@ -295,6 +300,10 @@ test('approval mode creates an approval issue and X media preflight validates OA
       await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
       const preflight = await runLivePreflight({ accountFilter: 'example-x' });
       assert.equal(preflight.ok, true);
+      assert.equal(preflight.approvalChannel.checked, true);
+      assert.equal(preflight.approvalChannel.ok, true);
+      assert.equal(preflight.approvalChannel.issuesEnabled, true);
+      assert.equal(preflight.approvalChannel.labelExists, false);
       assert.equal(preflight.accounts[0].identity.id, 'user-1');
       assert.equal(preflight.accounts[0].xOAuth2Identity.id, 'user-1');
       assert.match(preflight.accounts[0].xOAuth2Identity.session.scope, /media\.write/);

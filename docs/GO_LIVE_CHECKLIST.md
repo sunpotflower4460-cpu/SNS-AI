@@ -2,6 +2,10 @@
 
 実アカウントを`mode: auto`へ切り替える前の最終チェックリストです。
 
+アカウント別の具体的な手順書がある場合は、そちらを併読してください（例: [`docs/ACCOUNT_MUSIC_TOOLS_X.md`](ACCOUNT_MUSIC_TOOLS_X.md)）。本チェックリストは全アカウント共通の汎用版です。
+
+セクションC/Dは X、Eは Instagram 用です。Dは X で画像/動画を投稿する場合だけ必要で、text-onlyのXアカウントではスキップできます。
+
 ## A. GitHub
 
 - [ ] Repository Actionsが有効
@@ -11,7 +15,7 @@
 - [ ] repositoryがpublic、またはbuilt-in media hostingを使わず外部public CDNを設定
 - [ ] `OPENAI_API_KEY` Secret登録
 - [ ] `SOCIAL_CREDENTIALS_JSON` Secret登録
-- [ ] X image/video利用時は`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）
+- [ ] X image/video利用時は`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）— **media利用時のみ。text-onlyのXアカウントには不要です**
 - [ ] optional external media利用時だけ`MEDIA_SERVICE_TOKEN`
 
 `sns-ai-state`は外部SNSへpublishする直前にslot claimを耐久保存する専用branchです。通常の履歴/state pushが投稿後に失敗しても、次runが同じslotを再送しないための最後のidempotency guardとして使います。削除しないでください。
@@ -25,12 +29,15 @@ GitHub Actionsのscheduleはhard real-timeではありません。public reposit
 - [ ] OpenAI API project/keyを作成
 - [ ] API billing / creditsが有効
 - [ ] Live Preflightでconfigured text modelがavailable
-- [ ] built-in image利用時は`gpt-image-1`（または明示設定したsupported model）がavailable
+- [ ] built-in image利用時は`gpt-image-2`（`defaults.media.imageModel`の既定値。明示設定した場合はその値）がavailable
 - [ ] built-in video利用時は`sora-2` / `sora-2-pro`（設定値）がavailable
+  - **OpenAIのVideos APIは2026-09-24に終了します。** それ以降`internalVideoGeneration: true`はfail-closedになり、doctorがblockerを出します。現在の既定は`defaults.media.internalVideoGeneration: false`なので、明示的にtrueにしない限り影響はありません。動画を続ける場合は外部`media.endpoint`か`pool`/`fixed`のmedia strategyへ切り替えてください。
 - [ ] QA modelがavailable
 - [ ] controlled image/video generationを1回成功させる
 
 Preflightの`/v1/models/{model}` checkはmodel visibilityを確認しますが、endpoint固有のbilling/rate-limit/verificationまで完全には証明しません。最初のcontrolled generationを最終proofにします。
+
+model idそのものが存在しない場合もこのcheckで落ちます（`ok: false`）。image modelの既定値を変更した場合は、Preflightがgreenであることを先に確認してから最初の生成を実行してください。
 
 ## C. X — text only
 
@@ -99,13 +106,18 @@ Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを�
 
 - [ ] CI green
 - [ ] Doctor `ready`
+  - `ready`はenabledなアカウントが1件以上あって初めてtrueになります。全アカウントがdisabledの場合は`state: waiting_for_accounts` / `ready: false`です（何も検証していない状態をreadyと呼ばないための仕様）。
 - [ ] Live Preflight `ready`
+  - 同様に、enabledなアカウントが無い場合は`ok: false` / `state: nothing_enabled`になります。**先にアカウントを`enabled: true`にしてからPreflightを実行してください。**
 - [ ] Live Preflight `durableState.ok === true`
 - [ ] Autopilot `force=true / dry_run=true` success
   - dry_runは実際にOpenAIの生成APIを呼びます（draft確認のため意図的な仕様）。moderation・media生成・publish・approval issue作成・state/circuit更新は一切行わず、生成コストは本番の日次予算とは別カウンタで計上されます。
 - [ ] generated draftを確認
 - [ ] media利用時controlled generation success
 - [ ] approval modeで実投稿1件success
+  - **投稿を実行する操作は「approval Issueに `approved` labelを付ける」ことだけです。** Issueへのコメントやcloseでは何も起きません。却下する場合はlabelを付けずにcloseします。
+  - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです（`.github/workflows/publish.yml`のActor authorization step）。
+  - label付与後に何も起きない場合は、labelを一度外して付け直してください（共有concurrency group `sns-ai-write`が混み合っていた場合、pending runがキャンセルされることがまれにあります）。
 - [ ] `data/history.jsonl`へproviderPostId保存
 - [ ] Metrics Collector success
 - [ ] `data/metrics.jsonl`へsnapshot保存

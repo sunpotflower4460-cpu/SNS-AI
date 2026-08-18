@@ -241,6 +241,7 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
 
       let privateRepo = false;
       let postAttempted = false;
+      let publishLimitStatus = 200;
       globalThis.fetch = async (url, options = {}) => {
         const target = String(url);
         if (target === 'https://api.openai.com/v1/moderations') {
@@ -253,9 +254,16 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
           assert.equal(options.headers.Authorization, 'Bearer github-test-token');
           return jsonResponse({ private: privateRepo });
         }
-        if (target === 'https://graph.instagram.com/v25.0/ig-user-123?fields=id,username') {
+        if (target === 'https://graph.instagram.com/v25.0/ig-user-123?fields=id,username,account_type') {
           assert.equal(options.headers.Authorization, 'Bearer ig-access-token');
-          return jsonResponse({ id: 'ig-user-123', username: 'integration_ig' });
+          return jsonResponse({ id: 'ig-user-123', username: 'integration_ig', account_type: 'BUSINESS' });
+        }
+        if (target === 'https://graph.instagram.com/v25.0/ig-user-123/content_publishing_limit?fields=config,quota_usage') {
+          assert.equal(options.headers.Authorization, 'Bearer ig-access-token');
+          if (publishLimitStatus !== 200) {
+            return jsonResponse({ error: { message: 'Please reduce the amount of data you\'re asking for', code: 1 } }, publishLimitStatus);
+          }
+          return jsonResponse({ data: [{ quota_usage: 3, config: { quota_total: 100 } }] });
         }
         if (target.includes('/media_publish') || target.endsWith('/media')) postAttempted = true;
         throw new Error(`Unexpected mocked URL: ${target}`);
@@ -269,6 +277,8 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
       assert.equal(ready.mediaHosting.ok, true);
       assert.equal(ready.mediaHosting.private, false);
       assert.equal(ready.accounts[0].identity.username, 'integration_ig');
+      assert.equal(ready.accounts[0].identity.accountType, 'BUSINESS');
+      assert.deepEqual(ready.accounts[0].identity.publishAccess.quota, { used: 3, total: 100 });
       assert.equal(ready.accounts[0].builtInMedia.kind, 'image');
       assert.equal(ready.accounts[0].builtInMedia.hostingReady, true);
       assert.equal(postAttempted, false, 'preflight must never publish');
@@ -281,6 +291,18 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
       assert.equal(blocked.mediaHosting.private, true);
       assert.match(blocked.mediaHosting.error, /public repository/);
       assert.equal(blocked.accounts[0].ok, false);
+      privateRepo = false;
+
+      // A publish-access probe failure that can't be classified as a missing scope (rate limit,
+      // transient 5xx) must still block readiness - publishing capability was never actually proven -
+      // without being misreported as "grant instagram_business_content_publish" when the operator
+      // already has that permission and the real cause is unrelated.
+      publishLimitStatus = 500;
+      const publishAccessBlocked = await runLivePreflight({ accountFilter: 'example-instagram' });
+      assert.equal(publishAccessBlocked.ok, false);
+      assert.equal(publishAccessBlocked.accounts[0].ok, false);
+      assert.match(publishAccessBlocked.accounts[0].error, /publish-access probe failed/);
+      assert.equal(postAttempted, false, 'preflight must never publish');
     } finally {
       globalThis.fetch = previousFetch;
       restoreEnv(env);

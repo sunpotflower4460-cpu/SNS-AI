@@ -21,6 +21,8 @@ export async function fetchJson(url, options = {}) {
   const retries = Number(options.retries ?? (['GET', 'HEAD'].includes(method) ? 2 : 0));
   const fetchOptions = { ...options };
   delete fetchOptions.retries;
+  const onResponse = typeof options.onResponse === 'function' ? options.onResponse : null;
+  delete fetchOptions.onResponse;
 
   for (let attempt = 0; ; attempt += 1) {
     let response;
@@ -36,6 +38,10 @@ export async function fetchJson(url, options = {}) {
     let body;
     try { body = raw ? JSON.parse(raw) : {}; }
     catch { body = { raw }; }
+
+    // Diagnostic hook for callers that need response headers (X reports the token's access level in one).
+    // Wrapped so a broken observer can never turn a successful request into a failure.
+    if (onResponse) { try { onResponse(response); } catch { /* diagnostics must never break the request */ } }
 
     if (response.ok) return body;
 
