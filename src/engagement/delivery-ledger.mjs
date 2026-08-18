@@ -9,7 +9,6 @@ const REMOTE_PATH = 'data/engagement-delivery-ledger.json';
 // longer than that complete processing window so a compacted engagement-state entry cannot cause an
 // older-but-still-processable provider event to be sent twice.
 const RESOLVED_RETENTION_MS = 35 * 24 * 60 * 60_000;
-const MAX_RESOLVED_RECORDS = 2000;
 const BLOCKING_STATUSES = new Set(['sending', 'sent', 'unknown', 'handled']);
 const UNRESOLVED_STATUSES = new Set(['sending', 'unknown']);
 
@@ -45,8 +44,12 @@ function compactRecords(records = {}, now = Date.now()) {
     const at = Date.parse(row?.updatedAt || row?.createdAt || '');
     if (Number.isFinite(at) && now - at <= RESOLVED_RETENTION_MS) resolved.push([key, row]);
   }
+  // Do not add a count-based slice here. A hard record cap could evict a 9-30-day-old `sent`
+  // guard while the provider event is still inside run.mjs's 30-day ingestion window, reopening a
+  // duplicate-send path during high-volume periods. Resolved rows are time-bounded instead; unresolved
+  // `sending`/`unknown` rows are intentionally retained until a human resolves the ambiguity.
   resolved.sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')));
-  return Object.fromEntries([...unresolved, ...resolved.slice(0, MAX_RESOLVED_RECORDS)]);
+  return Object.fromEntries([...unresolved, ...resolved]);
 }
 
 async function loadLocal() {
@@ -205,6 +208,5 @@ export const __test = {
   deliveryBlocksSend,
   deliveryNeedsHuman,
   hasGithubRuntime,
-  MAX_RESOLVED_RECORDS,
   RESOLVED_RETENTION_MS
 };
