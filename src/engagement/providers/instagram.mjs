@@ -1,5 +1,8 @@
 import { fetchJson } from '../../lib/http.mjs';
 
+const DEFAULT_MAX_PAGES = 5;
+const ABSOLUTE_MAX_PAGES = 20;
+
 function apiBase(apiVersion = 'v25.0') {
   const version = String(apiVersion || '').trim();
   if (!/^v\d+\.\d+$/.test(version)) throw new Error('Instagram apiVersion must look like v25.0.');
@@ -24,6 +27,53 @@ function text(value) {
   const output = String(value || '').trim();
   if (!output) throw new Error('Instagram response text is required.');
   return output;
+}
+
+function pageLimit(value = DEFAULT_MAX_PAGES) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) return DEFAULT_MAX_PAGES;
+  return Math.min(number, ABSOLUTE_MAX_PAGES);
+}
+
+function paginationTruncated(kind, maxPages) {
+  const error = new Error(`Instagram ${kind} pagination exceeded the ${maxPages}-page safety cap; refusing to report the channel healthy while unread interactions remain.`);
+  error.code = 'ENGAGEMENT_PAGINATION_TRUNCATED';
+  return error;
+}
+
+function safePagingUrl(value) {
+  let url;
+  try { url = new URL(String(value || '')); }
+  catch { throw new Error('Instagram pagination returned an invalid next-page URL.'); }
+  if (url.protocol !== 'https:' || url.hostname !== 'graph.instagram.com' || url.username || url.password) {
+    throw new Error('Instagram pagination attempted to leave the trusted Graph API origin.');
+  }
+  if (!/^\/v\d+\.\d+\//.test(url.pathname)) throw new Error('Instagram pagination URL is missing a versioned Graph API path.');
+  // Some Graph responses historically included tokens in paging links. Never carry those forward in
+  // a URL where they can surface in network errors or logs; this runtime authenticates via header only.
+  url.searchParams.delete('access_token');
+  return url.toString();
+}
+
+function mergeGraphEdgePages(pages) {
+  const data = pages.flatMap((page) => Array.isArray(page?.data) ? page.data : []);
+  const last = pages.at(-1) || {};
+  const paging = last.paging ? structuredClone(last.paging) : undefined;
+  if (paging) delete paging.next;
+  return { ...last, data, ...(paging ? { paging } : {}) };
+}
+
+async function paginateGraphEdge(firstPage, { accessToken, kind = 'edge', maxPages = DEFAULT_MAX_PAGES } = {}) {
+  const limit = pageLimit(maxPages);
+  const pages = [firstPage || {}];
+  let next = firstPage?.paging?.next || null;
+  while (next && pages.length < limit) {
+    const page = await fetchJson(safePagingUrl(next), { method: 'GET', headers: auth(accessToken) });
+    pages.push(page || {});
+    next = page?.paging?.next || null;
+  }
+  if (next) throw paginationTruncated(kind, limit);
+  return mergeGraphEdgePages(pages);
 }
 
 export function buildInstagramCommentsUrl({ mediaId, apiVersion = 'v25.0', after } = {}) {
@@ -60,16 +110,21 @@ export function buildInstagramDmPayload({ recipientId, message }) {
   return { recipient: { id: id(recipientId, 'recipientId') }, message: { text: text(message) } };
 }
 
-export async function listInstagramComments({ accessToken, ...params }) {
-  return fetchJson(buildInstagramCommentsUrl(params), { method: 'GET', headers: auth(accessToken) });
+export async function listInstagramComments({ accessToken, maxPages = DEFAULT_MAX_PAGES, ...params }) {
+  const first = await fetchJson(buildInstagramCommentsUrl(params), { method: 'GET', headers: auth(accessToken) });
+  return paginateGraphEdge(first, { accessToken, kind: 'comments', maxPages });
 }
 
-export async function listInstagramConversations({ accessToken, ...params }) {
-  return fetchJson(buildInstagramConversationsUrl(params), { method: 'GET', headers: auth(accessToken) });
+export async function listInstagramConversations({ accessToken, maxPages = DEFAULT_MAX_PAGES, ...params }) {
+  const first = await fetchJson(buildInstagramConversationsUrl(params), { method: 'GET', headers: auth(accessToken) });
+  return paginateGraphEdge(first, { accessToken, kind: 'conversations', maxPages });
 }
 
-export async function listInstagramConversationMessages({ accessToken, ...params }) {
-  return fetchJson(buildInstagramConversationMessagesUrl(params), { method: 'GET', headers: auth(accessToken) });
+export async function listInstagramConversationMessages({ accessToken, maxPages = DEFAULT_MAX_PAGES, ...params }) {
+  const detail = await fetchJson(buildInstagramConversationMessagesUrl(params), { method: 'GET', headers: auth(accessToken) });
+  if (!detail?.messages) return detail;
+  const messages = await paginateGraphEdge(detail.messages, { accessToken, kind: 'conversation messages', maxPages });
+  return { ...detail, messages };
 }
 
 export async function sendInstagramCommentReply({ accessToken, commentId, message, apiVersion = 'v25.0', dryRun = true }) {
@@ -94,10 +149,17 @@ export async function sendInstagramDm({ accessToken, igUserId, recipientId, mess
 }
 
 export const __test = {
+  DEFAULT_MAX_PAGES,
+  ABSOLUTE_MAX_PAGES,
   apiBase,
   auth,
   id,
   text,
+  pageLimit,
+  paginationTruncated,
+  safePagingUrl,
+  mergeGraphEdgePages,
+  paginateGraphEdge,
   buildInstagramConversationsUrl,
   buildInstagramConversationMessagesUrl
 };
