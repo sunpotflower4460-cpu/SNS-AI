@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { assertAutomatedEngagementAllowed } from '../src/engagement/policy.mjs';
+import { hardHumanCategory, withRequiredXOptOut } from '../src/engagement/ai.mjs';
 
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const basePolicy = {
   enabled: true,
   allowedAccounts: ['music-tools-x'],
@@ -11,7 +15,8 @@ const basePolicy = {
   approvalRequired: false,
   oneAutomatedResponsePerInteraction: true,
   requireXAiReplyBotApproval: true,
-  xAiReplyBotApprovalConfirmed: false
+  xAiReplyBotApprovalConfirmed: false,
+  xAutomatedResponseOptOutText: '自動返信停止は「自動返信不要」でOKです。'
 };
 
 const account = { id: 'music-tools-x' };
@@ -43,4 +48,31 @@ test('the X public-reply approval gate does not turn inbound DM replies into per
   });
   assert.equal(dm.platformApprovalRequired, false);
   assert.equal(dm.approvalRequired, false);
+});
+
+test('X automated responses always carry one clear opt-out notice after generation', () => {
+  const notice = basePolicy.xAutomatedResponseOptOutText;
+  const reply = withRequiredXOptOut('ありがとうございます。確認します。', { platform: 'x', kind: 'reply' }, basePolicy);
+  assert.match(reply, /自動返信不要/);
+  assert.equal(reply.split(notice).length - 1, 1);
+
+  const alreadyPresent = withRequiredXOptOut(`ありがとうございます。\n\n${notice}`, { platform: 'x', kind: 'dm' }, basePolicy);
+  assert.equal(alreadyPresent.split(notice).length - 1, 1);
+
+  const instagram = withRequiredXOptOut('ありがとうございます。', { platform: 'instagram', kind: 'reply' }, basePolicy);
+  assert.equal(instagram, 'ありがとうございます。');
+});
+
+test('medical-advice requests are deterministically escalated before model judgment', () => {
+  assert.equal(hardHumanCategory('この薬は一日に何錠服用すればいいですか？'), 'medical');
+});
+
+test('engagement dry-run details are kept out of public Actions and ChatOps output', async () => {
+  const chatops = await readFile(`${ROOT}.github/workflows/chatops.yml`, 'utf8');
+  const engagement = await readFile(`${ROOT}.github/workflows/engagement.yml`, 'utf8');
+  assert.match(chatops, /sns-engagement-dry-run-private\.txt/);
+  assert.match(chatops, /Detailed interaction output is intentionally suppressed/);
+  assert.match(engagement, /sns-engagement-dry-run-private\.txt/);
+  assert.match(engagement, /detailed interaction output is intentionally suppressed/i);
+  assert.doesNotMatch(chatops, /engagement\/run\.mjs[^\n]*--dry-run[^\n]*tee\s+"\$COMMAND_OUTPUT"/);
 });
