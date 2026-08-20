@@ -1,0 +1,130 @@
+name: SNS Engagement Control
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  control:
+    if: >
+      startsWith(github.event.issue.title, '[engagement-activate]') ||
+      startsWith(github.event.issue.title, '[engagement-deactivate]')
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_REQUIRE_DURABLE_STATE: 'true'
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+    steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to change live engagement state."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Parse control command
+        id: command
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const title = process.env.ISSUE_TITLE || '';
+          let body = {};
+          try { body = process.env.ISSUE_BODY ? JSON.parse(process.env.ISSUE_BODY) : {}; }
+          catch { throw new Error('Engagement control Issue body must be valid JSON when supplied.'); }
+          const match = title.match(/^\[(engagement-activate|engagement-deactivate)\](?:\s+(.+))?$/);
+          if (!match) throw new Error('Unsupported engagement control title.');
+          const command = match[1];
+          const account = String(body.account || match[2] || '').trim().split(/\s+/)[0];
+          if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
+          appendFileSync(process.env.GITHUB_OUTPUT, `command=${command}\naccount=${account}\n`);
+          NODE
+
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Verify every activation gate
+        if: steps.command.outputs.command == 'engagement-activate'
+        shell: bash
+        run: |
+          set -o pipefail
+          account='${{ steps.command.outputs.account }}'
+          npm run doctor -- --strict --account "$account"
+          node src/ops/live-preflight.mjs --account "$account"
+          node src/ops/x-automation-compliance.mjs --account "$account"
+
+      - name: Apply activation
+        if: steps.command.outputs.command == 'engagement-activate'
+        run: node src/engagement/activate.mjs --account '${{ steps.command.outputs.account }}' --activate
+
+      - name: Apply deactivation
+        if: steps.command.outputs.command == 'engagement-deactivate'
+        run: node src/engagement/activate.mjs --account '${{ steps.command.outputs.account }}' --deactivate
+
+      - name: Validate changed configuration
+        run: npm run validate
+
+      - name: Persist engagement control state
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- config/accounts.json config/engagement-policy.json)" ]]; then
+            echo "No engagement control changes."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add config/accounts.json config/engagement-policy.json
+          git commit -m "config: ${{ steps.command.outputs.command }} ${{ steps.command.outputs.account }}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Close successful control issue
+        if: success()
+        run: |
+          if [[ '${{ steps.command.outputs.command }}' == 'engagement-activate' ]]; then
+            message='✅ Engagement activated. Scheduled polling is now eligible for this account; routine high-confidence inbound replies may be automatic, while sensitive/low-confidence cases still escalate.'
+          else
+            message='✅ Engagement deactivated. Scheduled runs will no longer perform live inbound handling for this account.'
+          fi
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$message"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"
+
+      - name: Explain failed control command
+        if: failure()
+        run: gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "❌ Engagement control failed closed. No live activation was committed. Check account enablement, provider credentials/scopes, durable-state readiness, X automation disclosure, and any required X AI-reply approval before retrying."
