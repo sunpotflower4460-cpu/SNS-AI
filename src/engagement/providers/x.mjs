@@ -1,4 +1,5 @@
 import { xOAuth2FetchJson } from '../../providers/x-oauth2.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from '../../ops/manual-only.mjs';
 
 const X_API = 'https://api.x.com/2';
 const DEFAULT_MAX_PAGES = 5;
@@ -59,6 +60,11 @@ async function paginateX(fetchPage, { kind = 'engagement', maxPages = DEFAULT_MA
   throw paginationTruncated(kind, limit);
 }
 
+async function assertLiveMutationAllowed(source) {
+  const runtimePolicy = await loadRuntimePolicy();
+  assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
+}
+
 export function buildXMentionsUrl({ userId, sinceId, paginationToken, maxResults = 20 } = {}) {
   const url = new URL(`${X_API}/users/${id(userId, 'userId')}/mentions`);
   url.searchParams.set('max_results', String(Math.max(5, Math.min(100, Number(maxResults) || 20))));
@@ -105,6 +111,7 @@ export async function listXDirectMessages({ credential, maxPages = DEFAULT_MAX_P
 export async function sendXReply({ credential, postId, text, dryRun = true }) {
   const payload = buildXReplyPayload({ postId, text });
   if (dryRun) return { dryRun: true, platform: 'x', action: 'reply', payload };
+  await assertLiveMutationAllowed('engagement:x:reply');
   return xOAuth2FetchJson(`${X_API}/tweets`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   }, credential);
@@ -114,6 +121,7 @@ export async function sendXDirectMessage({ credential, participantId, text, dryR
   const participant = id(participantId, 'participantId');
   const payload = buildXDmPayload({ text });
   if (dryRun) return { dryRun: true, platform: 'x', action: 'dm', participantId: participant, payload };
+  await assertLiveMutationAllowed('engagement:x:dm');
   return xOAuth2FetchJson(`${X_API}/dm_conversations/with/${encodeURIComponent(participant)}/messages`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   }, credential);
