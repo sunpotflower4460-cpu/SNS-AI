@@ -61,17 +61,17 @@ export function patchEngagementActivation({ accountsConfig, policy, accountId, a
 export async function setEngagementActivation({
   accountId,
   active,
+  operationMode = null,
   loadResolvedAccounts = loadAccounts,
-  loadMode = loadOperationMode,
   read = readJson,
   write = writeJsonAtomic,
   accountsFile = ACCOUNTS_FILE,
   policyFile = POLICY_FILE
 }) {
-  const [resolvedAccounts, operationMode] = await Promise.all([loadResolvedAccounts(), loadMode()]);
+  const resolvedAccounts = await loadResolvedAccounts();
   const resolved = resolvedAccounts[accountId];
   if (!resolved) throw new Error(`Unknown account "${accountId}".`);
-  assertEngagementActivationAllowed(active, operationMode);
+  if (operationMode) assertEngagementActivationAllowed(active, operationMode);
   if (active && (resolved.enabled !== true || resolved.mode === 'pause')) {
     throw new Error(`Account "${accountId}" must be enabled and not paused before engagement activation.`);
   }
@@ -100,7 +100,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const activate = Boolean(args.activate);
   const deactivate = Boolean(args.deactivate);
   if (activate === deactivate) throw new Error('Specify exactly one of --activate or --deactivate.');
-  const result = await setEngagementActivation({ accountId, active: activate });
+  const operationMode = await loadOperationMode();
+  const result = await setEngagementActivation({ accountId, active: activate, operationMode });
   console.log(JSON.stringify(result, null, 2));
 }
 
