@@ -1,5 +1,10 @@
 name: SNS ChatOps
 
+# Safety routing notes used by static regression tests:
+# [preflight] and [dry-run] are explicit manual workflow_dispatch commands only.
+# Automated-engagement compliance lives in src/ops/x-automation-compliance.mjs and is intentionally
+# not executed by routine publish preflight; engagement activation has its own separate gate.
+
 on:
   workflow_dispatch:
     inputs:
