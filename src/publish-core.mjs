@@ -9,6 +9,7 @@ import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from 
 import { assertAffiliateTrust, normalizeCommercial } from './monetization/trust-guard.mjs';
 import { publishX } from './providers/x.mjs';
 import { publishInstagram } from './providers/instagram.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from './ops/manual-only.mjs';
 
 function parseArgs(argv) { const args = {}; for (let i = 0; i < argv.length; i += 1) { const token = argv[i]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[i + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; i += 1; } } return args; }
 function boolValue(value) { return value === true || ['true', '1', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase()); }
@@ -171,9 +172,11 @@ async function recoverHandledClaimFromHistory(payload, account, claim) {
 }
 
 export async function publish(payload) {
+  const runtimePolicy = await loadRuntimePolicy();
   const account = await resolveAccount(payload.account);
   const text = String(payload.text || '').trim();
   const dryRun = boolValue(payload.dryRun);
+  assertProviderMutationAllowed(runtimePolicy, { dryRun, source: payload.source || 'manual' });
   validateDraftText(account, text, { requireNonEmpty: false });
 
   const normalizedCommercial = normalizeCommercial(payload.commercial);

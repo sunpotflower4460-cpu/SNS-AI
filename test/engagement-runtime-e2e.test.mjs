@@ -112,6 +112,8 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false,
     await writeFile(CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 
     const policy = JSON.parse(snap.get(POLICY));
+    policy.enabled = true;
+    policy.autoReply = true;
     policy.allowedAccounts = ['music-tools-x'];
     policy.liveAccounts = live ? ['music-tools-x'] : [];
     // These tests exercise the send machinery end to end, so the fixture opts into automatic sending

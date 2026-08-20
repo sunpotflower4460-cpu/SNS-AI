@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "enabled": true,
+  "enabled": false,
   "allowedAccounts": [
     "music-tools-x"
   ],
@@ -8,7 +8,7 @@
   "inboundOnly": true,
   "replyScope": "own-posts",
   "maxInboundFetchesPerDay": 48,
-  "autoReply": true,
+  "autoReply": false,
   "autoDmReply": false,
   "approvalRequired": true,
   "xAutomationProfileComplianceConfirmedAccounts": [],

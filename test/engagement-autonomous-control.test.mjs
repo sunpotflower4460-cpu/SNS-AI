@@ -81,7 +81,8 @@ test('activation orchestrator checks resolved live state and writes both configs
     read,
     write,
     accountsFile: 'accounts.json',
-    policyFile: 'policy.json'
+    policyFile: 'policy.json',
+    loadPolicy: async () => ({ manualOnly: false })
   });
   assert.equal(result.account, 'alpha');
   assert.equal(result.active, true);

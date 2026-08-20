@@ -3,8 +3,7 @@ name: SNS ChatOps
 # The full x-automation-compliance.mjs gate is intentionally reserved for engagement activation.
 # Routine [preflight] checks posting transparency only, so dormant reply OAuth/approval cannot block publishing.
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 permissions:
   contents: write
