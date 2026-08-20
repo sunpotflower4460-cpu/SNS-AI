@@ -1,176 +1,148 @@
-# SNS-AI Go-Live Checklist
+# SNS-AI Controlled Launch Checklist — manual-only
 
-実アカウントを`mode: auto`へ切り替える前の最終チェックリストです。
+現在のリポジトリは`config/operation-mode.json`で**manual-only**に固定されています。このチェックリストは「自動運用を始めるため」ではなく、**人が明示操作した時だけ安全に実SNSへ接続できる状態を作るため**のものです。
 
-アカウント別の具体的な手順書がある場合は、そちらを併読してください（例: [`docs/ACCOUNT_MUSIC_TOOLS_X.md`](ACCOUNT_MUSIC_TOOLS_X.md)）。本チェックリストは全アカウント共通の汎用版です。
+自動運用へ移行する手順は本チェックリストの最後に分離しています。
 
-セクションC/Dは X、Eは Instagram 用です。Dは X で画像/動画を投稿する場合だけ必要で、text-onlyのXアカウントではスキップできます。
+## A. Repository safety state
 
-## A. GitHub
+- [ ] CI green
+- [ ] `config/operation-mode.json`が`mode: manual-only`
+- [ ] `allowAutoPromotion: false`
+- [ ] `allowUnattendedEngagement: false`
+- [ ] 全accountが通常保管状態では`enabled: false`
+- [ ] `mode: auto`のaccountがない
+- [ ] `config/engagement-policy.json`の`liveAccounts`が空
+- [ ] active `schedule` / `cron`が運用Workflowにない
+- [ ] open `[health]` Issueがない、または内容を確認済み
+
+## B. GitHub / durable state
 
 - [ ] Repository Actionsが有効
-- [ ] `SNS Autopilot` workflowがactive
-- [ ] durable idempotency用の **`sns-ai-state`** branchが存在
-- [ ] Live Preflightの`durableState.ok`がtrue
-- [ ] repositoryがpublic、またはbuilt-in media hostingを使わず外部public CDNを設定
-- [ ] `OPENAI_API_KEY` Secret登録
-- [ ] `SOCIAL_CREDENTIALS_JSON` Secret登録
-- [ ] X image/video利用時は`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）— **media利用時のみ。text-onlyのXアカウントには不要です**
-- [ ] optional external media利用時だけ`MEDIA_SERVICE_TOKEN`
+- [ ] `sns-ai-state` branchが存在
+- [ ] Repository SecretsをIssue/README/logへ貼っていない
+- [ ] built-in public media hostingを使う場合はrepository visibility要件を満たしている
 
-`sns-ai-state`は外部SNSへpublishする直前にslot claimを耐久保存する専用branchです。通常の履歴/state pushが投稿後に失敗しても、次runが同じslotを再送しないための最後のidempotency guardとして使います。削除しないでください。
+## C. OpenAI
 
-`SNS Autopilot`（投稿用）は毎時`03,13,23,33,43,53`分にpollします。投稿scheduleはアカウントtimezoneの`times` + `windowMinutes`で判定します。返信エンゲージメント用の別workflow `SNS Engagement Autopilot` はこれとは別物で、§Iのとおり現在手動実行のみです。
+- [ ] `OPENAI_API_KEY`
+- [ ] API billing / credits
+- [ ] configured text model available
+- [ ] image generationを使う場合はconfigured image model available
+- [ ] QA model available
+- [ ] controlled generation test
 
-GitHub Actionsのscheduleはhard real-timeではありません。public repositoryは60日間repository activityがない場合scheduled workflowsが自動無効化され得るため、長期休止後はActions状態を確認してください。
+内部Video generationを使う場合は現行OpenAI/provider lifecycleを必ず再確認してください。既定では`internalVideoGeneration: false`です。
 
-## B. OpenAI API
-
-- [ ] OpenAI API project/keyを作成
-- [ ] API billing / creditsが有効
-- [ ] Live Preflightでconfigured text modelがavailable
-- [ ] built-in image利用時は`gpt-image-2`（`defaults.media.imageModel`の既定値。明示設定した場合はその値）がavailable
-- [ ] built-in video利用時は`sora-2` / `sora-2-pro`（設定値）がavailable
-  - **OpenAIのVideos APIは2026-09-24に終了します。** それ以降`internalVideoGeneration: true`はfail-closedになり、doctorがblockerを出します。現在の既定は`defaults.media.internalVideoGeneration: false`なので、明示的にtrueにしない限り影響はありません。動画を続ける場合は外部`media.endpoint`か`pool`/`fixed`のmedia strategyへ切り替えてください。
-- [ ] QA modelがavailable
-- [ ] controlled image/video generationを1回成功させる
-
-Preflightの`/v1/models/{model}` checkはmodel visibilityを確認しますが、endpoint固有のbilling/rate-limit/verificationまで完全には証明しません。最初のcontrolled generationを最終proofにします。
-
-model idそのものが存在しない場合もこのcheckで落ちます（`ok: false`）。image modelの既定値を変更した場合は、Preflightがgreenであることを先に確認してから最初の生成を実行してください。
-
-## C. X — text only
+## D. X text-only
 
 - [ ] X developer app
 - [ ] OAuth1 API key / secret
 - [ ] OAuth1 user access token / secret
-- [ ] X API credits / billingが有効
-- [ ] Live PreflightでOAuth1 identityが期待するX accountと一致
+- [ ] X API billing / credits
+- [ ] Live Preflightでidentity一致
+- [ ] X automated-profile transparency requirementを実アカウント側で完了
 
-## D. X — image / video
+## E. X media
 
-Cに加えて:
+Dに加えて:
 
 - [ ] OAuth2 Client ID
-- [ ] OAuth2 authorization scope: `tweet.write`
-- [ ] OAuth2 authorization scope: `users.read`
-- [ ] OAuth2 authorization scope: `media.write`
-- [ ] OAuth2 authorization scope: `offline.access`
-- [ ] `offline.access`で取得したrefresh token
-- [ ] confidential clientなら必要に応じてOAuth2 Client Secret
-- [ ] Live PreflightでOAuth1 / OAuth2 identityが同一X user
-- [ ] Live Preflightでrefresh bootstrap成功
-- [ ] `data/x-oauth2-state.json`が暗号化stateとして作成/更新
-- [ ] imageを使うならcontrolled image media post成功
-- [ ] videoを使うならcontrolled video media post成功
+- [ ] required user scopes
+- [ ] offline refresh token
+- [ ] `X_OAUTH2_STATE_KEY`
+- [ ] Live PreflightでOAuth1/OAuth2 identity一致
+- [ ] refresh bootstrap成功
+- [ ] controlled media post test
 
-`X_OAUTH2_STATE_KEY`を失うと保存済みrotating token stateを復号できません。その場合はOAuth2を再authorizationして新しいrefresh tokenからbootstrapします。
+## F. Instagram
 
-## E. Instagram
-
-- [ ] Instagram Professional account（BusinessまたはCreator）
-- [ ] Instagram Login app/access token
+- [ ] Professional account
+- [ ] Meta app / login setup
+- [ ] access token
 - [ ] `igUserId`
-- [ ] `instagram_business_basic`
-- [ ] `instagram_business_content_publish`
-- [ ] Metricsを使う場合: `instagram_business_manage_insights`
-- [ ] Live Preflightで期待するProfessional account identity
-- [ ] controlled imageまたはReel post成功
-- [ ] Metrics Collectorで1回以上media insights取得成功
-- [ ] tokenのprovider-defined expiry/lifecycleを確認し、必要なら`expiresAt`をcredential metadataへ登録
+- [ ] content publishing permissions
+- [ ] insightsを使う場合は必要permission
+- [ ] app reviewが必要な機能はreview通過
+- [ ] Live Preflight identity一致
+- [ ] controlled image/Reel post test
 
-Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを使います。Reelはcontainerが`FINISHED`になるまでpollしてからpublishします。
+## G. Manual controlled launch sequence
 
-## F. Account config
+通常保管時はaccountをdisabledのままにします。実接続テストを開始する時だけ対象accountを`approval`へ明示的に移します。
 
-- [ ] `enabled: true`
-- [ ] 最初は`mode: approval`
-- [ ] `credentialKey`
-- [ ] identity
-- [ ] goal
-- [ ] audience
-- [ ] topics
-- [ ] style
-- [ ] avoid / prohibited themes
-- [ ] account-specific instructions
-- [ ] timezone
-- [ ] days
-- [ ] times
-- [ ] `windowMinutes`（通常30分推奨）
-- [ ] maxChars
-- [ ] media strategy / type
-- [ ] disclosure / affiliate / domain rules（必要な場合）
-- [ ] API daily hard caps
+- [ ] `[account-approval] ACCOUNT_ID`または同等の明示操作
+- [ ] Doctor
+- [ ] Live Preflight
+- [ ] Autopilot `force=true / dry_run=true`
+- [ ] generated draft確認
+- [ ] mediaを使う場合はcontrolled generation確認
+- [ ] approval/manual pathで実投稿1件
+- [ ] provider post IDがhistoryへ保存
+- [ ] Metrics Collectorを手動実行
+- [ ] metrics snapshot確認
+- [ ] Current Report確認
+- [ ] 必要ならTrend / Learning / Policy / Maintenanceを手動実行
 
-## G. Controlled launch sequence
+**manual-only中はここで止めます。`mode:auto`へ上げません。**
 
+## H. Manual publish semantics
+
+実投稿は次の明示操作だけで開始します。
+
+- Actions `Publish social post`
+- authorized `[publish]` Issue
+- SNS-AIが作成したapproval Issueへauthorized userが`approved` labelを付与
+
+Workflow dispatchは`dry_run:true`が既定です。
+
+Issueへのコメントや単なるcloseはapproval publishを開始しません。
+
+## I. Engagement
+
+現在はunattended engagementを有効化しません。
+
+- [ ] `liveAccounts`は空
+- [ ] `approvalRequired: true`
+- [ ] `autoDmReply: false`
+- [ ] 必要な時だけ`[engagement-dry-run] ACCOUNT_ID`
+- [ ] public human-required interactionは人がreply/ignoreを決める
+- [ ] private DMはSNSアプリで人が確認・送信
+
+`[engagement-activate]` / direct `--activate`はmanual-only runtime lockで拒否されます。
+
+## J. Read-back / recovery
+
+Publish outcomeが曖昧な場合だけ`SNS Publish Readback Reconcile`を手動実行できます。
+
+- provider stateをread-onlyで確認
+- exact matchが1件だけの場合のみdurable stateをrepair
+- provider create-post endpointは呼ばない
+- blind repostはしない
+
+## K. Manual-onlyで自動に残るもの
+
+SNS運用ではなくGitHub内部の安全機構だけです。
+
+- `SNS-AI CI`: push / PR / manual dispatch
+- `SNS Failure Watch`:対象Workflow完了後にGitHub health Issueを整理
+
+この2つにはSNS/OpenAI/provider Secretsを渡さず、SNS投稿・返信・provider pollingを行いません。
+
+## L. 将来自動運用へ切り替える場合
+
+現状のmanual-only lockを迂回してはいけません。別のreviewed changeとして最低限:
+
+- [ ] operatorが自動運用を明示決定
+- [ ] external provider setup/billing/complianceを再確認
+- [ ] controlled publish proofあり
+- [ ] metrics proofあり
+- [ ] health incidentなし
+- [ ] `config/operation-mode.json`を意図的に変更
+- [ ] 対象accountだけをauto許可
+- [ ] unattended engagementが必要なら別途明示許可
+- [ ] 必要なWorkflowだけscheduleを復活
+- [ ] manual-only regression testsを意図的に更新
 - [ ] CI green
-- [ ] Doctor `ready`
-  - `ready`はenabledなアカウントが1件以上あって初めてtrueになります。全アカウントがdisabledの場合は`state: waiting_for_accounts` / `ready: false`です（何も検証していない状態をreadyと呼ばないための仕様）。
-- [ ] Live Preflight `ready`
-  - 同様に、enabledなアカウントが無い場合は`ok: false` / `state: nothing_enabled`になります。**先にアカウントを`enabled: true`にしてからPreflightを実行してください。**
-- [ ] Live Preflight `durableState.ok === true`
-- [ ] Autopilot `force=true / dry_run=true` success
-  - dry_runは実際にOpenAIの生成APIを呼びます（draft確認のため意図的な仕様）。moderation・media生成・publish・approval issue作成・state/circuit更新は一切行わず、生成コストは本番の日次予算とは別カウンタで計上されます。
-- [ ] generated draftを確認
-- [ ] media利用時controlled generation success
-- [ ] approval modeで実投稿1件success
-  - **投稿を実行する操作は「approval Issueに `approved` labelを付ける」ことだけです。** Issueへのコメントやcloseでは何も起きません。却下する場合はlabelを付けずにcloseします。
-  - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです（`.github/workflows/publish.yml`のActor authorization step）。
-  - label付与後に何も起きない場合は、labelを一度外して付け直してください（共有concurrency group `sns-ai-write`が混み合っていた場合、pending runがキャンセルされることがまれにあります）。
-- [ ] `data/history.jsonl`へproviderPostId保存
-- [ ] Metrics Collector success
-- [ ] `data/metrics.jsonl`へsnapshot保存
-- [ ] Current Reportへ反映
-- [ ] open Health Issueなし
 
-**ここまで全て通った後だけ`mode: auto`へ変更します。**
-
-## H. Auto後
-
-Autopilotが定期pollし、due slotに対して:
-
-```text
-research / history / strategy
-  → candidate generation
-  → safety / duplicate / compliance
-  → candidate selection
-  → optional image/video generation
-  → media moderation / visual QA
-  → durable slot claim on sns-ai-state
-  → X / Instagram publish
-  → history/state persistence
-  → Metrics Collector
-  → Daily Learning
-  → next post strategy
-```
-
-Circuit Breaker、Anomaly Brake、daily budget、Failure Watchは`auto`後も有効です。
-
-## I. 返信エンゲージメント（投稿が安定してから）
-
-**投稿運用が安定するまでは有効化しないでください。** 返信は自分の投稿があって初めて発生します。
-
-現在の出荷時設定（`config/engagement-policy.json`）:
-
-- `approvalRequired: true` — 生成された返信は**必ず`[engagement-human]` Issue経由**。自動送信されません
-- `autoDmReply: false` — **DMは対象外**（日次上限も`0`）
-- `replyScope: "own-posts"` — **自分の投稿のスレッド内のみ**。無関係なメンションには返信しません
-- `maxInboundFetchesPerDay: 48` — 取得回数のハード上限。超えたら停止します
-- workflowは**手動実行のみ**（cronはコメントアウト済み）
-
-有効化の順序:
-
-- [ ] X API課金の実単価をダッシュボードで確認（2026年2月以降は従量課金。**取得1回ごとに課金されます**）
-- [ ] X OAuth2を設定 — scope `tweet.read` / `tweet.write` / `users.read` / `offline.access`、
-      refresh token取得、`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）
-  - **text-onlyのままでも返信を使うならOAuth2一式が必要です**（`docs/ACCOUNT_MUSIC_TOOLS_X.md`のtext-only前提とはここで変わります）
-- [ ] Instagramのコメント返信を使う場合、`instagram_business_manage_comments`のMeta App Review通過
-- [ ] `xAiReplyBotApprovalConfirmedAccounts`にアカウントを追加（X側のAI自動返信に関する承認記録）
-- [ ] `xAutomationProfileComplianceConfirmedAccounts`にアカウントを追加
-- [ ] `liveAccounts`にアカウントを追加 ← **これを追加するまで一切動きません**
-- [ ] **SNS Engagement Autopilot を手動実行**し、生成された`[engagement-human]` Issueの内容を確認
-- [ ] 数件を人の目で確認してから、必要なら`engagement.yml`のcronを復活させる
-
-`liveAccounts`が空の間は、workflowを実行してもアカウントがフィルタで除外され、
-外部APIを一切呼ばずに`nothing_enabled`で終了します（課金も発生しません）。
+これらを同時にレビューしない限り、**自動運用コードが存在していても起動させない**のが正しい状態です。
