@@ -12,6 +12,8 @@
     "validate": "node src/validate-strict-config.mjs",
     "autopilot": "node src/orchestrate.mjs",
     "engagement": "node src/engagement/run.mjs",
+    "engagement-scheduled": "node src/engagement/scheduled.mjs",
+    "engagement-activate": "node src/engagement/activate.mjs",
     "metrics": "node src/analytics/collector.mjs",
     "learn": "node src/learning/learn.mjs",
     "trends": "node src/research/trends.mjs",

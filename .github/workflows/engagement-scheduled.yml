@@ -1,0 +1,63 @@
+name: SNS Engagement Scheduled
+
+on:
+  schedule:
+    # Every 30 minutes, but provider reads happen only for a live engagement account that is inside
+    # the recent-own-post window (or has explicitly enabled DM automation). The runtime's per-read
+    # maxInboundFetchesPerDay guard remains the final hard cost ceiling.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  engagement:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Restore durable engagement and OAuth state
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh restore
+
+      - name: Ensure human-escalation label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label create needs-human --description 'SNS-AI requires a human decision' --color B60205 --force
+
+      - name: Run cost-aware scheduled engagement
+        id: engagement_run
+        shell: bash
+        run: node src/engagement/scheduled.mjs
+
+      - name: Persist privacy-safe engagement and OAuth state
+        if: always() && steps.engagement_run.outcome != 'skipped'
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh persist

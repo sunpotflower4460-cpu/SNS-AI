@@ -1,6 +1,6 @@
 # Engagement automation
 
-Verified baseline: 2026-08-18.
+Verified baseline: 2026-08-20.
 
 ## Goal
 
@@ -18,85 +18,110 @@ The target is **exception-based human involvement**, not per-reply approval.
 
 ## Activation model
 
-Engagement has two separate account gates in `config/engagement-policy.json`:
+Engagement has two account gates in `config/engagement-policy.json`:
 
-- `allowedAccounts`: accounts whose inbound engagement may be inspected/dry-run and whose engagement credentials are checked by Live Preflight.
-- `liveAccounts`: accounts that are explicitly permitted to send live automated inbound replies/DM replies.
+- `allowedAccounts`: accounts whose engagement setup may be checked and dry-run.
+- `liveAccounts`: accounts allowed to perform live inbound handling.
 
-An account must also be `enabled: true` and not in `pause` mode.
+There is also a per-account `engagement.approvalRequired` override in `config/accounts.json`.
+The repository keeps the global launch posture conservative (`approvalRequired: true`). A successful
+controlled activation changes only the selected account to `approvalRequired: false` and adds only that
+account to `liveAccounts`. Deactivation removes it from `liveAccounts` and restores the account override
+to `true`.
 
-The production policy intentionally starts with `music-tools-x` in `allowedAccounts` but **not** in `liveAccounts`. This lets setup and dry-run verification happen without accidentally sending a reply.
+Use the ChatGPT/GitHub Issue control bridge:
 
-Recommended one-time launch sequence:
+```text
+[engagement-activate] ACCOUNT_ID
+[engagement-deactivate] ACCOUNT_ID
+```
 
-1. Complete provider app/OAuth/secret setup.
-2. Run Live Preflight for the account. For X, this verifies the engagement OAuth2 scopes and refresh-token readiness even before engagement is live.
-3. Run `engagement-dry-run` / the Engagement workflow with dry-run enabled and inspect the privacy-safe result.
-4. Perform the controlled provider rehearsal required by the main go-live checklist.
-5. Add the account to `liveAccounts` only after those checks pass.
-6. After activation, routine inbound handling is automatic; human involvement is exception-only.
+`[engagement-activate]` fails closed unless all repository-verifiable gates pass first:
 
-Removing an account from `liveAccounts` is the engagement kill switch. Removing it does not disable normal account research/configuration.
+- account is enabled and not paused;
+- account is in `allowedAccounts`;
+- strict Doctor passes;
+- Live Preflight passes, including provider credentials/scopes and durable state;
+- X automation compliance passes for X accounts, including the recorded automated-profile disclosure
+  acknowledgement and any required prior written X approval for an AI reply bot.
 
-## Current runtime
+The control workflow then commits `config/accounts.json` and `config/engagement-policy.json` together.
+A failed runner therefore cannot persist a one-file half-activation.
 
-`SNS Engagement Autopilot` runs **on manual dispatch only**. The ten-minute schedule is present in the
-workflow but commented out: X moved to pay-per-use pricing in February 2026, so every poll for new
-inbound interactions is billed whether or not anything arrived, and an unattended ten-minute cron is
-about 144 paid reads a day even on an account that has not published anything yet. Run it by hand until
-the real per-request price and the real reply volume are known, then restore the schedule with an
-interval that matches the traffic - replies cluster in the hours right after a post, so a narrow window
-beats round-the-clock polling.
+`[engagement-deactivate]` is the kill switch. It does not dismantle credentials or disable normal posting.
 
-Current automatic response policy:
+## Runtime: manual diagnostics + cost-aware scheduled operation
 
-- **every generated reply goes to a human `[engagement-human]` Issue before anything is sent**
-  (`approvalRequired: true`);
-- **DM automation is off** (`autoDmReply: false`, DM daily cap `0`). X DMs need a paid tier plus
-  `dm.read`/`dm.write`; Instagram DMs need Meta App Review. Turning the flag on alone is not enough;
+Two workflows intentionally coexist:
+
+### `SNS Engagement Autopilot`
+
+Manual `workflow_dispatch` for setup, diagnostics, controlled dry-runs, and explicit operator runs.
+
+### `SNS Engagement Scheduled`
+
+Runs every 30 minutes. A scheduled wake-up does **not** automatically mean a provider read.
+`src/engagement/scheduled.mjs` first applies a local, zero-network gate:
+
+- the account must be enabled, not paused, and present in `liveAccounts`;
+- if public auto-replies are enabled, the account must have one of its own published posts within the
+  recent-post window (default: 360 minutes / 6 hours);
+- if DM automation is explicitly enabled, polling may run independently of a fresh public post because
+  a DM can arrive without a new post;
+- malformed scheduled-polling settings fail closed and cause the account to be skipped;
+- the existing `maxInboundFetchesPerDay` reservation still happens immediately before **every actual
+  provider read**, so the scheduled layer cannot bypass the hard daily read budget.
+
+This design matters especially on X because the current X API is pay-per-use. Public replies normally
+cluster after the account posts, so the repository polls that high-value window instead of paying to
+check a quiet account around the clock.
+
+Optional per-account tuning is supported under `account.engagement.scheduledPolling`:
+
+```json
+{
+  "scheduledPolling": {
+    "enabled": true,
+    "recentPostWindowMinutes": 360
+  }
+}
+```
+
+The runtime accepts only a whole-number recent-post window from 1 minute through 7 days. Invalid values
+resolve to zero and block scheduled polling rather than widening it.
+
+## Current automatic response policy
+
+After successful activation, routine eligible public replies can be automatic. The important guardrails
+remain in force:
+
 - inbound only;
-- **public replies are limited to threads rooted at our own published posts** (`replyScope: own-posts`);
-  cold mentions from people who never touched our content are discarded, not answered;
-- a hard daily ceiling on inbound *reads* (`maxInboundFetchesPerDay`, default 48), enforced before any
-  provider request is made, so polling cost cannot run away;
+- public X replies are limited to threads rooted at our own published posts (`replyScope: own-posts`);
 - no keyword-search cold replies;
 - no proactive follow/unfollow;
 - no unsolicited bulk DMs;
 - one automated response per inbound interaction;
 - deterministic human-like delay: public replies 8–35 minutes, DMs 12–50 minutes;
 - confidence threshold before automatic sending;
-- daily hard caps: 12 public replies by default (DM replies capped at 0 while DM automation is off);
-- every automation limit fails closed: a malformed cap/cooldown/threshold reduces automation rather than removing the limit, and `validateEngagementPolicy` rejects the malformed value at load time;
+- daily hard caps: 12 public replies by default;
+- DM automation is currently off (`autoDmReply: false`, DM daily cap `0`);
+- a hard daily ceiling on inbound provider reads (`maxInboundFetchesPerDay`, currently 48), enforced
+  before each provider read;
+- every automation limit fails closed: malformed caps/cooldowns/thresholds reduce automation rather
+  than removing the limit;
 - per-actor reply/DM cooldowns: 30 minutes by default;
-- opt-out persists per pseudonymous actor key, not just for one interaction, and explicit opt-outs are not evicted by routine actor-cache compaction;
-- high-risk/human-request categories are surfaced before normal delay/cooldown/daily-cap suppression, but opted-out users still receive no automatic response;
+- explicit opt-out persists per pseudonymous actor key;
 - private DM bodies are never persisted in repository state/audit/Issues;
 - private DM content is never used as a web-search query.
 
-If a configured engagement channel becomes unavailable, or its OAuth/permission state is no longer valid, the scheduled run becomes degraded/non-zero instead of silently staying green.
-
-## At-most-once delivery guard
-
-A live public reply or DM reply is reserved in `data/engagement-delivery-ledger.json` on `sns-ai-state` **before** the provider send request is made. The reservation contains only the pseudonymous event key and operational metadata; it does not contain inbound message text, private participant IDs, or generated private reply text.
-
-This closes the normal duplicate-send crash window. If the provider accepts a reply and the runner fails before ordinary engagement bookkeeping is saved, the durable reservation prevents the next run from blindly sending the same interaction again.
-
-SNS-AI deliberately prefers **at-most-once automatic delivery** over automatic retry when provider acceptance is ambiguous. An ambiguous network/provider outcome creates or reuses a `[engagement-delivery-unknown]` Issue with the `needs-human` label and automatic retry remains blocked.
-
-When that Issue appears:
-
-1. Check the corresponding interaction directly on X/Instagram. Public cases may include the public target ID. Private DM body/user/response details are intentionally omitted from GitHub.
-2. If a reply already exists, leave it as-is. If no reply exists, decide whether to send/skip it manually rather than asking SNS-AI to guess whether the previous request succeeded.
-3. Close the `[engagement-delivery-unknown]` Issue after the interaction has been intentionally handled or skipped.
-4. On the next run, SNS-AI marks that delivery as handled and does not auto-retry it.
-
-An explicit provider rejection that proves the send was not accepted (for example a definitive request-level 4xx) is recorded as failed rather than unknown and may be attempted again later. Ambiguous network/5xx-style outcomes are never automatically retried.
+The global `approvalRequired: true` remains a conservative fallback for accounts that have **not** gone
+through controlled activation. The selected account receives the narrow override only after the activation
+workflow proves the current gates.
 
 ## Human-required boundary
 
-Routine questions, thanks, reactions, light criticism, and straightforward support should normally be handled automatically.
-
-Escalation is reserved for cases such as:
+Routine questions, thanks, reactions, light criticism, and straightforward support may be handled
+automatically after activation. Human escalation is reserved for cases such as:
 
 - legal claims or legal commitments;
 - medical advice;
@@ -107,76 +132,80 @@ Escalation is reserved for cases such as:
 - binding partnership/contract terms;
 - rights/licensing commitments;
 - explicit requests to speak to a human;
-- low-confidence cases where a reply would otherwise be sent.
+- low-confidence cases where an automatic reply should not be trusted.
 
-Human escalation creates a `[engagement-human]` Issue. Public interactions can include a short public excerpt. For private DMs, provider/user/message details and model free-text reasoning are intentionally omitted because this repository is public.
+Those cases create a `[engagement-human]` Issue with `needs-human`.
 
-Public human-required replies can be resolved through the ChatOps bridge. Private human-required DMs deliberately remain manual-send exceptions so private content/final reply text do not pass through public GitHub Issues.
+Public human-required replies can be resolved through ChatOps. Private human-required DMs deliberately
+remain manual-send exceptions so private message content and final reply text do not pass through a
+public GitHub Issue.
 
-A separate ChatGPT condition-watch can surface only new unresolved human-required Issues directly in chat. This keeps normal operation unattended while preserving a human decision path for exceptions.
+## At-most-once delivery guard
+
+A live public reply or DM reply is reserved in `data/engagement-delivery-ledger.json` on `sns-ai-state`
+**before** the provider send request is made. The reservation contains only a pseudonymous event key and
+operational metadata; it does not contain inbound message text, private participant IDs, or generated
+private reply text.
+
+If a provider accepts a reply but the runner fails before ordinary bookkeeping is saved, the durable
+reservation prevents a blind duplicate retry. Ambiguous outcomes surface as
+`[engagement-delivery-unknown]` and automatic retry stays blocked until the case is intentionally handled.
+SNS-AI deliberately prefers at-most-once delivery over duplicate risk.
 
 ## X
 
-Implemented polling/sending paths:
+Implemented paths:
 
 - mentions: `GET /2/users/{id}/mentions`;
 - DM events: `GET /2/dm_events`;
 - public reply: `POST /2/tweets` with `reply.in_reply_to_tweet_id`;
 - one-to-one DM reply: `POST /2/dm_conversations/with/:participant_id/messages`.
 
-Scopes are derived from the policy (`requiredXEngagementScopes`). With DM automation off the `dm.*` scopes are not requested. With both public replies and DM replies enabled, unattended X engagement requires OAuth2 scopes:
+For the current public-reply-only launch, OAuth2 must contain the scopes derived by the policy plus an
+unattended refresh token. If DM automation is later enabled, `dm.read` and `dm.write` become required as
+well.
 
-- `tweet.read`
-- `tweet.write`
-- `users.read`
-- `dm.read`
-- `dm.write`
-- `offline.access`
-
-A refresh token is required for long-running unattended operation. Live Preflight verifies these requirements before `liveAccounts` activation. The authenticated OAuth1/OAuth2 identities must also resolve to the same account when both are used.
-
-If credentials/scopes are not ready, Engagement Autopilot reports `waiting_for_engagement_credentials`/degraded instead of sending anything.
+X's current automation rules allow automated responses where the user has clearly indicated intent to
+be contacted, require an easy opt-out, and limit automation to one response per user interaction. They
+also state that AI-powered automated reply bots require prior written and explicit approval from X.
+SNS-AI therefore treats that approval acknowledgement as a fail-closed go-live gate rather than trying
+to infer it from code.
 
 Official references:
 
+- https://help.x.com/en/rules-and-policies/x-automation
+- https://docs.x.com/x-api/getting-started/pricing
 - https://docs.x.com/x-api/users/get-mentions
 - https://docs.x.com/x-api/direct-messages/get-dm-events
-- https://docs.x.com/x-api/direct-messages/manage/integrate
-- https://help.x.com/en/rules-and-policies/x-automation
 
 ## Instagram
 
-Implemented scheduled paths:
+Implemented paths include polling comments on recent SNS-AI-published media, public comment replies,
+conversation/message reads, and DM replies. Meta's current platform setup uses Webhooks for real-time
+comment/message notifications and to avoid unnecessary polling/rate-limit pressure. The polling runtime
+in this repository does not remove the external Meta app/webhook setup requirements.
 
-- poll comments on recent SNS-AI-published media;
-- reply publicly through `/{comment_id}/replies`;
-- poll Instagram Conversations and recent conversation messages;
-- send inbound DM replies through the official messages route.
+External setup includes:
 
-The runtime itself uses scheduled polling rather than consuming webhook events. However, Meta's current Conversations/messaging documentation assumes the app has completed the required platform setup, including a webhooks server/subscriptions in the messaging setup flow. Treat webhook setup as an external Meta-app prerequisite when required by the chosen login/app-review configuration; do not infer from the polling implementation that Meta setup can skip it.
-
-External setup for Instagram engagement includes:
-
-- Professional account;
+- Instagram Professional account;
 - Meta app/login setup;
-- `instagram_business_basic` plus the comment/messaging permissions required by the enabled functions;
-- webhook endpoint/subscriptions when required by the current Meta messaging setup/app review;
+- required business permissions for the enabled features;
+- webhook endpoint/subscriptions where required by the current Meta setup/app review;
 - access token stored in GitHub Secrets;
-- controlled read/dry-run verification before adding an Instagram account to `liveAccounts`.
+- controlled read/dry-run verification before activation.
 
-Official Meta API collection/reference:
+Official Meta reference:
 
 - https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
 
 ## Privacy and state
 
-`data/engagement-state.json` stores hashed interaction/actor keys plus operational status. It also keeps a bounded privacy-safe sent log so daily caps remain enforceable even after old event entries are compacted.
+Engagement state, engagement audit, encrypted X OAuth2 rotation state, delivery ledger, and durable usage
+state live on the existing `sns-ai-state` branch rather than normal `main` history. Both manual ChatOps and
+scheduled engagement use the same restore/persist helper.
 
-`data/engagement-audit.jsonl` stores metadata such as account, platform, interaction kind, category, and result. X OAuth2 rotation state is encrypted before it is written to `data/x-oauth2-state.json`. `data/engagement-delivery-ledger.json` stores only bounded privacy-safe delivery reservations/results; unresolved delivery ambiguity records are retained until intentionally handled.
-
-In GitHub Actions, these four engagement runtime files are restored from and persisted to the existing `sns-ai-state` durable branch rather than `main`. Both the scheduled Engagement workflow and ChatOps engagement commands use the same restore/persist helper, so ChatGPT-triggered engagement does not fork a second state history. Runtime churn therefore does not create normal code-history commits or trigger the repository's `push: main` CI on every engagement state update. Live Preflight verifies the durable-state branch/write path before live activation.
-
-Neither engagement state file stores inbound message text or raw provider user IDs. Private DM content is not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash rather than a provider ID/username, and explicit opt-outs are retained rather than silently aged out with normal cooldown cache entries.
+Neither engagement state file stores inbound message text or raw provider user IDs. Private DM content is
+not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash and explicit opt-outs are kept.
 
 ## Growth guardrails
 

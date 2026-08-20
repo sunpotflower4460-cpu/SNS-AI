@@ -8,6 +8,7 @@ This file records tasks that cannot be completed safely from repository code alo
 - Affiliate publishing remains disabled.
 - Engagement code/configuration is available for dry-run/preflight, but `config/engagement-policy.json` keeps `liveAccounts: []`, so no automated inbound reply/DM can be sent yet.
 - X automation compliance acknowledgements are intentionally empty. Preflight fails closed until the required X-side profile disclosure and AI-reply approval steps are completed and explicitly recorded.
+- The new scheduled engagement workflow can wake every 30 minutes, but it performs zero provider reads while no account is live. After activation it still reads only inside the recent-own-post window unless DM automation is explicitly enabled, and every actual provider read is bounded by `maxInboundFetchesPerDay`.
 
 ## Affiliate applications
 
@@ -35,26 +36,26 @@ For each X account that will be automated:
 4. Only after steps 1–2 are complete, add the account ID to `xAutomationProfileComplianceConfirmedAccounts` in `config/engagement-policy.json`.
 5. Only after step 3 is actually approved, add the account ID to `xAiReplyBotApprovalConfirmedAccounts`.
 
-`music-tools-x` is already listed in `xAiReplyBotApprovalRequiredAccounts`, so it cannot be live for AI public replies merely by being added to `liveAccounts`. A misordered rollout fails closed. Engagement dry-run remains available before approval so the code path can be verified without sending.
+`music-tools-x` is already listed in `xAiReplyBotApprovalRequiredAccounts`, so it cannot become automatic for AI public replies just by changing a generic enable flag. The activation workflow reruns the compliance check and fails closed if either acknowledgement is missing.
 
-The generated X engagement response also appends the configured opt-out sentence deterministically. The runtime already persists actor opt-outs and stops further automated responses for that actor.
+The generated X engagement response appends the configured opt-out sentence deterministically. The runtime persists actor opt-outs and stops further automated responses for that actor.
 
 ## X engagement permissions
 
-When reply/DM handling is intentionally started:
+When reply handling is intentionally started:
 
 1. Re-check X Automation Rules and complete the X developer-app/OAuth consent steps.
-2. Authorize OAuth2 with the scopes required by the current policy. With both public replies and DMs enabled this is `tweet.read`, `tweet.write`, `users.read`, `dm.read`, `dm.write`, and `offline.access`.
+2. Authorize OAuth2 with the scopes required by the current policy. Public replies need the reply/read/user scopes derived by the repository plus `offline.access`; enabling DMs additionally requires `dm.read` and `dm.write`.
 3. Ensure a refresh token exists for unattended rotation and store the credentials plus `X_OAUTH2_STATE_KEY` in GitHub Actions Secrets.
 4. Complete the X account transparency and AI-reply approval steps above.
-5. Run Live Preflight for `music-tools-x`. It verifies scopes/refresh-token readiness and the recorded one-time X compliance acknowledgements even though engagement is not live yet.
-6. Run engagement dry-run/read-only ingestion. Detailed interaction output is deliberately suppressed on public ChatOps surfaces.
-7. Complete the controlled provider rehearsal from the normal go-live checklist.
-8. Only then add `music-tools-x` to `liveAccounts` in `config/engagement-policy.json`.
+5. Enable the normal SNS account but keep engagement non-live.
+6. Run Live Preflight for the account. It verifies engagement scopes/refresh-token readiness and the recorded one-time X compliance acknowledgements even though engagement is not live yet.
+7. Run `[engagement-dry-run] ACCOUNT_ID` or the manual Engagement workflow and inspect the privacy-safe result.
+8. When the controlled checks are satisfactory, create `[engagement-activate] ACCOUNT_ID` from ChatGPT/GitHub. The workflow repeats Doctor + Live Preflight + X compliance, then atomically adds the account to `liveAccounts` and sets only that account's engagement approval override to automatic.
 
-After step 8, ordinary eligible inbound handling is autonomous and does not need per-reply approval. Legal/refund/privacy/security/threat/contract/human-request and other sensitive/low-confidence cases are the exceptions that surface for human judgment.
+After step 8, `SNS Engagement Scheduled` handles eligible inbound public replies automatically in cost-aware polling windows. Legal/refund/privacy/security/threat/contract/human-request and low-confidence cases remain exceptions that surface for human judgment.
 
-To stop live automated engagement without dismantling the account, remove the account from `liveAccounts`.
+To stop live automated engagement without dismantling the account, create `[engagement-deactivate] ACCOUNT_ID`. This removes the live gate and restores the account to approval-required behavior.
 
 Do not add auto-follow, auto-unfollow, cold keyword replies or unsolicited bulk DMs.
 
@@ -64,11 +65,13 @@ When Instagram handling is intentionally started:
 
 1. Use/confirm an Instagram Professional account.
 2. Configure the Meta app/login flow and required permissions, including `instagram_business_basic`, comment management when public comment handling is enabled, and message management when DM handling is enabled.
-3. Complete the webhook endpoint/subscription setup required by the current Meta messaging/app-review flow. The SNS-AI runtime currently polls Conversations/messages on a schedule rather than consuming webhook payloads, but that does not imply Meta's external app setup can skip webhook prerequisites.
-4. Store the access token in GitHub Secrets.
-5. Test scheduled comment/conversation/message polling in dry-run before live activation.
-6. Add the Instagram account to `liveAccounts` only after the controlled verification succeeds.
+3. Configure and verify the Webhook endpoint/subscriptions required by the current Meta comment/messaging setup. The SNS-AI runtime can poll provider endpoints, but Meta's platform setup still expects Webhooks for supported real-time notifications.
+4. Store access tokens in GitHub Secrets.
+5. Test comment/conversation/message ingestion in dry-run before live activation.
+6. Use `[engagement-activate] ACCOUNT_ID` only after controlled verification succeeds. The same control workflow handles the live gate and account-scoped automatic-reply override.
 
 ## Human-only decisions
 
 Keep a human in the loop for account/app registrations, platform terms acceptance, X automated-account profile setup, X AI-reply written approval, affiliate applications, payment/tax profile setup, bank/payout details, app review/permission approval, OAuth consent, secret creation/rotation, initial controlled live activation, and any partnership contract that adds obligations beyond a normal affiliate agreement.
+
+The repository can verify recorded state and automate the transition only after those external facts are true; it must not pretend to have completed them.
