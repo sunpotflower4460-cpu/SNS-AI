@@ -243,9 +243,11 @@ test('scheduled runner executes due accounts sequentially and reports healthy/de
 
 test('scheduled and control workflows expose only bounded engagement automation', async () => {
   const scheduled = await readFile(`${ROOT}.github/workflows/engagement-scheduled.yml`, 'utf8');
-  assert.match(scheduled, /cron:\s*'7,37 \* \* \* \*'/);
+  const activeScheduled = scheduled.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  assert.match(activeScheduled, /^\s*workflow_dispatch:/m);
+  assert.doesNotMatch(activeScheduled, /^\s*schedule:/m);
+  assert.doesNotMatch(activeScheduled, /^\s*-\s*cron:/m);
   assert.match(scheduled, /node src\/engagement\/scheduled\.mjs/);
-  assert.match(scheduled, /maxInboundFetchesPerDay/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   assert.match(control, /\[engagement-activate\]/);

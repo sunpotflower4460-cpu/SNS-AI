@@ -1,8 +1,7 @@
 name: SNS Daily Learning
 
 on:
-  schedule:
-    - cron: '47 17 * * *'
+  # Manual-only safety posture: no scheduled learning/state writes.
   workflow_dispatch:
     inputs:
       account:

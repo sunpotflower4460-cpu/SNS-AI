@@ -1,8 +1,7 @@
 name: SNS Trend Intelligence
 
 on:
-  schedule:
-    - cron: '37 */6 * * *'
+  # Manual-only safety posture: no scheduled OpenAI/web research.
   workflow_dispatch:
     inputs:
       account:

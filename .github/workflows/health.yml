@@ -1,8 +1,7 @@
 name: SNS Health Report
 
 on:
-  schedule:
-    - cron: '17 21 * * *'
+  # Manual-only safety posture: health checks do not run on a timer.
   workflow_dispatch:
 
 permissions:

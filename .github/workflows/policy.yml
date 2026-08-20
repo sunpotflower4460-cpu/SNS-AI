@@ -1,8 +1,7 @@
 name: SNS Policy Watch
 
 on:
-  schedule:
-    - cron: '41 18 * * 3'
+  # Manual-only safety posture: no scheduled OpenAI/web policy checks.
   workflow_dispatch:
 
 permissions:

@@ -1,8 +1,7 @@
 name: SNS Hub Reconcile
 
 on:
-  schedule:
-    - cron: '29 */6 * * *'
+  # Manual-only safety posture: no scheduled Hub/provider reconciliation.
   workflow_dispatch:
 
 permissions:

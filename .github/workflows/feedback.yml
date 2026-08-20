@@ -99,15 +99,38 @@ jobs:
           npm run validate
           node src/feedback/record.mjs --file feedback.json
 
-      - name: Persist feedback
+      - name: Persist feedback without rebase conflicts
+        shell: bash
         run: |
+          # record.mjs appends exactly one JSONL row. Preserve that immutable row, then on every retry
+          # start from the latest remote branch and append it only if it is not already present.
+          # This avoids leaving a rebase conflict in the worktree when another writer wins the race.
+          tail -n 1 data/human-feedback.jsonl > /tmp/sns-feedback-row.jsonl
+          if [[ ! -s /tmp/sns-feedback-row.jsonl ]]; then
+            echo "::error::Feedback recorder did not produce a JSONL row."
+            exit 1
+          fi
+
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
-          git add data/human-feedback.jsonl
-          git diff --cached --quiet && exit 0
-          git commit -m "data: record human SNS feedback"
+
           for attempt in 1 2 3; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            touch data/human-feedback.jsonl
+
+            if grep -Fqx -f /tmp/sns-feedback-row.jsonl data/human-feedback.jsonl; then
+              echo "Feedback row is already persisted."
+              exit 0
+            fi
+
+            cat /tmp/sns-feedback-row.jsonl >> data/human-feedback.jsonl
+            git add data/human-feedback.jsonl
+            git commit -m "data: record human SNS feedback"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Feedback push attempt ${attempt} lost a race; retrying from the latest remote state."
             sleep $((attempt * 3))
           done
           exit 1
