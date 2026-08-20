@@ -68,7 +68,7 @@ test('Manual-Only rejects unclassified workflows and stale Issue event dependenc
     await rm(join(workflows, 'unreviewed.yml'));
     const healthFile = join(workflows, 'health.yml');
     const health = await readFile(healthFile, 'utf8');
-    await writeFile(healthFile, `${health}\n# stale reference: ${{ github.event.issue.title }}\n`);
+    await writeFile(healthFile, health + '\n# stale reference: ${{ github.event.issue.title }}\n');
     const staleResult = await auditManualOnly(root);
     assert.equal(staleResult.ok, false);
     assert.match(staleResult.errors.join('\n'), /event payload that workflow_dispatch cannot provide/);
