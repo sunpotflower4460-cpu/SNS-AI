@@ -1,8 +1,6 @@
 name: SNS Human Feedback
 
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
     inputs:
       account:
@@ -30,7 +28,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: sns-ai-write
@@ -38,10 +35,14 @@ concurrency:
 
 jobs:
   feedback:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[feedback]')
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_ACTION: ${{ inputs.action }}
+      INPUT_NOTE: ${{ inputs.note }}
+      INPUT_DIMENSION: ${{ inputs.dimension }}
+      INPUT_VALUE: ${{ inputs.value }}
+
     steps:
       - name: Authorize command actor
         env:
@@ -65,46 +66,35 @@ jobs:
           node-version: '22'
 
       - name: Build feedback payload
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-          INPUT_ACCOUNT: ${{ inputs.account }}
-          INPUT_ACTION: ${{ inputs.action }}
-          INPUT_NOTE: ${{ inputs.note }}
-          INPUT_DIMENSION: ${{ inputs.dimension }}
-          INPUT_VALUE: ${{ inputs.value }}
+        shell: bash
         run: |
           node --input-type=module <<'NODE'
           import { writeFileSync } from 'node:fs';
-          let payload;
-          if (process.env.EVENT_NAME === 'issues') {
-            try { payload = JSON.parse(process.env.ISSUE_BODY || ''); }
-            catch { throw new Error('For [feedback] issues, the issue body must be valid JSON.'); }
-            payload.source ||= 'github-issue';
-          } else {
-            payload = {
-              account: process.env.INPUT_ACCOUNT,
-              action: process.env.INPUT_ACTION || 'note',
-              note: process.env.INPUT_NOTE,
-              dimension: process.env.INPUT_DIMENSION || undefined,
-              value: process.env.INPUT_VALUE || undefined,
-              source: 'workflow-dispatch'
-            };
-          }
-          writeFileSync('feedback.json', JSON.stringify(payload));
+          const account = String(process.env.INPUT_ACCOUNT || '').trim();
+          const action = String(process.env.INPUT_ACTION || 'note').trim();
+          const note = String(process.env.INPUT_NOTE || '');
+          if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
+          if (!['prefer', 'avoid', 'correct', 'pin', 'note'].includes(action)) throw new Error('Unsupported feedback action.');
+          if (!note.trim()) throw new Error('Feedback note is required.');
+          writeFileSync('feedback.json', JSON.stringify({
+            account,
+            action,
+            note,
+            dimension: String(process.env.INPUT_DIMENSION || '').trim() || undefined,
+            value: String(process.env.INPUT_VALUE || '').trim() || undefined,
+            source: 'workflow-dispatch'
+          }));
           NODE
 
       - name: Validate and record
         run: |
           npm run validate
+          npm run manual-only-audit
           node src/feedback/record.mjs --file feedback.json
 
       - name: Persist feedback without rebase conflicts
         shell: bash
         run: |
-          # record.mjs appends exactly one JSONL row. Preserve that immutable row, then on every retry
-          # start from the latest remote branch and append it only if it is not already present.
-          # This avoids leaving a rebase conflict in the worktree when another writer wins the race.
           tail -n 1 data/human-feedback.jsonl > /tmp/sns-feedback-row.jsonl
           if [[ ! -s /tmp/sns-feedback-row.jsonl ]]; then
             echo "::error::Feedback recorder did not produce a JSONL row."
@@ -135,18 +125,6 @@ jobs:
           done
           exit 1
 
-      - name: Close feedback issue on success
-        if: success() && github.event_name == 'issues'
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ Human feedback recorded. It will outrank learned strategy on future generations."
-          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
-
-      - name: Explain feedback failure
-        if: failure() && github.event_name == 'issues'
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Feedback could not be recorded. Check authorization, JSON shape, and account ID."
+      - name: Report result
+        if: success()
+        run: echo "Human feedback recorded for '$INPUT_ACCOUNT'."
