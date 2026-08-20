@@ -4,11 +4,11 @@ This file records tasks that cannot be completed safely from repository code alo
 
 ## Current live-state invariants
 
-- `music-tools-x` live posting remains disabled until the existing social credential/OpenAI preflight sequence is completed.
+- `music-tools-x` live posting remains disabled until the existing social credential/OpenAI publish-preflight sequence is completed.
 - Affiliate publishing remains disabled.
 - Engagement code/configuration is available for dry-run/preflight, but `config/engagement-policy.json` keeps `liveAccounts: []`, so no automated inbound reply/DM can be sent yet.
-- X automation compliance acknowledgements are intentionally empty. Preflight fails closed until the required X-side profile disclosure and AI-reply approval steps are completed and explicitly recorded.
-- The new scheduled engagement workflow can wake every 30 minutes, but it performs zero provider reads while no account is live. After activation it still reads only inside the recent-own-post window unless DM automation is explicitly enabled, and every actual provider read is bounded by `maxInboundFetchesPerDay`.
+- X automated-profile transparency is a posting gate. X AI-reply written approval and reply/DM OAuth2 scopes are separate engagement gates and do **not** block text-only publishing before engagement is activated.
+- The scheduled engagement workflow can wake every 30 minutes, but it performs zero provider reads while no account is live. After activation it still reads only inside the recent-own-post window unless DM automation is explicitly enabled, and every actual provider read is bounded by `maxInboundFetchesPerDay`.
 
 ## Affiliate applications
 
@@ -26,7 +26,7 @@ After each approval, capture only the identifiers/templates needed by `config/af
 
 ## X account transparency and AI-reply approval
 
-These are one-time external X-side actions. Repository code cannot truthfully perform or verify the X UI/approval actions itself, so Live Preflight requires an explicit acknowledgement after they are complete.
+These are one-time external X-side actions. Repository code cannot truthfully perform or verify the X UI/approval actions itself, so the relevant safety gate requires an explicit acknowledgement after they are complete.
 
 For each X account that will be automated:
 
@@ -38,7 +38,7 @@ For each X account that will be automated:
 
 If either external fact stops being true, use `[compliance-revoke-x-profile] ACCOUNT_ID` or `[compliance-revoke-x-ai-reply] ACCOUNT_ID`. Revoking profile compliance immediately pauses posting and removes the engagement live gate. Revoking AI-reply approval removes the engagement live gate and restores approval-required reply behavior without unnecessarily pausing ordinary posting.
 
-`music-tools-x` is already listed in `xAiReplyBotApprovalRequiredAccounts`, so it cannot become automatic for AI public replies just by changing a generic enable flag. The activation workflow reruns the compliance check and fails closed if either acknowledgement is missing.
+`music-tools-x` is already listed in `xAiReplyBotApprovalRequiredAccounts`, so it cannot become automatic for AI public replies just by changing a generic enable flag. The engagement activation workflow reruns the full compliance check and fails closed if either acknowledgement is missing. Ordinary publish preflight checks profile transparency only and does not require AI-reply approval.
 
 The generated X engagement response appends the configured opt-out sentence deterministically. The runtime persists actor opt-outs and stops further automated responses for that actor.
 
@@ -50,12 +50,11 @@ When reply handling is intentionally started:
 2. Authorize OAuth2 with the scopes required by the current policy. Public replies need the reply/read/user scopes derived by the repository plus `offline.access`; enabling DMs additionally requires `dm.read` and `dm.write`.
 3. Ensure a refresh token exists for unattended rotation and store the credentials plus `X_OAUTH2_STATE_KEY` in GitHub Actions Secrets.
 4. Complete the X account transparency and AI-reply approval steps above.
-5. Enable the normal SNS account but keep engagement non-live. Repository-side account lifecycle changes can be requested with `[account-approval] ACCOUNT_ID`; the workflow persists them only after its safety gates pass.
-6. Run Live Preflight for the account. It verifies engagement scopes/refresh-token readiness and the recorded one-time X compliance acknowledgements even though engagement is not live yet.
-7. Run `[engagement-dry-run] ACCOUNT_ID` or the manual Engagement workflow and inspect the privacy-safe result.
-8. When the controlled checks are satisfactory, create `[engagement-activate] ACCOUNT_ID` from ChatGPT/GitHub. The workflow repeats Doctor + Live Preflight + X compliance, then atomically adds the account to `liveAccounts` and sets only that account's engagement approval override to automatic.
+5. Enable the normal SNS account but keep engagement non-live. Repository-side account lifecycle changes can be requested with `[account-approval] ACCOUNT_ID`; the workflow persists them only after its publish safety gates pass. Starting text-only posting does not require engagement OAuth2.
+6. Run `[engagement-dry-run] ACCOUNT_ID` when desired. Detailed private interaction content remains suppressed from public GitHub output.
+7. When the controlled checks are satisfactory, create `[engagement-activate] ACCOUNT_ID` from ChatGPT/GitHub. The activation workflow automatically runs Doctor, **engagement-specific** Live Preflight (`--engagement`), and full X automation compliance. It therefore proves reply/DM scopes, refresh-token readiness, profile transparency, and any required AI-reply written approval before atomically adding the account to `liveAccounts` and enabling only that account's unattended engagement behavior.
 
-After step 8, `SNS Engagement Scheduled` handles eligible inbound public replies automatically in cost-aware polling windows. Legal/refund/privacy/security/threat/contract/human-request and low-confidence cases remain exceptions that surface for human judgment.
+After activation, `SNS Engagement Scheduled` handles eligible inbound public replies automatically in cost-aware polling windows. Legal/refund/privacy/security/threat/contract/human-request and low-confidence cases remain exceptions that surface for human judgment.
 
 To stop live automated engagement without dismantling the account, create `[engagement-deactivate] ACCOUNT_ID`. This removes the live gate and restores the account to approval-required behavior.
 
