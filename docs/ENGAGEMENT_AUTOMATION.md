@@ -1,220 +1,97 @@
-# Engagement automation
+# Engagement handling — current manual-only posture
 
 Verified baseline: 2026-08-20.
 
-## Goal
+The repository contains a full inbound engagement automation engine, but **unattended engagement is currently locked off**.
 
-Run useful inbound community handling with minimal operator interruption:
-
-1. Detect genuine inbound interactions.
-2. Wait a bounded human-like delay instead of replying instantly.
-3. Classify intent, sensitivity, and confidence.
-4. Draft a concise account-voice response.
-5. Send routine high-confidence responses automatically.
-6. Escalate only interactions that genuinely require an owner/human decision.
-7. Persist privacy-safe state and outcome metadata for idempotency and later quality tuning.
-
-The target is **exception-based human involvement**, not per-reply approval.
-
-## Activation model
-
-Engagement has two account gates in `config/engagement-policy.json`:
-
-- `allowedAccounts`: accounts whose engagement setup may be checked and dry-run.
-- `liveAccounts`: accounts allowed to perform live inbound handling.
-
-There is also a per-account `engagement.approvalRequired` override in `config/accounts.json`.
-The repository keeps the global launch posture conservative (`approvalRequired: true`). A successful
-controlled activation changes only the selected account to `approvalRequired: false` and adds only that
-account to `liveAccounts`. Deactivation removes it from `liveAccounts` and restores the account override
-to `true`.
-
-Use the ChatGPT/GitHub Issue control bridge:
-
-```text
-[engagement-activate] ACCOUNT_ID
-[engagement-deactivate] ACCOUNT_ID
-```
-
-`[engagement-activate]` fails closed unless all repository-verifiable gates pass first:
-
-- account is enabled and not paused;
-- account is in `allowedAccounts`;
-- strict Doctor passes;
-- Live Preflight passes, including provider credentials/scopes and durable state;
-- X automation compliance passes for X accounts, including the recorded automated-profile disclosure
-  acknowledgement and any required prior written X approval for an AI reply bot.
-
-The control workflow then commits `config/accounts.json` and `config/engagement-policy.json` together.
-A failed runner therefore cannot persist a one-file half-activation.
-
-`[engagement-deactivate]` is the kill switch. It does not dismantle credentials or disable normal posting.
-
-## Runtime: manual diagnostics + cost-aware scheduled operation
-
-Two workflows intentionally coexist:
-
-### `SNS Engagement Autopilot`
-
-Manual `workflow_dispatch` for setup, diagnostics, controlled dry-runs, and explicit operator runs.
-
-### `SNS Engagement Scheduled`
-
-Runs every 30 minutes. A scheduled wake-up does **not** automatically mean a provider read.
-`src/engagement/scheduled.mjs` first applies a local, zero-network gate:
-
-- the account must be enabled, not paused, and present in `liveAccounts`;
-- if public auto-replies are enabled, the account must have one of its own published posts within the
-  recent-post window (default: 360 minutes / 6 hours);
-- if DM automation is explicitly enabled, polling may run independently of a fresh public post because
-  a DM can arrive without a new post;
-- malformed scheduled-polling settings fail closed and cause the account to be skipped;
-- the existing `maxInboundFetchesPerDay` reservation still happens immediately before **every actual
-  provider read**, so the scheduled layer cannot bypass the hard daily read budget.
-
-This design matters especially on X because the current X API is pay-per-use. Public replies normally
-cluster after the account posts, so the repository polls that high-value window instead of paying to
-check a quiet account around the clock.
-
-Optional per-account tuning is supported under `account.engagement.scheduledPolling`:
+The current source of truth is `config/operation-mode.json`:
 
 ```json
 {
-  "scheduledPolling": {
-    "enabled": true,
-    "recentPostWindowMinutes": 360
-  }
+  "mode": "manual-only",
+  "allowUnattendedEngagement": false
 }
 ```
 
-The runtime accepts only a whole-number recent-post window from 1 minute through 7 days. Invalid values
-resolve to zero and block scheduled polling rather than widening it.
+## What is active now
 
-## Current automatic response policy
+- `config/engagement-policy.json` keeps `liveAccounts: []`.
+- global `approvalRequired` remains `true`.
+- `autoDmReply` remains `false` and the DM daily automation cap remains `0`.
+- `SNS Engagement Autopilot` is `workflow_dispatch` only.
+- `SNS Engagement Scheduled` is `workflow_dispatch` only despite its historical name.
+- there is no active engagement cron.
+- `[engagement-activate] ACCOUNT_ID` and direct `--activate` are rejected by the manual-only runtime lock.
 
-After successful activation, routine eligible public replies can be automatic. The important guardrails
-remain in force:
+Therefore no X/Instagram reply, DM, mention polling, comment polling, or conversation polling begins by itself.
+
+## What can be used manually
+
+### Dry-run
+
+Use the ChatOps command or manual workflow to collect/classify/draft without sending:
+
+```text
+[engagement-dry-run] ACCOUNT_ID
+```
+
+Dry-run may perform provider reads when the account credentials/setup allow it, but it is started only by an explicit owner/admin action.
+
+### Human-resolved public interaction
+
+A public interaction that has already been surfaced for human review may be intentionally resolved through the existing `engagement-resolve` path. The operator chooses reply vs ignore and supplies the final public reply text when replying.
+
+### Private DM
+
+Private human-required DM content should remain in the SNS app. Do not copy private message bodies into a public GitHub Issue. Human-required private replies are sent manually in the SNS app.
+
+## Safety rules retained even for manual runs
 
 - inbound only;
-- public X replies are limited to threads rooted at our own published posts (`replyScope: own-posts`);
+- X public replies are scoped to threads rooted at our own published posts;
 - no keyword-search cold replies;
 - no proactive follow/unfollow;
 - no unsolicited bulk DMs;
-- one automated response per inbound interaction;
-- deterministic human-like delay: public replies 8–35 minutes, DMs 12–50 minutes;
-- confidence threshold before automatic sending;
-- daily hard caps: 12 public replies by default;
-- DM automation is currently off (`autoDmReply: false`, DM daily cap `0`);
-- a hard daily ceiling on inbound provider reads (`maxInboundFetchesPerDay`, currently 48), enforced
-  before each provider read;
-- every automation limit fails closed: malformed caps/cooldowns/thresholds reduce automation rather
-  than removing the limit;
-- per-actor reply/DM cooldowns: 30 minutes by default;
-- explicit opt-out persists per pseudonymous actor key;
-- private DM bodies are never persisted in repository state/audit/Issues;
-- private DM content is never used as a web-search query.
+- one automated delivery reservation per inbound interaction;
+- daily provider-read caps;
+- cooldowns and confidence thresholds;
+- explicit opt-out persistence;
+- private DM bodies are not persisted to repository state/audit/Issues;
+- private DM content is not used as a web-search query;
+- ambiguous provider delivery blocks blind retry.
 
-The global `approvalRequired: true` remains a conservative fallback for accounts that have **not** gone
-through controlled activation. The selected account receives the narrow override only after the activation
-workflow proves the current gates.
+## Delivery idempotency
 
-## Human-required boundary
+The engagement delivery ledger is written before a provider send. If the provider result is ambiguous, SNS-AI prefers at-most-once behavior and blocks automatic retry until the case is intentionally handled.
 
-Routine questions, thanks, reactions, light criticism, and straightforward support may be handled
-automatically after activation. Human escalation is reserved for cases such as:
+## X setup when manually testing engagement
 
-- legal claims or legal commitments;
-- medical advice;
-- payment/refund or other financial disputes;
-- account-security matters;
-- private personal data;
-- harassment or threats;
-- binding partnership/contract terms;
-- rights/licensing commitments;
-- explicit requests to speak to a human;
-- low-confidence cases where an automatic reply should not be trusted.
+Depending on the enabled channels, the OAuth2 session needs the policy-derived scopes, typically including:
 
-Those cases create a `[engagement-human]` Issue with `needs-human`.
+- `tweet.read`
+- `users.read`
+- `offline.access`
+- `tweet.write` for public replies
+- `dm.read` / `dm.write` only if DM automation is intentionally introduced in a future mode
 
-Public human-required replies can be resolved through ChatOps. Private human-required DMs deliberately
-remain manual-send exceptions so private message content and final reply text do not pass through a
-public GitHub Issue.
+The repository also keeps fail-closed checks for X automated-profile transparency and any required prior written approval for AI-powered automated public replies.
 
-## At-most-once delivery guard
+## Instagram setup when manually testing engagement
 
-A live public reply or DM reply is reserved in `data/engagement-delivery-ledger.json` on `sns-ai-state`
-**before** the provider send request is made. The reservation contains only a pseudonymous event key and
-operational metadata; it does not contain inbound message text, private participant IDs, or generated
-private reply text.
+Use an Instagram Professional account, Meta app/login setup, and the permissions/app review required for the specific comment/message features being tested. Provider setup remains a human-controlled external boundary.
 
-If a provider accepts a reply but the runner fails before ordinary bookkeeping is saved, the durable
-reservation prevents a blind duplicate retry. Ambiguous outcomes surface as
-`[engagement-delivery-unknown]` and automatic retry stays blocked until the case is intentionally handled.
-SNS-AI deliberately prefers at-most-once delivery over duplicate risk.
+## Future unattended engagement
 
-## X
+The implementation for cost-aware scheduled polling remains in source for future use, including recent-own-post windows and hard provider-read caps. It is **dormant code**, not current behavior.
 
-Implemented paths:
+To re-enable unattended engagement in the future, do not merely add a cron or `liveAccounts` entry. A reviewed change must:
 
-- mentions: `GET /2/users/{id}/mentions`;
-- DM events: `GET /2/dm_events`;
-- public reply: `POST /2/tweets` with `reply.in_reply_to_tweet_id`;
-- one-to-one DM reply: `POST /2/dm_conversations/with/:participant_id/messages`.
+1. intentionally change `config/operation-mode.json` to allow unattended engagement;
+2. verify provider permissions/billing/compliance again;
+3. prove the account in controlled approval/manual operation first;
+4. enable only the intended account;
+5. restore only the specific schedule wanted;
+6. intentionally update the manual-only trigger tests;
+7. pass CI.
 
-For the current public-reply-only launch, OAuth2 must contain the scopes derived by the policy plus an
-unattended refresh token. If DM automation is later enabled, `dm.read` and `dm.write` become required as
-well.
-
-X's current automation rules allow automated responses where the user has clearly indicated intent to
-be contacted, require an easy opt-out, and limit automation to one response per user interaction. They
-also state that AI-powered automated reply bots require prior written and explicit approval from X.
-SNS-AI therefore treats that approval acknowledgement as a fail-closed go-live gate rather than trying
-to infer it from code.
-
-Official references:
-
-- https://help.x.com/en/rules-and-policies/x-automation
-- https://docs.x.com/x-api/getting-started/pricing
-- https://docs.x.com/x-api/users/get-mentions
-- https://docs.x.com/x-api/direct-messages/get-dm-events
-
-## Instagram
-
-Implemented paths include polling comments on recent SNS-AI-published media, public comment replies,
-conversation/message reads, and DM replies. Meta's current platform setup uses Webhooks for real-time
-comment/message notifications and to avoid unnecessary polling/rate-limit pressure. The polling runtime
-in this repository does not remove the external Meta app/webhook setup requirements.
-
-External setup includes:
-
-- Instagram Professional account;
-- Meta app/login setup;
-- required business permissions for the enabled features;
-- webhook endpoint/subscriptions where required by the current Meta setup/app review;
-- access token stored in GitHub Secrets;
-- controlled read/dry-run verification before activation.
-
-Official Meta reference:
-
-- https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
-
-## Privacy and state
-
-Engagement state, engagement audit, encrypted X OAuth2 rotation state, delivery ledger, and durable usage
-state live on the existing `sns-ai-state` branch rather than normal `main` history. Both manual ChatOps and
-scheduled engagement use the same restore/persist helper.
-
-Neither engagement state file stores inbound message text or raw provider user IDs. Private DM content is
-not copied to GitHub Issues. Actor opt-out state is keyed by a one-way hash and explicit opt-outs are kept.
-
-## Growth guardrails
-
-Do not automate:
-
-- proactive auto-follow or auto-unfollow;
-- keyword-search cold replies to unrelated users;
-- unsolicited bulk DMs;
-- repetitive replies or mentions;
-- duplicate/substantially similar posts across multiple operated accounts;
-- engagement bait whose main purpose is manipulating platform metrics;
-- pretending an AI-generated response is based on personal product use when no real use is known.
+Until that happens, the expected state is **manual dry-run / human resolution only, no unattended provider polling or replies**.
