@@ -33,8 +33,10 @@ For each X account that will be automated:
 1. Enable the X **Automated** profile label and link the bot/automated account to its human-managed account.
 2. Make the profile bio clearly disclose that the account is automated and identify who operates/manages it.
 3. If the account will use AI-generated automated public replies, obtain X's prior written and explicit approval for that AI reply bot/use case through the current X developer/support route.
-4. Only after steps 1–2 are complete, add the account ID to `xAutomationProfileComplianceConfirmedAccounts` in `config/engagement-policy.json`.
-5. Only after step 3 is actually approved, add the account ID to `xAiReplyBotApprovalConfirmedAccounts`.
+4. Only after steps 1–2 are genuinely complete, ask ChatGPT to record profile compliance. It creates `[compliance-x-profile] ACCOUNT_ID` with the exact attestation line `I_CONFIRM_X_AUTOMATED_PROFILE_SETUP_COMPLETE=true`. The workflow records the account in `xAutomationProfileComplianceConfirmedAccounts`; it does not perform or infer the external X action.
+5. Only after step 3 is genuinely approved, ask ChatGPT to record the written approval. It creates `[compliance-x-ai-reply] ACCOUNT_ID` with `I_CONFIRM_X_AI_REPLY_WRITTEN_APPROVAL_RECEIVED=true`. The workflow records the account in `xAiReplyBotApprovalConfirmedAccounts`.
+
+If either external fact stops being true, use `[compliance-revoke-x-profile] ACCOUNT_ID` or `[compliance-revoke-x-ai-reply] ACCOUNT_ID`. Revoking profile compliance immediately pauses posting and removes the engagement live gate. Revoking AI-reply approval removes the engagement live gate and restores approval-required reply behavior without unnecessarily pausing ordinary posting.
 
 `music-tools-x` is already listed in `xAiReplyBotApprovalRequiredAccounts`, so it cannot become automatic for AI public replies just by changing a generic enable flag. The activation workflow reruns the compliance check and fails closed if either acknowledgement is missing.
 
@@ -48,7 +50,7 @@ When reply handling is intentionally started:
 2. Authorize OAuth2 with the scopes required by the current policy. Public replies need the reply/read/user scopes derived by the repository plus `offline.access`; enabling DMs additionally requires `dm.read` and `dm.write`.
 3. Ensure a refresh token exists for unattended rotation and store the credentials plus `X_OAUTH2_STATE_KEY` in GitHub Actions Secrets.
 4. Complete the X account transparency and AI-reply approval steps above.
-5. Enable the normal SNS account but keep engagement non-live.
+5. Enable the normal SNS account but keep engagement non-live. Repository-side account lifecycle changes can be requested with `[account-approval] ACCOUNT_ID`; the workflow persists them only after its safety gates pass.
 6. Run Live Preflight for the account. It verifies engagement scopes/refresh-token readiness and the recorded one-time X compliance acknowledgements even though engagement is not live yet.
 7. Run `[engagement-dry-run] ACCOUNT_ID` or the manual Engagement workflow and inspect the privacy-safe result.
 8. When the controlled checks are satisfactory, create `[engagement-activate] ACCOUNT_ID` from ChatGPT/GitHub. The workflow repeats Doctor + Live Preflight + X compliance, then atomically adds the account to `liveAccounts` and sets only that account's engagement approval override to automatic.
@@ -72,6 +74,6 @@ When Instagram handling is intentionally started:
 
 ## Human-only decisions
 
-Keep a human in the loop for account/app registrations, platform terms acceptance, X automated-account profile setup, X AI-reply written approval, affiliate applications, payment/tax profile setup, bank/payout details, app review/permission approval, OAuth consent, secret creation/rotation, initial controlled live activation, and any partnership contract that adds obligations beyond a normal affiliate agreement.
+Keep a human in the loop for account/app registrations, platform terms acceptance, X automated-account profile setup, X AI-reply written approval, affiliate applications, payment/tax profile setup, bank/payout details, app review/permission approval, OAuth consent, secret creation/rotation, initial controlled live-post review, and any partnership contract that adds obligations beyond a normal affiliate agreement.
 
-The repository can verify recorded state and automate the transition only after those external facts are true; it must not pretend to have completed them.
+The repository can verify recorded state and automate transitions only after those external facts are true; it must not pretend to have completed them. Repository-side recording of the two X compliance facts is allowed only after an owner/admin explicitly supplies the required attestation marker through the dedicated ChatOps command.

@@ -1,0 +1,126 @@
+name: SNS Compliance Attestation
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    if: >
+      startsWith(github.event.issue.title, '[compliance-x-profile]') ||
+      startsWith(github.event.issue.title, '[compliance-x-ai-reply]') ||
+      startsWith(github.event.issue.title, '[compliance-revoke-x-profile]') ||
+      startsWith(github.event.issue.title, '[compliance-revoke-x-ai-reply]')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to record compliance attestations."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Parse exact attestation command and require explicit confirmation
+        id: command
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const title = process.env.ISSUE_TITLE || '';
+          const match = title.match(/^\[(compliance-x-profile|compliance-x-ai-reply|compliance-revoke-x-profile|compliance-revoke-x-ai-reply)\]\s+([A-Za-z0-9_.-]{1,80})$/);
+          if (!match) throw new Error('Compliance Issue title is malformed.');
+          const command = match[1];
+          const account = match[2];
+          const revoke = command.startsWith('compliance-revoke-');
+          const kind = command.endsWith('x-profile') ? 'x-profile' : 'x-ai-reply';
+          if (!revoke) {
+            const marker = kind === 'x-profile'
+              ? 'I_CONFIRM_X_AUTOMATED_PROFILE_SETUP_COMPLETE=true'
+              : 'I_CONFIRM_X_AI_REPLY_WRITTEN_APPROVAL_RECEIVED=true';
+            const lines = String(process.env.ISSUE_BODY || '').split(/\r?\n/).map((line) => line.trim());
+            if (!lines.includes(marker)) throw new Error(`Explicit external-compliance attestation is required: ${marker}`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `account=${account}\nkind=${kind}\naction=${revoke ? 'revoke' : 'confirm'}\n`);
+          NODE
+
+      - name: Apply attestation in checkout
+        env:
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          KIND: ${{ steps.command.outputs.kind }}
+          ACTION: ${{ steps.command.outputs.action }}
+        shell: bash
+        run: |
+          args=(--account "$ACCOUNT" --kind "$KIND")
+          if [[ "$ACTION" == "confirm" ]]; then args+=(--confirm); else args+=(--revoke); fi
+          node src/ops/compliance-attestation.mjs "${args[@]}"
+
+      - name: Validate fail-closed repository state
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Persist attestation and any safety deactivation
+        shell: bash
+        env:
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          KIND: ${{ steps.command.outputs.kind }}
+          ACTION: ${{ steps.command.outputs.action }}
+        run: |
+          if [[ -z "$(git status --porcelain -- config/accounts.json config/engagement-policy.json)" ]]; then
+            echo "No compliance state change needed."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add config/accounts.json config/engagement-policy.json
+          git commit -m "ops: ${ACTION} ${KIND} compliance for ${ACCOUNT}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Close command issue on success
+        if: success()
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          KIND: ${{ steps.command.outputs.kind }}
+          ACTION: ${{ steps.command.outputs.action }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ SNS-AI recorded \`${ACTION}\` for \`${KIND}\` on \`${ACCOUNT}\`. This only records the owner's explicit attestation; it did not perform the external X action."
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
+
+      - name: Explain fail-closed rejection
+        if: failure()
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Compliance state was not persisted. Confirmation commands require the exact explicit attestation line and owner/admin authorization. No external X action is inferred or fabricated."
