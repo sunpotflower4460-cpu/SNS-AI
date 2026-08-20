@@ -1,8 +1,7 @@
 name: SNS Maintenance
 
 on:
-  schedule:
-    - cron: '23 18 * * 0'
+  # Manual-only safety posture: maintenance runs only when explicitly requested.
   workflow_dispatch:
 
 permissions:
