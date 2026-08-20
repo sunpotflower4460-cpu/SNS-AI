@@ -2,10 +2,21 @@ name: SNS Account Control
 
 on:
   workflow_dispatch:
+    inputs:
+      account:
+        description: Account ID from config/accounts.json
+        required: true
+        type: string
+      target:
+        description: Lifecycle target. Manual-Only blocks approval/auto until runtime policy is reviewed.
+        required: true
+        default: disabled
+        type: choice
+        options: [approval, auto, pause, disabled]
 
 permissions:
   contents: write
-  issues: write
+  issues: read
 
 concurrency:
   group: sns-ai-write
@@ -13,11 +24,6 @@ concurrency:
 
 jobs:
   control:
-    if: >
-      startsWith(github.event.issue.title, '[account-approval]') ||
-      startsWith(github.event.issue.title, '[account-auto]') ||
-      startsWith(github.event.issue.title, '[account-pause]') ||
-      startsWith(github.event.issue.title, '[account-disable]')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -34,6 +40,8 @@ jobs:
       CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
       CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
       CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_TARGET: ${{ inputs.target }}
 
     steps:
       - name: Authorize command actor
@@ -57,59 +65,32 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Parse exact lifecycle command
-        id: command
-        env:
-          ISSUE_TITLE: ${{ github.event.issue.title }}
+      - name: Validate lifecycle inputs
         shell: bash
         run: |
           node --input-type=module <<'NODE'
-          import { appendFileSync } from 'node:fs';
-          const title = process.env.ISSUE_TITLE || '';
-          const match = title.match(/^\[(account-approval|account-auto|account-pause|account-disable)\]\s+([A-Za-z0-9_.-]{1,80})$/);
-          if (!match) throw new Error('Use exactly: [account-approval|account-auto|account-pause|account-disable] ACCOUNT_ID');
-          const target = ({
-            'account-approval': 'approval',
-            'account-auto': 'auto',
-            'account-pause': 'pause',
-            'account-disable': 'disabled'
-          })[match[1]];
-          appendFileSync(process.env.GITHUB_OUTPUT, `account=${match[2]}\ntarget=${target}\n`);
+          const account = String(process.env.INPUT_ACCOUNT || '').trim();
+          const target = String(process.env.INPUT_TARGET || '').trim();
+          if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
+          if (!['approval', 'auto', 'pause', 'disabled'].includes(target)) throw new Error('Unsupported lifecycle target.');
           NODE
 
-      - name: Refuse auto promotion while any health incident is open
-        if: steps.command.outputs.target == 'auto'
-        shell: bash
-        run: |
-          count=$(gh issue list --repo "$REPO" --state open --limit 100 --json title --jq '[.[] | select(.title | startswith("[health]"))] | length')
-          if [[ "$count" != "0" ]]; then
-            echo "::error::Auto promotion is blocked while an open [health] incident exists."
-            exit 1
-          fi
-
       - name: Apply lifecycle transition in checkout
-        env:
-          ACCOUNT: ${{ steps.command.outputs.account }}
-          TARGET: ${{ steps.command.outputs.target }}
-        run: node src/ops/account-control.mjs --account "$ACCOUNT" --target "$TARGET"
+        run: node src/ops/account-control.mjs --account "$INPUT_ACCOUNT" --target "$INPUT_TARGET"
 
       - name: Static safety checks
         run: |
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
 
       - name: Live account preflight before enabling publishing
-        if: steps.command.outputs.target == 'approval' || steps.command.outputs.target == 'auto'
-        env:
-          ACCOUNT: ${{ steps.command.outputs.account }}
-        run: node src/ops/live-preflight.mjs --account "$ACCOUNT"
+        if: inputs.target == 'approval' || inputs.target == 'auto'
+        run: node src/ops/live-preflight.mjs --account "$INPUT_ACCOUNT"
 
       - name: Persist account lifecycle change
         shell: bash
-        env:
-          ACCOUNT: ${{ steps.command.outputs.account }}
-          TARGET: ${{ steps.command.outputs.target }}
         run: |
           if [[ -z "$(git status --porcelain -- config/accounts.json)" ]]; then
             echo "No account config change needed."
@@ -118,23 +99,13 @@ jobs:
           git config user.name "sns-ai-bot"
           git config user.email "sns-ai-bot@users.noreply.github.com"
           git add config/accounts.json
-          git commit -m "ops: set ${ACCOUNT} lifecycle to ${TARGET}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          git commit -m "ops: set ${INPUT_ACCOUNT} lifecycle to ${INPUT_TARGET}"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
 
-      - name: Close command issue on success
+      - name: Report result
         if: success()
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ACCOUNT: ${{ steps.command.outputs.account }}
-          TARGET: ${{ steps.command.outputs.target }}
-        run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ SNS-AI moved \`${ACCOUNT}\` to lifecycle state \`${TARGET}\` after the required safety gates."
-          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
-
-      - name: Explain fail-closed rejection
-        if: failure()
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Account lifecycle change was not persisted. SNS-AI failed closed. Check the Actions log for the missing preflight, profile-compliance, controlled-publish, metrics, or health prerequisite."
+        run: echo "SNS-AI account '$INPUT_ACCOUNT' lifecycle request '$INPUT_TARGET' completed after safety gates."
