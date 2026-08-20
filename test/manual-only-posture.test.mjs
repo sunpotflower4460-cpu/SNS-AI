@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const operationalWorkflows = [
   '.github/workflows/autopilot.yml',
+  '.github/workflows/engagement.yml',
   '.github/workflows/engagement-scheduled.yml',
   '.github/workflows/metrics.yml',
   '.github/workflows/learning.yml',
@@ -35,6 +36,7 @@ test('manual-only posture keeps every configured SNS account disabled', async ()
   assert.ok(entries.length > 0, 'expected at least one configured account');
   for (const [id, account] of entries) {
     assert.notEqual(account.enabled, true, `${id} must remain disabled in manual-only posture`);
+    assert.notEqual(account.mode, 'auto', `${id} must not remain in auto mode in manual-only posture`);
   }
 });
 
