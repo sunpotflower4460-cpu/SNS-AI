@@ -81,10 +81,6 @@ async function checkOpenAIModel(model) {
 
 const MEDIA_RELEASE_TAG = 'sns-ai-media';
 
-// Reading the hosting release proves the token can see it; it does NOT prove the token may create the
-// release or upload to uploads.github.com. Preflight deliberately does not create it - that is a real
-// mutation on a repository we are only inspecting - so the result is reported honestly instead of being
-// silently counted as proof. Only `private: true` blocks; unproven write is surfaced as a note.
 async function mediaReleaseProbe(token, repo) {
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(MEDIA_RELEASE_TAG)}`, {
@@ -127,10 +123,6 @@ async function repositoryHostingCheck(required) {
   }
 }
 
-// approval mode does `ensureApprovalLabel` (POST /labels on a 404) and then POST /issues - after a full
-// paid generation has already run. preflight.yml previously granted only `contents: write`, so this
-// whole channel was unverified and structurally unverifiable. Issues being disabled on the repository
-// produces the same silent dead end. Neither is a mutation to check, so preflight checks both.
 async function approvalChannelCheck(required) {
   if (!required) return { checked: false, ok: null, error: null };
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
@@ -232,15 +224,11 @@ async function durableStateBranchCheck() {
   }
 }
 
-export async function runLivePreflight({ accountFilter } = {}) {
+export async function runLivePreflight({ accountFilter, includeEngagement = false } = {}) {
   const accounts = await loadAccounts();
   const globalEngagementPolicy = await loadEngagementPolicy();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  // ok:false with nothing enabled. Preflight with no selected account touches neither OpenAI, nor the
-  // provider credentials, nor the sns-ai-state branch - so `ok: true` here meant "I proved nothing", and
-  // the checklist item "Live Preflight ready" passed before a single key was registered. The `state`
-  // still says nothing_enabled so the operator sees this is a not-yet rather than a failure.
   if (!selected.length) return { ok: false, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
@@ -271,12 +259,13 @@ export async function runLivePreflight({ accountFilter } = {}) {
       const accountEngagementPolicy = effectiveEngagementPolicy(globalEngagementPolicy, resolved);
       const engagementIsConfigured = engagementConfigured(globalEngagementPolicy, id, resolved);
       const engagementIsLive = engagementIsConfigured && liveEngagementAccount(accountEngagementPolicy, id);
+      const checkEngagementCredential = includeEngagement && engagementIsConfigured;
       let identity;
       let oauth2Identity = null;
       let engagementCredential = null;
       if (resolved.platform === 'x') {
         identity = await verifyXCredential(resolved.credential);
-        if (xUsesMedia(resolved) || engagementIsConfigured) {
+        if (xUsesMedia(resolved) || checkEngagementCredential) {
           oauth2Identity = await verifyXOAuth2Credential(resolved.credential);
           if (String(oauth2Identity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
         }
@@ -288,16 +277,11 @@ export async function runLivePreflight({ accountFilter } = {}) {
             if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
           }
         }
-        if (engagementIsConfigured) {
+        if (checkEngagementCredential) {
           engagementCredential = assertXEngagementCredential(oauth2Identity, accountEngagementPolicy);
         }
       } else if (resolved.platform === 'instagram') {
         identity = await verifyInstagramCredential({ credential: resolved.credential, apiVersion: resolved.apiVersion || 'v25.0' });
-        // A hard permission/OAuth error already throws inside verifyInstagramCredential. publishAccess.ok
-        // === false is the OTHER outcome: content_publishing_limit failed for a reason that could not be
-        // classified as a missing scope (rate limit, transient 5xx, etc). That must still block readiness
-        // - publishing capability was never actually proven - it just must not be misreported as a scope
-        // problem the operator can't fix by granting a permission they already have.
         if (identity.publishAccess?.ok === false) {
           throw new Error(`Instagram publish-access probe failed: ${identity.publishAccess.error || 'unknown error'}`);
         }
@@ -317,13 +301,14 @@ export async function runLivePreflight({ accountFilter } = {}) {
         mode: account.mode || 'pause',
         engagement: engagementIsConfigured ? {
           configured: true,
+          checked: Boolean(includeEngagement),
           live: engagementIsLive,
-          credentialReady: resolved.platform === 'x' ? engagementCredential?.ok === true : null,
-          requiredScopes: resolved.platform === 'x' ? requiredXEngagementScopes(accountEngagementPolicy) : [],
-          note: engagementIsLive
-            ? 'Inbound engagement is LIVE for this account.'
-            : 'Engagement credentials are checked before activation; liveAccounts remains the separate one-time send gate.'
-        } : { configured: false, live: false, credentialReady: null, requiredScopes: [] },
+          credentialReady: checkEngagementCredential && resolved.platform === 'x' ? engagementCredential?.ok === true : null,
+          requiredScopes: checkEngagementCredential && resolved.platform === 'x' ? requiredXEngagementScopes(accountEngagementPolicy) : [],
+          note: includeEngagement
+            ? (engagementIsLive ? 'Inbound engagement is LIVE for this account.' : 'Engagement credentials were checked for activation/readiness.')
+            : 'Engagement checks are intentionally deferred during publish-only preflight; run with --engagement before activating inbound automation.'
+        } : { configured: false, checked: false, live: false, credentialReady: null, requiredScopes: [] },
         openaiModels: ownModels.map((model) => modelChecks.find((check) => check.model === model)).filter(Boolean),
         builtInMedia: kind ? {
           configured: true,
@@ -343,6 +328,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
+    mode: includeEngagement ? 'publish+engagement' : 'publish',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError && !modelFailure : null, error: openaiError, models: modelChecks },
     mediaHosting,
     approvalChannel,
@@ -354,7 +340,7 @@ export async function runLivePreflight({ accountFilter } = {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = parseArgs(process.argv.slice(2));
   try {
-    const report = await runLivePreflight({ accountFilter: args.account || undefined });
+    const report = await runLivePreflight({ accountFilter: args.account || undefined, includeEngagement: args.engagement === true });
     console.log(JSON.stringify(report, null, 2));
     if (!report.ok) process.exitCode = 1;
   } catch (error) {

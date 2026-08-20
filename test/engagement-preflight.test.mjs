@@ -99,6 +99,7 @@ async function withPreflightFixture(task, {
 
 function installFetchMock({ tokenScopes }) {
   let postAttempted = false;
+  let oauth2Attempted = false;
   globalThis.fetch = async (url, options = {}) => {
     const target = String(url);
     const method = String(options.method || 'GET').toUpperCase();
@@ -109,6 +110,7 @@ function installFetchMock({ tokenScopes }) {
       return response({ id: 'gpt-5', owned_by: 'openai' });
     }
     if (target === 'https://api.x.com/2/oauth2/token' && method === 'POST') {
+      oauth2Attempted = true;
       return response({
         access_token: 'refreshed-access-token',
         refresh_token: 'rotated-refresh-token',
@@ -134,32 +136,55 @@ function installFetchMock({ tokenScopes }) {
     }
     throw new Error(`Unexpected mocked URL: ${method} ${target}`);
   };
-  return () => postAttempted;
+  return { wasPostAttempted: () => postAttempted, wasOauth2Attempted: () => oauth2Attempted };
 }
 
-test('Live Preflight proves X engagement scopes before liveAccounts activation without sending anything', async () => {
+test('publish-only Live Preflight does not require dormant engagement OAuth2', async () => {
   await withPreflightFixture(async () => {
-    const scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access';
-    const wasPostAttempted = installFetchMock({ tokenScopes: scopes });
+    const scopes = 'tweet.read tweet.write users.read dm.read offline.access';
+    const calls = installFetchMock({ tokenScopes: scopes });
     const report = await runLivePreflight({ accountFilter: 'music-tools-x' });
 
     assert.equal(report.ok, true, JSON.stringify(report));
-    assert.equal(report.state, 'ready');
+    assert.equal(report.mode, 'publish');
     assert.equal(report.accounts[0].engagement.configured, true);
+    assert.equal(report.accounts[0].engagement.checked, false);
+    assert.equal(report.accounts[0].engagement.credentialReady, null);
+    assert.deepEqual(report.accounts[0].engagement.requiredScopes, []);
+    assert.equal(calls.wasOauth2Attempted(), false);
+    assert.equal(calls.wasPostAttempted(), false);
+  }, {
+    scopes: 'tweet.read tweet.write users.read dm.read offline.access',
+    stateId: 'publish-preflight-no-engagement-oauth'
+  });
+});
+
+test('engagement Live Preflight proves X engagement scopes before liveAccounts activation without sending anything', async () => {
+  await withPreflightFixture(async () => {
+    const scopes = 'tweet.read tweet.write users.read dm.read dm.write offline.access';
+    const calls = installFetchMock({ tokenScopes: scopes });
+    const report = await runLivePreflight({ accountFilter: 'music-tools-x', includeEngagement: true });
+
+    assert.equal(report.ok, true, JSON.stringify(report));
+    assert.equal(report.state, 'ready');
+    assert.equal(report.mode, 'publish+engagement');
+    assert.equal(report.accounts[0].engagement.configured, true);
+    assert.equal(report.accounts[0].engagement.checked, true);
     assert.equal(report.accounts[0].engagement.live, false);
     assert.equal(report.accounts[0].engagement.credentialReady, true);
     assert.deepEqual(new Set(report.accounts[0].engagement.requiredScopes), new Set([
       'tweet.read', 'tweet.write', 'users.read', 'dm.read', 'dm.write', 'offline.access'
     ]));
-    assert.equal(wasPostAttempted(), false);
+    assert.equal(calls.wasOauth2Attempted(), true);
+    assert.equal(calls.wasPostAttempted(), false);
   }, { stateId: 'engagement-preflight-full' });
 });
 
-test('Live Preflight blocks activation when X engagement OAuth is missing a required DM scope', async () => {
+test('engagement Live Preflight blocks activation when X engagement OAuth is missing a required DM scope', async () => {
   await withPreflightFixture(async () => {
     const scopes = 'tweet.read tweet.write users.read dm.read offline.access';
     installFetchMock({ tokenScopes: scopes });
-    const report = await runLivePreflight({ accountFilter: 'music-tools-x' });
+    const report = await runLivePreflight({ accountFilter: 'music-tools-x', includeEngagement: true });
 
     assert.equal(report.ok, false);
     assert.equal(report.state, 'blocked');
