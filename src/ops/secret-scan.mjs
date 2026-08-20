@@ -1,7 +1,10 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const execFileAsync = promisify(execFile);
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const ROOTS = ['src', 'test', 'config', 'data', '.github', 'docs', 'README.md', 'package.json'];
 const SKIP = new Set(['node_modules', '.git']);
@@ -33,6 +36,33 @@ function redact(match) {
   return `${match.slice(0, 4)}…${match.slice(-4)}`;
 }
 
+function scanText(text, file) {
+  const findings = [];
+  for (const [name, pattern] of PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      const prefix = text.slice(0, match.index).split('\n');
+      findings.push({ file, line: prefix.length, type: name, sample: redact(match[0]) });
+    }
+  }
+  return findings;
+}
+
+async function scanAvailableGitHistory() {
+  if (process.env.SNS_SECRET_SCAN_HISTORY === 'false') return [];
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['log', '--all', '-p', '--no-color', '--no-ext-diff', '--', ...ROOTS],
+      { cwd: ROOT, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }
+    );
+    return scanText(stdout, 'git-history').map((finding) => ({ ...finding, historical: true }));
+  } catch (error) {
+    if (error?.code === 'ENOENT' || /not a git repository/i.test(String(error?.stderr || error?.message || ''))) return [];
+    throw new Error(`Historical secret scan could not complete: ${String(error?.message || error).slice(0, 240)}`);
+  }
+}
+
 export async function scanSecrets() {
   const files = [];
   for (const root of ROOTS) {
@@ -43,14 +73,9 @@ export async function scanSecrets() {
   for (const path of files) {
     let text;
     try { text = await readFile(path, 'utf8'); } catch { continue; }
-    for (const [name, pattern] of PATTERNS) {
-      pattern.lastIndex = 0;
-      for (const match of text.matchAll(pattern)) {
-        const prefix = text.slice(0, match.index).split('\n');
-        findings.push({ file: relative(ROOT, path), line: prefix.length, type: name, sample: redact(match[0]) });
-      }
-    }
+    findings.push(...scanText(text, relative(ROOT, path)));
   }
+  findings.push(...await scanAvailableGitHistory());
   return findings;
 }
 
