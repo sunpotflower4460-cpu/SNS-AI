@@ -82,9 +82,9 @@ export function strongMatches(claim, candidates = []) {
   });
 }
 
-async function xCandidates(account, claim) {
+async function xCandidates(account, claim, { fetch = fetchJson } = {}) {
   const identityUrl = 'https://api.x.com/2/users/me?user.fields=id,name,username';
-  const identity = await fetchJson(identityUrl, {
+  const identity = await fetch(identityUrl, {
     method: 'GET',
     headers: { Authorization: oauth1Header('GET', identityUrl, account.credential) }
   });
@@ -98,7 +98,7 @@ async function xCandidates(account, claim) {
   url.searchParams.set('start_time', new Date(window.start).toISOString());
   url.searchParams.set('end_time', new Date(window.end).toISOString());
   const target = url.toString();
-  const body = await fetchJson(target, {
+  const body = await fetch(target, {
     method: 'GET',
     headers: { Authorization: oauth1Header('GET', target, account.credential) }
   });
@@ -110,14 +110,14 @@ async function xCandidates(account, claim) {
   }));
 }
 
-async function instagramCandidates(account) {
+async function instagramCandidates(account, { fetch = fetchJson } = {}) {
   const apiVersion = account.apiVersion || 'v25.0';
   const credential = account.credential || {};
   if (!credential.igUserId || !credential.accessToken) throw new Error('Instagram read-back requires igUserId and accessToken.');
   const url = new URL(`https://graph.instagram.com/${apiVersion}/${encodeURIComponent(credential.igUserId)}/media`);
   url.searchParams.set('fields', 'id,caption,media_type,timestamp,permalink');
   url.searchParams.set('limit', '100');
-  const body = await fetchJson(url.toString(), {
+  const body = await fetch(url.toString(), {
     method: 'GET',
     headers: { Authorization: `Bearer ${credential.accessToken}` }
   });
@@ -130,19 +130,26 @@ async function instagramCandidates(account) {
   }));
 }
 
-async function providerCandidates(account, claim) {
-  if (account.platform === 'x') return xCandidates(account, claim);
-  if (account.platform === 'instagram') return instagramCandidates(account, claim);
+async function providerCandidates(account, claim, deps = {}) {
+  if (account.platform === 'x') return xCandidates(account, claim, deps);
+  if (account.platform === 'instagram') return instagramCandidates(account, deps);
   return [];
 }
 
-async function persistLocalConfirmation(claim, candidate) {
+async function persistLocalConfirmation(claim, candidate, deps = {}) {
   const providerPostId = String(candidate.id || '');
   if (!providerPostId) throw new Error('Provider read-back candidate has no id.');
-  const history = await readHistory();
+  const readHistoryFn = deps.readHistory || readHistory;
+  const appendHistoryFn = deps.appendHistory || appendHistory;
+  const getSlotFn = deps.getSlot || getSlot;
+  const markSlotFn = deps.markSlot || markSlot;
+  const readAuditFn = deps.readAudit || readAudit;
+  const appendAuditFn = deps.appendAudit || appendAudit;
+
+  const history = await readHistoryFn();
   const existingHistory = history.find((row) => row.slotId === claim.slotId && row.status === 'published');
   if (!existingHistory) {
-    await appendHistory({
+    await appendHistoryFn({
       at: candidate.createdAt || new Date().toISOString(),
       account: claim.account,
       platform: claim.platform,
@@ -156,9 +163,9 @@ async function persistLocalConfirmation(claim, candidate) {
       reconciledFromDurableClaim: true
     });
   }
-  const slot = await getSlot(claim.slotId);
+  const slot = await getSlotFn(claim.slotId);
   if (slot?.status !== 'published') {
-    await markSlot(claim.slotId, 'published', {
+    await markSlotFn(claim.slotId, 'published', {
       account: claim.account,
       platform: claim.platform,
       providerPostId,
@@ -166,9 +173,9 @@ async function persistLocalConfirmation(claim, candidate) {
       reconciledFromDurableClaim: true
     });
   }
-  const audit = await readAudit();
+  const audit = await readAuditFn();
   if (!audit.some((row) => row.event === 'publish_provider_readback_confirmed' && row.slotId === claim.slotId)) {
-    await appendAudit({
+    await appendAuditFn({
       event: 'publish_provider_readback_confirmed',
       account: claim.account,
       platform: claim.platform,
@@ -273,4 +280,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-export const __test = { oauth1Header, expandXUrls, cleanText, claimWindow, candidateTime, parseArgs };
+export const __test = {
+  oauth1Header,
+  expandXUrls,
+  cleanText,
+  claimWindow,
+  candidateTime,
+  parseArgs,
+  xCandidates,
+  instagramCandidates,
+  providerCandidates,
+  persistLocalConfirmation
+};
