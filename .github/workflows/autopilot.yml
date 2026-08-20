@@ -1,8 +1,7 @@
 name: SNS Autopilot
 
 on:
-  schedule:
-    - cron: '3,13,23,33,43,53 * * * *'
+  # Manual-only safety posture: no scheduled generation or publishing.
   workflow_dispatch:
     inputs:
       account:
@@ -73,8 +72,8 @@ jobs:
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           if [[ "${INPUT_FORCE:-false}" == "true" ]]; then args+=(--force); fi
 
-          # Scheduled runs are live. Manual workflow runs default to dry-run=true.
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-true}" == "true" ]]; then
+          # Manual workflow runs default to dry-run=true. A live run requires an explicit dry_run=false choice.
+          if [[ "${INPUT_DRY_RUN:-true}" == "true" ]]; then
             args+=(--dry-run)
           fi
 
