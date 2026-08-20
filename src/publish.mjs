@@ -24,6 +24,10 @@ async function ensurePublishedHubClaim({slotId,claim,requirement,postId,publishe
   for(let attempt=1;attempt<=attempts;attempt+=1){try{return await writeClaim(slotId,'published',detail)}catch(error){last=error;if(attempt<attempts)await sleepImpl(attempt*250)}}
   throw last;
 }
+async function markHubBacklinkSynced({slotId,claim,requirement,hubSync},{writeClaim=writeDurableClaim,now=()=>new Date()}={}){
+  const syncedAt=now().toISOString();
+  return writeClaim(slotId,'published',{hub:requirement,providerPostId:claim?.providerPostId||null,publishedAt:claim?.publishedAt||null,hubBacklinkSyncedAt:syncedAt,hubBacklinkUrl:hubSync?.url||null});
+}
 
 export async function publish(payload,{
   core=corePublish,
@@ -35,7 +39,8 @@ export async function publish(payload,{
   audit=appendAudit,
   sleepImpl=sleep,
   prepare=prepareHubPublish,
-  validateProduct=validateHubProductContract
+  validateProduct=validateHubProductContract,
+  now=()=>new Date()
 }={}){
   const dryRun=boolValue(payload?.dryRun),slotId=payload?.slotId||null;
   const explicitHub=payload?.hub?.required===true,hasHubProduct=Boolean(payload?.hubProduct);
@@ -68,7 +73,7 @@ export async function publish(payload,{
   let finalClaim=(await getClaim(slotId,{fresh:true}))||claim;
   const account=await resolve(payload.account);
   const postId=result?.postId||finalClaim?.providerPostId||null;
-  const publishedAt=finalClaim?.publishedAt||claim?.publishedAt||new Date().toISOString();
+  const publishedAt=finalClaim?.publishedAt||claim?.publishedAt||now().toISOString();
   try{
     finalClaim=await ensurePublishedHubClaim({slotId,claim:finalClaim,requirement,postId,publishedAt,payload:effectivePayload,account},{writeClaim,sleepImpl});
   }catch(error){
@@ -86,12 +91,19 @@ export async function publish(payload,{
     throw pending;
   }
 
-  await audit({account:payload.account,stage:'hub-backlink-synced',slotId,platform:account.platform,providerPostId:postId,hubProductId:requirement.productId,hubChanged:Boolean(hubSync?.sync?.changed)}).catch(()=>{});
-  return {...result,hub:{productId:requirement.productId,synced:true,changed:Boolean(hubSync?.sync?.changed)}};
+  let markerPersisted=true;
+  try{
+    finalClaim=await markHubBacklinkSynced({slotId,claim:finalClaim,requirement,hubSync},{writeClaim,now});
+  }catch(error){
+    markerPersisted=false;
+    await audit({account:payload.account,stage:'hub-backlink-marker-pending',slotId,platform:account.platform,providerPostId:postId,hubProductId:requirement.productId,error:String(error?.message||error).slice(0,500)}).catch(()=>{});
+  }
+  await audit({account:payload.account,stage:'hub-backlink-synced',slotId,platform:account.platform,providerPostId:postId,hubProductId:requirement.productId,hubChanged:Boolean(hubSync?.sync?.changed),markerPersisted}).catch(()=>{});
+  return {...result,hub:{productId:requirement.productId,synced:true,changed:Boolean(hubSync?.sync?.changed),markerPersisted}};
 }
 
 if(import.meta.url===`file://${process.argv[1]}`){
   try{const payload=await loadPayload(parseArgs(process.argv.slice(2)));const result=await publish(payload);console.log(JSON.stringify({ok:true,account:payload.account,result},null,2))}
   catch(error){console.error(JSON.stringify({ok:false,error:error.message,status:error.status,code:error.code,bookkeepingWarnings:error.bookkeepingWarnings||[]},null,2));process.exitCode=1}
 }
-export const __test={...coreTest,boolValue,parseArgs,pendingError,durablePendingError,syncWithRetry,withoutHubProduct,claimHasRequirement,ensurePublishedHubClaim};
+export const __test={...coreTest,boolValue,parseArgs,pendingError,durablePendingError,syncWithRetry,withoutHubProduct,claimHasRequirement,ensurePublishedHubClaim,markHubBacklinkSynced};
