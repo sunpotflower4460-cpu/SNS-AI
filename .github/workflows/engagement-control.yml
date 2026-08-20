@@ -83,7 +83,7 @@ jobs:
           set -o pipefail
           account='${{ steps.command.outputs.account }}'
           npm run doctor -- --strict --account "$account"
-          node src/ops/live-preflight.mjs --account "$account"
+          node src/ops/live-preflight.mjs --account "$account" --engagement
           node src/ops/x-automation-compliance.mjs --account "$account"
 
       - name: Apply activation
