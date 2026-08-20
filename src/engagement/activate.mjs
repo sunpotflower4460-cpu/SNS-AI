@@ -56,8 +56,16 @@ export function patchEngagementActivation({ accountsConfig, policy, accountId, a
   return { accountsConfig: nextAccounts, policy: nextPolicy };
 }
 
-export async function setEngagementActivation({ accountId, active }) {
-  const resolvedAccounts = await loadAccounts();
+export async function setEngagementActivation({
+  accountId,
+  active,
+  loadResolvedAccounts = loadAccounts,
+  read = readJson,
+  write = writeJsonAtomic,
+  accountsFile = ACCOUNTS_FILE,
+  policyFile = POLICY_FILE
+}) {
+  const resolvedAccounts = await loadResolvedAccounts();
   const resolved = resolvedAccounts[accountId];
   if (!resolved) throw new Error(`Unknown account "${accountId}".`);
   if (active && (resolved.enabled !== true || resolved.mode === 'pause')) {
@@ -65,15 +73,15 @@ export async function setEngagementActivation({ accountId, active }) {
   }
 
   const [accountsConfig, policy] = await Promise.all([
-    readJson(ACCOUNTS_FILE),
-    readJson(POLICY_FILE)
+    read(accountsFile),
+    read(policyFile)
   ]);
   const patched = patchEngagementActivation({ accountsConfig, policy, accountId, active });
 
   // Both writes happen only in the ephemeral workflow checkout. They are committed together later by
   // the control workflow, so a runner failure cannot persist a one-file half-activation to the repo.
-  await writeJsonAtomic(ACCOUNTS_FILE, patched.accountsConfig);
-  await writeJsonAtomic(POLICY_FILE, patched.policy);
+  await write(accountsFile, patched.accountsConfig);
+  await write(policyFile, patched.policy);
   return {
     account: accountId,
     active,
@@ -92,4 +100,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-export const __test = { ACCOUNT_ID_RE, unique };
+export const __test = { ACCOUNT_ID_RE, unique, parseArgs, ACCOUNTS_FILE, POLICY_FILE };
