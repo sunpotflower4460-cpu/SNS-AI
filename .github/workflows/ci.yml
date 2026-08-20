@@ -21,6 +21,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+      - name: Focused test - Manual-Only policy
+        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/manual-only-policy.test.mjs
+      - name: Focused test - Account lifecycle control
+        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
+      - name: Focused test - Compliance attestation control
+        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
+      - name: Focused test - Engagement autonomous control
+        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
       - name: Unit and integration tests
         run: npm test
       - name: Strict configuration validation
