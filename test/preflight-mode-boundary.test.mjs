@@ -14,8 +14,9 @@ test('routine publish preflight defers engagement OAuth and AI-reply approval wh
   const engagementControl = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   const manualPreflight = await readFile(`${ROOT}.github/workflows/preflight.yml`, 'utf8');
 
-  assert.match(chatops, /live-preflight\.mjs --account "\$\{\{ steps\.command\.outputs\.account \}\}"/);
-  assert.doesNotMatch(chatops, /live-preflight\.mjs --account "\$\{\{ steps\.command\.outputs\.account \}\}" --engagement/);
+  assert.match(chatops, /INPUT_ACCOUNT: \$\{\{ inputs\.account \}\}/);
+  assert.match(chatops, /live-preflight\.mjs --account "\$INPUT_ACCOUNT"/);
+  assert.doesNotMatch(chatops, /live-preflight\.mjs --account "\$INPUT_ACCOUNT" --engagement/);
   assert.match(chatops, executable('src/ops/x-posting-compliance.mjs'));
   assert.doesNotMatch(chatops, executable('src/ops/x-automation-compliance.mjs'));
 
