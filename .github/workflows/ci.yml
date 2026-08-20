@@ -22,28 +22,28 @@ jobs:
         with:
           node-version: '22'
       - name: Focused test - Manual-Only policy
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/manual-only-policy.test.mjs
+        run: node --test --test-concurrency=1 test/manual-only-policy.test.mjs
       - name: Focused test - Account lifecycle control
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
+        run: node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
       - name: Focused test - Compliance attestation control
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
+        run: node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
       - name: Focused test - Engagement autonomous control
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
+        run: node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
       - name: Diagnostic test group A-D
         continue-on-error: true
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/a*.test.mjs test/b*.test.mjs test/c*.test.mjs test/d*.test.mjs
+        run: node --test --test-concurrency=1 test/a*.test.mjs test/b*.test.mjs test/c*.test.mjs test/d*.test.mjs
       - name: Diagnostic test group E-G
         continue-on-error: true
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/e*.test.mjs test/f*.test.mjs test/g*.test.mjs
+        run: node --test --test-concurrency=1 test/e*.test.mjs test/f*.test.mjs test/g*.test.mjs
       - name: Diagnostic test group I-M
         continue-on-error: true
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/i*.test.mjs test/m*.test.mjs
+        run: node --test --test-concurrency=1 test/i*.test.mjs test/m*.test.mjs
       - name: Diagnostic test group O-R
         continue-on-error: true
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/o*.test.mjs test/p*.test.mjs test/r*.test.mjs
+        run: node --test --test-concurrency=1 test/o*.test.mjs test/p*.test.mjs test/r*.test.mjs
       - name: Diagnostic test group S-X
         continue-on-error: true
-        run: SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 test/s*.test.mjs test/t*.test.mjs test/w*.test.mjs test/x*.test.mjs
+        run: node --test --test-concurrency=1 test/s*.test.mjs test/t*.test.mjs test/w*.test.mjs test/x*.test.mjs
       - name: Unit and integration tests
         run: npm test
       - name: Strict configuration validation
