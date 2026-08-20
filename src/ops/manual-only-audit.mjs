@@ -36,7 +36,11 @@ export async function auditManualOnly(root = ROOT) {
   for (const key of ['allowAutomaticAccountActivation', 'allowAutomaticEngagement', 'allowScheduledProviderPolling']) if (runtime[key] !== false) errors.push(`${key} must be false`);
 
   const accounts = JSON.parse(await readFile(join(root, 'config/accounts.json'), 'utf8'));
-  for (const [id, account] of Object.entries(accounts.accounts || {})) if (account.enabled !== false) errors.push(`account ${id} must be disabled`);
+  for (const [id, account] of Object.entries(accounts.accounts || {})) {
+    if (account.mode === 'auto') errors.push(`account ${id} must not use auto mode while Manual-Only is active`);
+    if (account.enabled === true && account.mode !== 'approval') errors.push(`enabled account ${id} must remain in approval mode while Manual-Only is active`);
+  }
+
   const engagement = JSON.parse(await readFile(join(root, 'config/engagement-policy.json'), 'utf8'));
   if (engagement.enabled !== false || engagement.autoReply !== false || engagement.autoDmReply !== false || engagement.approvalRequired !== true) errors.push('engagement must be disabled, non-automatic, and approval-required');
   if (!Array.isArray(engagement.liveAccounts) || engagement.liveAccounts.length) errors.push('engagement liveAccounts must be []');
@@ -50,6 +54,7 @@ export async function auditManualOnly(root = ROOT) {
     if (OPERATIONAL_WORKFLOWS.has(name)) {
       if (triggers.length !== 1 || triggers[0] !== 'workflow_dispatch') errors.push(`${name} operational trigger must be workflow_dispatch only (found: ${triggers.join(', ') || 'none'})`);
       if (/^\s*(?:schedule|cron|push|pull_request|workflow_run|repository_dispatch|workflow_call|issues|issue_comment|pull_request_target):/m.test(onBlock)) errors.push(`${name} contains an unattended trigger`);
+      if (/github\.event\.issue\b|github\.event\.pull_request\b/.test(yaml)) errors.push(`${name} still depends on an event payload that workflow_dispatch cannot provide`);
       continue;
     }
 
