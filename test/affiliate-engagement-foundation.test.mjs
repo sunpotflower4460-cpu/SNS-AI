@@ -83,35 +83,33 @@ test('global engagement policy enables only an explicit allowlist and remains in
   //                       and Instagram DMs need Meta App Review, so this cannot be flipped on alone.
   //   replyScope        - replies stay inside threads rooted at our own posts; no cold outreach.
   const globalPolicy = await loadEngagementPolicy();
-  assert.equal(globalPolicy.enabled, true);
+  assert.equal(globalPolicy.enabled, false);
   assert.deepEqual(globalPolicy.allowedAccounts, ['music-tools-x']);
   assert.equal(globalPolicy.inboundOnly, true);
-  assert.equal(globalPolicy.autoReply, true);
+  assert.equal(globalPolicy.autoReply, false);
   assert.equal(globalPolicy.autoDmReply, false, 'DM automation is deliberately out of scope for launch');
   assert.equal(globalPolicy.approvalRequired, true, 'every reply must pass through a human before sending');
   assert.equal(globalPolicy.replyScope, 'own-posts', 'automated replies must not reach cold mentions');
   assert.equal(globalPolicy.maxAutomatedDmRepliesPerDay, 0, 'the DM cap must not permit sends while DM is off');
 
-  const allowed = assertAutomatedEngagementAllowed({
+  assert.throws(() => assertAutomatedEngagementAllowed({
     account: { id: 'music-tools-x' },
     globalPolicy,
     event: { kind: 'reply', inbound: true }
-  });
-  assert.equal(allowed.allowed, true);
-  assert.equal(allowed.approvalRequired, true);
+  }), { code: 'ENGAGEMENT_DISABLED' });
   assert.throws(() => assertAutomatedEngagementAllowed({
     account: { id: 'some-other-account' },
     globalPolicy,
     event: { kind: 'reply', inbound: true }
-  }), { code: 'ENGAGEMENT_ACCOUNT_NOT_ALLOWED' });
+  }), { code: 'ENGAGEMENT_DISABLED' });
   assert.throws(() => assertAutomatedEngagementAllowed({
     account: { id: 'music-tools-x' },
     globalPolicy,
     event: { kind: 'dm', inbound: true }
-  }), { code: 'ENGAGEMENT_DM_DISABLED' }, 'an inbound DM must be refused while DM automation is off');
+  }), { code: 'ENGAGEMENT_DISABLED' }, 'all engagement must be refused while Manual-Only engagement is off');
 
   const effective = effectiveEngagementPolicy(globalPolicy, { engagement: { autoReply: false } });
-  assert.equal(effective.enabled, true);
+  assert.equal(effective.enabled, false);
   assert.equal(effective.autoReply, false);
   assert.equal(effective.autoDmReply, false);
   assert.equal(effective.inboundOnly, true);

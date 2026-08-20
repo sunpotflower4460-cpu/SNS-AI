@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "manualOnly": true,
+  "requireExplicitManualInvocation": true,
+  "allowAutomaticAccountActivation": false,
+  "allowAutomaticEngagement": false,
+  "allowScheduledProviderPolling": false
+}

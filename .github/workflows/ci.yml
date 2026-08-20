@@ -28,6 +28,7 @@ jobs:
           npm run check
           npm run smoke
           npm run secret-scan
+          npm run manual-only-audit
       - name: Source coverage audit
         run: npm run coverage
       - name: Parse every workflow YAML

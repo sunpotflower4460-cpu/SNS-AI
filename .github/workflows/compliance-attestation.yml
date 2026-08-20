@@ -1,8 +1,7 @@
 name: SNS Compliance Attestation
 
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 permissions:
   contents: write

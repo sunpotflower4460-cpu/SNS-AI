@@ -2,6 +2,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 import { readHistory } from '../lib/history.mjs';
 import { readMetricSnapshots } from '../analytics/store.mjs';
+import { assertLifecycleTransitionAllowed, loadRuntimePolicy } from './manual-only.mjs';
 
 const ACCOUNTS_FILE = fileURLToPath(new URL('../../config/accounts.json', import.meta.url));
 const ENGAGEMENT_POLICY_FILE = fileURLToPath(new URL('../../config/engagement-policy.json', import.meta.url));
@@ -64,11 +65,12 @@ export function autoPromotionEvidence({ accountId, account, history = [], metric
   };
 }
 
-export function patchAccountLifecycle({ accountsConfig, policy = {}, accountId, target, history = [], metrics = [] }) {
+export function patchAccountLifecycle({ accountsConfig, policy = {}, runtimePolicy = {}, accountId, target, history = [], metrics = [] }) {
   if (!ACCOUNT_ID_RE.test(String(accountId || ''))) throw controlError('ACCOUNT_ID_INVALID', 'A valid account id is required.');
   if (!TARGETS.has(String(target || ''))) throw controlError('ACCOUNT_TARGET_INVALID', `Unsupported account lifecycle target "${target}".`);
   const current = accountsConfig?.accounts?.[accountId];
   if (!current) throw controlError('ACCOUNT_UNKNOWN', `Unknown account "${accountId}".`);
+  assertLifecycleTransitionAllowed(runtimePolicy, target);
 
   if (target === 'approval' || target === 'auto') assertPostingProfileCompliance({ accountId, account: current, policy });
   let evidence = null;
@@ -92,13 +94,14 @@ export function patchAccountLifecycle({ accountsConfig, policy = {}, accountId, 
 }
 
 export async function setAccountLifecycle({ accountId, target }) {
-  const [accountsConfig, policy, history, metrics] = await Promise.all([
+  const [accountsConfig, policy, runtimePolicy, history, metrics] = await Promise.all([
     readJson(ACCOUNTS_FILE),
     readJson(ENGAGEMENT_POLICY_FILE, {}),
+    loadRuntimePolicy(),
     readHistory(),
     readMetricSnapshots()
   ]);
-  const patched = patchAccountLifecycle({ accountsConfig, policy, accountId, target, history, metrics });
+  const patched = patchAccountLifecycle({ accountsConfig, policy, runtimePolicy, accountId, target, history, metrics });
   await writeJsonAtomic(ACCOUNTS_FILE, patched.accountsConfig);
   return {
     account: accountId,

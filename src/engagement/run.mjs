@@ -49,6 +49,7 @@ import {
   markEngagementSent,
   reserveInboundFetch
 } from './store.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 
 function parseArgs(argv) {
   const out = {};
@@ -648,7 +649,9 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
   return { status: 'sent', eventKey: key, result: delivery.result, recoveredFromDeliveryLedger: recovered };
 }
 
-export async function runEngagement({ accountFilter = null, dryRun = false } = {}) {
+export async function runEngagement({ accountFilter = null, dryRun = false, manualInvocation = false } = {}) {
+  const runtimePolicy = await loadRuntimePolicy();
+  assertProviderMutationAllowed(runtimePolicy, { dryRun, source: 'manual' });
   const globalPolicy = await loadEngagementPolicy();
   if (globalPolicy.enabled !== true) return { state: 'disabled', accounts: [] };
   const accounts = await loadAccounts();
@@ -702,7 +705,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       dryRun: bool(payload.dryRun)
     });
   } else {
-    result = await runEngagement({ accountFilter: args.account || null, dryRun: bool(args['dry-run']) });
+    result = await runEngagement({ accountFilter: args.account || null, dryRun: bool(args['dry-run']), manualInvocation: bool(args['manual-invocation']) });
   }
   console.log(JSON.stringify(result, null, 2));
   if (result.state === 'degraded' || result.accounts?.some((row) => ['error', 'degraded', 'waiting_for_engagement_credentials'].includes(row.state))) process.exitCode = 1;

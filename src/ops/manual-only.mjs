@@ -1,0 +1,31 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+export const RUNTIME_POLICY_FILE = fileURLToPath(new URL('../../config/runtime-policy.json', import.meta.url));
+const MANUAL_INVOCATION_BOUNDARY = process.env.SNS_MANUAL_INVOCATION === 'true';
+
+export async function loadRuntimePolicy(path = RUNTIME_POLICY_FILE) {
+  const policy = JSON.parse(await readFile(path, 'utf8'));
+  if (policy?.schemaVersion !== 1 || typeof policy.manualOnly !== 'boolean') throw new Error('Runtime policy is missing schemaVersion:1 or boolean manualOnly.');
+  return policy;
+}
+
+export function manualOnlyError(operation) {
+  const error = new Error(`Manual-Only policy blocks ${operation}. Change config/runtime-policy.json through code review before enabling automation.`);
+  error.code = 'MANUAL_ONLY_BLOCKED';
+  return error;
+}
+
+export function assertLifecycleTransitionAllowed(policy, target) {
+  if (policy?.manualOnly === true && ['approval', 'auto'].includes(String(target))) throw manualOnlyError(`account transition to ${target}`);
+}
+
+export function assertEngagementActivationAllowed(policy, active) {
+  if (policy?.manualOnly === true && active === true) throw manualOnlyError('engagement activation');
+}
+
+export function assertProviderMutationAllowed(policy, { dryRun = false, source } = {}) {
+  if (dryRun || policy?.manualOnly !== true) return true;
+  if (policy.requireExplicitManualInvocation === true && !MANUAL_INVOCATION_BOUNDARY) throw manualOnlyError(`an unattended provider mutation (source: ${source || 'unknown'})`);
+  return true;
+}

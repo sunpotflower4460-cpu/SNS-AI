@@ -1,8 +1,7 @@
 name: SNS Account Control
 
 on:
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 permissions:
   contents: write

@@ -26,8 +26,6 @@ on:
         required: false
         default: true
         type: boolean
-  issues:
-    types: [opened, labeled]
 
 permissions:
   contents: write
@@ -39,14 +37,9 @@ concurrency:
 
 jobs:
   publish:
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'opened' && startsWith(github.event.issue.title, '[publish]')) ||
-      (github.event.action == 'labeled' &&
-       startsWith(github.event.issue.title, '[approval]') &&
-       github.event.label.name == 'approved')
     runs-on: ubuntu-latest
     env:
+      SNS_MANUAL_INVOCATION: 'true'
       SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
       X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GH_TOKEN: ${{ github.token }}
@@ -120,6 +113,7 @@ jobs:
               mediaType: process.env.INPUT_MEDIA_TYPE || 'image',
               dryRun: String(process.env.INPUT_DRY_RUN).toLowerCase() === 'true',
               source: 'manual',
+              manualInvocation: true,
               slotId: `${process.env.INPUT_ACCOUNT}:workflow:${process.env.RUN_ID}`
             };
           }

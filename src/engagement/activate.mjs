@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { loadAccounts } from '../lib/config.mjs';
 import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
 import { validateEngagementPolicy } from './policy.mjs';
+import { assertEngagementActivationAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 
 const ACCOUNTS_FILE = fileURLToPath(new URL('../../config/accounts.json', import.meta.url));
 const POLICY_FILE = fileURLToPath(new URL('../../config/engagement-policy.json', import.meta.url));
@@ -24,9 +25,10 @@ function unique(values = []) {
   return [...new Set(values.map(String))];
 }
 
-export function patchEngagementActivation({ accountsConfig, policy, accountId, active }) {
+export function patchEngagementActivation({ accountsConfig, policy, runtimePolicy = {}, accountId, active }) {
   if (!ACCOUNT_ID_RE.test(String(accountId || ''))) throw new Error('A valid account id is required.');
   if (!accountsConfig?.accounts?.[accountId]) throw new Error(`Unknown account "${accountId}".`);
+  assertEngagementActivationAllowed(runtimePolicy, active);
 
   const allowed = unique(policy?.allowedAccounts || []);
   if (active && !allowed.includes(accountId)) {
@@ -63,7 +65,8 @@ export async function setEngagementActivation({
   read = readJson,
   write = writeJsonAtomic,
   accountsFile = ACCOUNTS_FILE,
-  policyFile = POLICY_FILE
+  policyFile = POLICY_FILE,
+  loadPolicy = loadRuntimePolicy
 }) {
   const resolvedAccounts = await loadResolvedAccounts();
   const resolved = resolvedAccounts[accountId];
@@ -72,11 +75,12 @@ export async function setEngagementActivation({
     throw new Error(`Account "${accountId}" must be enabled and not paused before engagement activation.`);
   }
 
-  const [accountsConfig, policy] = await Promise.all([
+  const [accountsConfig, policy, runtimePolicy] = await Promise.all([
     read(accountsFile),
-    read(policyFile)
+    read(policyFile),
+    loadPolicy()
   ]);
-  const patched = patchEngagementActivation({ accountsConfig, policy, accountId, active });
+  const patched = patchEngagementActivation({ accountsConfig, policy, runtimePolicy, accountId, active });
 
   // Both writes happen only in the ephemeral workflow checkout. They are committed together later by
   // the control workflow, so a runner failure cannot persist a one-file half-activation to the repo.
