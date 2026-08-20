@@ -134,7 +134,7 @@ test('music-tools-x inherits trust defaults but remains commercially disabled', 
   assert.equal(affiliate.requireXPaidPartnership, true);
   assert.equal(affiliate.allowCommissionInRanking, false);
 
-  const publishSource = await readFile(new URL('../src/publish.mjs', import.meta.url), 'utf8');
-  assert.match(publishSource, /assertAffiliateTrust/);
-  assert.match(publishSource, /paidPartnership/);
+  const publishCoreSource = await readFile(new URL('../src/publish-core.mjs', import.meta.url), 'utf8');
+  assert.match(publishCoreSource, /assertAffiliateTrust/);
+  assert.match(publishCoreSource, /paidPartnership/);
 });
