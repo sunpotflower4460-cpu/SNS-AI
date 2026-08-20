@@ -43,10 +43,6 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      SNS_MANUAL_INVOCATION: 'true'
-      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
-      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
-      GH_TOKEN: ${{ github.token }}
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_TEXT: ${{ inputs.text }}
       INPUT_MEDIA_URL: ${{ inputs.media_url }}
@@ -112,6 +108,9 @@ jobs:
       - name: Publish
         id: publish_run
         env:
+          SNS_MANUAL_INVOCATION: 'true'
+          SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+          X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
           CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
           CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
           CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
