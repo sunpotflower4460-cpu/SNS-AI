@@ -1,5 +1,8 @@
 name: SNS Live Preflight
 
+# Verify X automation compliance acknowledgements: the full x-automation-compliance.mjs gate
+# is intentionally run by engagement-control.yml. This workflow is publish-only and therefore
+# checks only X automated-profile transparency through x-posting-compliance.mjs.
 on:
   workflow_dispatch:
     inputs:
