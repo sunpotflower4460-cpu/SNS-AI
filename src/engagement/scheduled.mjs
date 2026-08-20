@@ -65,11 +65,17 @@ export function scheduledAccountDecision({ accountId, account, history = [], glo
   return { due: true, reason: 'recent-own-post', lastPublishAt: new Date(lastPublish).toISOString(), windowMinutes };
 }
 
-export async function runScheduledEngagement({ now = new Date() } = {}) {
+export async function runScheduledEngagement({
+  now = new Date(),
+  loadPolicy = loadEngagementPolicy,
+  loadAccountConfig = loadAccounts,
+  loadPublishedHistory = readHistory,
+  run = runEngagement
+} = {}) {
   const [globalPolicy, accounts, history] = await Promise.all([
-    loadEngagementPolicy(),
-    loadAccounts(),
-    readHistory()
+    loadPolicy(),
+    loadAccountConfig(),
+    loadPublishedHistory()
   ]);
 
   if (globalPolicy.enabled !== true) return { state: 'disabled', accounts: [], skipped: [] };
@@ -87,7 +93,7 @@ export async function runScheduledEngagement({ now = new Date() } = {}) {
 
   const reports = [];
   for (const item of due) {
-    const result = await runEngagement({ accountFilter: item.accountId, dryRun: false });
+    const result = await run({ accountFilter: item.accountId, dryRun: false });
     reports.push({ account: item.accountId, gate: item.decision, result });
   }
   const unhealthy = reports.some(({ result }) => result.state === 'degraded'
