@@ -1,0 +1,44 @@
+name: SNS Hub Reconcile
+
+on:
+  schedule:
+    - cron: '29 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
+      CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
+      CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
+      CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Reconcile completed Hub-dependent publishes
+        run: npm run hub:reconcile

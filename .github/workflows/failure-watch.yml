@@ -10,6 +10,7 @@ on:
       - SNS Daily Learning
       - SNS Policy Watch
       - Publish social post
+      - SNS Hub Reconcile
       - SNS Health Report
       - SNS Human Feedback
       - SNS Live Preflight

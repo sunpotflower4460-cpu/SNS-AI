@@ -63,6 +63,11 @@ jobs:
       - name: Run autopilot
         id: autopilot_run
         shell: bash
+        env:
+          CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
+          CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
+          CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
+          CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
