@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { assertAccountLifecycleAllowed, assertEngagementActivationAllowed, loadOperationMode } from '../src/ops/operation-mode.mjs';
+import { patchAccountLifecycle } from '../src/ops/account-control.mjs';
+import { patchEngagementActivation } from '../src/engagement/activate.mjs';
 
 const WORKFLOW_DIR = '.github/workflows';
 
@@ -68,6 +70,73 @@ test('manual-only operation lock is explicit and fail-closed', async () => {
     (error) => error?.code === 'MANUAL_ONLY_ENGAGEMENT_ACTIVATION_BLOCKED'
   );
   assert.doesNotThrow(() => assertEngagementActivationAllowed(false, mode));
+});
+
+test('operation-mode unlock requires an explicit supported unattended configuration', () => {
+  for (const invalid of [
+    {},
+    { schemaVersion: 1, mode: 'manual-only', allowAutoPromotion: true, allowUnattendedEngagement: true },
+    { schemaVersion: 1, mode: 'typo-unattended', allowAutoPromotion: true, allowUnattendedEngagement: true },
+    { schemaVersion: 2, mode: 'unattended', allowAutoPromotion: true, allowUnattendedEngagement: true },
+    { schemaVersion: 1, mode: 'unattended', allowAutoPromotion: false, allowUnattendedEngagement: false }
+  ]) {
+    assert.throws(() => assertAccountLifecycleAllowed('auto', invalid), /Operation-mode lock blocks/);
+    assert.throws(() => assertEngagementActivationAllowed(true, invalid), /Operation-mode lock blocks/);
+  }
+
+  const explicit = {
+    schemaVersion: 1,
+    mode: 'unattended',
+    allowAutoPromotion: true,
+    allowUnattendedEngagement: true
+  };
+  assert.doesNotThrow(() => assertAccountLifecycleAllowed('auto', explicit));
+  assert.doesNotThrow(() => assertEngagementActivationAllowed(true, explicit));
+});
+
+test('manual-only lock is enforced by account and engagement escalation functions', () => {
+  const mode = {
+    schemaVersion: 1,
+    mode: 'manual-only',
+    allowAutoPromotion: false,
+    allowUnattendedEngagement: false
+  };
+  const accountsConfig = {
+    defaults: { mode: 'pause' },
+    accounts: {
+      alpha: {
+        platform: 'instagram',
+        enabled: true,
+        mode: 'approval'
+      }
+    }
+  };
+  const policy = {
+    allowedAccounts: ['alpha'],
+    liveAccounts: [],
+    approvalRequired: true
+  };
+
+  assert.throws(
+    () => patchAccountLifecycle({
+      accountsConfig,
+      policy,
+      accountId: 'alpha',
+      target: 'auto',
+      history: [{ account: 'alpha', status: 'published', providerPostId: 'p1' }],
+      metrics: [{ account: 'alpha', providerPostId: 'p1' }],
+      operationMode: mode
+    }),
+    (error) => error?.code === 'MANUAL_ONLY_AUTO_PROMOTION_BLOCKED'
+  );
+
+  assert.throws(
+    () => patchEngagementActivation({ accountsConfig, policy, accountId: 'alpha', active: true, operationMode: mode }),
+    (error) => error?.code === 'MANUAL_ONLY_ENGAGEMENT_ACTIVATION_BLOCKED'
+  );
+
+  assert.doesNotThrow(() => patchAccountLifecycle({ accountsConfig, policy, accountId: 'alpha', target: 'pause', operationMode: mode }));
+  assert.doesNotThrow(() => patchEngagementActivation({ accountsConfig, policy, accountId: 'alpha', active: false, operationMode: mode }));
 });
 
 test('every workflow is classified and exposes only its approved manual/safety trigger surface', async () => {
