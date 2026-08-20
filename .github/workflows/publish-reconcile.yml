@@ -1,0 +1,63 @@
+name: SNS Publish Readback Reconcile
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Static safety guards
+        run: |
+          npm run validate
+          npm run secret-scan
+
+      - name: Confirm ambiguous provider publishes by read-back only
+        run: node src/ops/publish-readback-reconcile.mjs --min-age-minutes 10 --out /tmp/provider-confirmed.json
+
+      - name: Persist confirmed provider outcomes to main
+        shell: bash
+        run: |
+          paths=(data/history.jsonl data/state.json data/audit.jsonl)
+          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then
+            echo "No local publish reconciliation changes."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          for path in "${paths[@]}"; do
+            [[ -e "$path" ]] && git add "$path"
+          done
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: reconcile provider-confirmed SNS publishes"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Finalize durable claims only after main persistence
+        run: node src/ops/publish-readback-reconcile.mjs --finalize-file /tmp/provider-confirmed.json
