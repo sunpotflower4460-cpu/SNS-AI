@@ -1,41 +1,59 @@
 # Manual-Only setup checklist
 
-The repository is deliberately **not live** by default. `config/runtime-policy.json` is the reviewed safety authority; unattended account activation, unattended engagement, scheduled provider polling, and non-manual provider mutation are blocked. Never paste a secret into an Issue, log, JSON file, or commit.
+The repository is deliberately **not live** by default. `config/runtime-policy.json` is the single reviewed safety authority. Unattended account activation, automatic engagement, scheduled provider polling, and provider mutation without an explicit manual invocation are blocked. Never paste a secret into an Issue, log, JSON file, or commit.
 
-## 1. Create the provider applications (human-only)
+## 1. X provider setup — human only
 
-- [ ] Sign in to the X Developer Portal with the account owner. Create/select a project and app, accept the current terms, and enable OAuth 1.0a read/write access for text-only publishing.
-- [ ] If X media, replies, DMs, or inbound reads will later be used, configure OAuth 2.0 authorization-code flow with offline access and the minimum required scopes. Record the client ID, client secret, callback URL, and the tokens returned by the owner-authorized flow.
-- [ ] Sign in to Meta for Developers. Create/select an app, connect the Instagram professional account to its Facebook Page, add the Instagram Graph API product, and have an administrator approve the minimum publishing/engagement permissions required for the intended manual test.
-- [ ] Add the callback URL shown by each provider to that provider's dashboard exactly (scheme, host, path, and trailing slash all matter).
+- [ ] Sign in to the X Developer Portal with the account owner.
+- [ ] Create/select the project and app and accept the current provider terms.
+- [ ] Configure the exact callback/redirect URL.
+- [ ] For text publishing, configure the minimum required read/write permission and regenerate credentials after permission changes when X requires it.
+- [ ] If replies, DMs, inbound reads, or OAuth2 media paths will be used later, configure OAuth 2.0 authorization-code flow/offline access and only the scopes required by those features.
+- [ ] Complete provider OAuth consent yourself and obtain the resulting credentials/tokens.
 
-These portal actions, terms, app review, OAuth consent, and token issuance cannot be completed by repository code.
+Repository code must not perform these portal, consent, app-review, or token-issuance actions.
 
-## 2. Prepare credentials locally
+## 2. Instagram / Meta provider setup — human only
 
-- [ ] Copy `.env.example` to `.env` (the latter is ignored) only if local diagnostics need environment variables.
-- [ ] Build `SOCIAL_CREDENTIALS_JSON` as one JSON object keyed by each account's `credentialKey` from `config/accounts.json`. X text publishing requires `consumerKey`, `consumerSecret`, `accessToken`, and `accessTokenSecret`; X OAuth2 features require the corresponding OAuth2 access/refresh/client fields. Instagram requires `accessToken` and `igUserId`.
-- [ ] Obtain an OpenAI API key only if generation is desired.
+- [ ] Sign in to Meta for Developers.
+- [ ] Create/select the Meta app.
+- [ ] Connect the Instagram Professional Account to the intended Facebook Page.
+- [ ] Add/configure the current Instagram Graph API product.
+- [ ] Configure the exact callback/redirect URL.
+- [ ] Request/approve only the permissions required for the intended manual publishing test.
+- [ ] Complete provider OAuth consent yourself and obtain the required token/account IDs.
 
-## 3. Register GitHub secrets and variables
+## 3. Prepare credentials locally
 
-In **Repository → Settings → Secrets and variables → Actions**, add only values actually used:
+- [ ] Copy `.env.example` to `.env` only if local diagnostics need environment variables; `.env` must remain ignored.
+- [ ] Build `SOCIAL_CREDENTIALS_JSON` as one JSON object keyed by each account's `credentialKey` from `config/accounts.json`.
+- [ ] X text publishing credentials and any X OAuth2 credentials must match the flows actually enabled in the X portal.
+- [ ] Instagram credentials must include the access token and real Instagram user/account ID expected by the configured provider path.
+- [ ] Obtain `OPENAI_API_KEY` only if AI generation is desired.
 
-- [ ] Secret `SOCIAL_CREDENTIALS_JSON` for SNS credentials.
-- [ ] Secret `OPENAI_API_KEY` for AI generation.
-- [ ] Secret `X_OAUTH2_STATE_KEY` for OAuth state encryption when OAuth2 is used.
-- [ ] Secret `MEDIA_SERVICE_TOKEN` only for an external media service.
-- [ ] Secret `CONVENIENCE_HUB_GITHUB_TOKEN` and variables `CONVENIENCE_HUB_REPOSITORY`, `CONVENIENCE_HUB_PUBLIC_URL`, `CONVENIENCE_HUB_BRANCH` only for SNS-HUB integration.
-- [ ] Do **not** create `SNS_MANUAL_INVOCATION` as a secret; approved manual workflows supply this non-secret boundary marker themselves.
+## 4. Register GitHub Actions secrets/variables — human only
 
-## 4. Enter public account identifiers
+In **Repository → Settings → Secrets and variables → Actions**, register only values actually used:
 
-- [ ] Replace example account configuration with the correct platform, `credentialKey`, display name, X user ID or Instagram user ID, callback metadata, media rules, and limits.
-- [ ] During setup, keep every account `enabled:false`, never use `mode:auto`, keep `liveAccounts: []`, keep engagement disabled, and keep `manualOnly:true`.
+- [ ] `SOCIAL_CREDENTIALS_JSON`
+- [ ] `OPENAI_API_KEY` when AI generation is desired
+- [ ] `X_OAUTH2_STATE_KEY` when X OAuth2 state encryption is used
+- [ ] `MEDIA_SERVICE_TOKEN` only when the external media service is used
+- [ ] `CONVENIENCE_HUB_GITHUB_TOKEN` and the matching Hub variables only when SNS-HUB integration is used
+- [ ] Any other provider credential required by the currently selected account/provider configuration
 
-## 5. Run keyless repository checks
+**Do not create `SNS_MANUAL_INVOCATION` as a GitHub Secret.** It is a non-secret execution-boundary marker supplied only inside explicitly manual workflows/approved test harnesses.
 
-From a clean checkout with no provider secrets exported:
+## 5. Enter real public account identifiers
+
+- [ ] Replace example account metadata with the correct platform, `credentialKey`, display name, X user ID or Instagram user ID, callback metadata, media rules, and limits.
+- [ ] Until controlled manual testing begins, keep every account `enabled:false` and do not use `mode:auto`.
+- [ ] Keep engagement `enabled:false`, `autoReply:false`, `autoDmReply:false`, `approvalRequired:true`, and `liveAccounts: []`.
+- [ ] Keep `config/runtime-policy.json` in Manual-Only. Completing provider setup must **not** unlock automatic operation.
+
+## 6. Required repository verification order
+
+From a clean checkout, run in this order:
 
 ```bash
 npm install
@@ -48,67 +66,75 @@ npm run smoke
 npm run doctor
 ```
 
-`doctor` may report live-readiness blockers while keys/accounts are absent; that is expected setup information, not permission to weaken the checks.
+Also run the CI coverage gate:
 
-## 6. Preflight provider readiness
+```bash
+npm run coverage
+```
 
-- [ ] Manually run **SNS Live Preflight** and pass the account ID explicitly. The preflight supports checking a disabled account without activating it.
-- [ ] Resolve every missing-scope, callback, account-ID, profile-disclosure, media-host, and credential diagnostic in the provider dashboards.
-- [ ] Confirm no secret appears in Actions logs and run `npm run secret-scan` again.
+`doctor` may report provider/account credential-readiness blockers while external setup is incomplete. Missing external credentials must be treated as setup/readiness information, not as permission to weaken code checks.
 
-## 7. Prepare one account for a controlled manual post
+## 7. Provider preflight — still no account activation
 
-Manual-Only intentionally blocks the **SNS Account Control** workflow from moving an account into `approval` or `auto`. To prepare a real account, make a reviewed configuration change instead:
+- [ ] Manually run **SNS Live Preflight** for the exact account ID, or run the equivalent local `npm run preflight -- --account <ACCOUNT_ID>` when credentials are available.
+- [ ] Resolve every missing scope, callback, account-ID, profile disclosure, media-host, and credential diagnostic in the external provider dashboards.
+- [ ] Run `npm run secret-scan` again after local/manual credential work and confirm no credential was committed or printed into repository data.
 
-- [ ] Change only the test account to `enabled:true` and `mode:"approval"` in `config/accounts.json`.
-- [ ] Keep every other account disabled and keep `mode:auto` unused everywhere.
-- [ ] Run `npm run manual-only-audit`; an enabled account in `approval` mode is allowed, while `auto` is rejected.
-- [ ] Record required X compliance attestations through the manually dispatched **SNS Compliance Attestation** workflow only after the external requirement is genuinely complete.
+## 8. Controlled first-publish sequence
 
-## 8. Dry-run the exact manual payload
+Use this order and do not skip directly to live publishing:
 
-- [ ] Open **Publish social post → Run workflow** yourself.
-- [ ] Select the prepared account and enter the exact text/media payload.
-- [ ] Leave `dry_run=true` and `confirm_live=false`.
-- [ ] Inspect the result and correct any provider/configuration problem before a real post.
-- [ ] **SNS Autopilot** and **SNS Engagement Autopilot** also default to dry-run; unattended schedules do not exist in Manual-Only.
+1. Complete API/OAuth configuration in X/Meta.
+2. Register only the required GitHub Secrets/Variables.
+3. Run `npm test`.
+4. Run `npm run validate`.
+5. Run `npm run check`.
+6. Run `npm run manual-only-audit`.
+7. Run `npm run secret-scan`.
+8. Run `npm run smoke`.
+9. Run `npm run doctor`.
+10. Run the account-specific preflight.
+11. Run **Publish social post** with `dry_run=true` and `confirm_live=false` while the account is still disabled where possible; inspect readiness/output.
+12. Through a reviewed/manual configuration change, enable **only** the chosen account in `mode:"approval"`. Manual-Only intentionally rejects automatic promotion to `approval`/`auto` through unattended lifecycle logic.
+13. Run the exact Publish dry-run again for that enabled approval account.
+14. Only after reviewing that result yourself, explicitly choose `dry_run=false` and `confirm_live=true`.
+15. Run **one** first live post and inspect the provider result before doing anything else.
 
-## 9. First manual publishing test
+No Issue title, Issue label, schedule, repository dispatch, or other server-side event can initiate the Publish workflow. It is `workflow_dispatch` only.
 
-Only after the exact dry run succeeds:
+## 9. Engagement is a separate later procedure
 
-- [ ] Open **Publish social post** again yourself.
-- [ ] Use the same account/text/media payload.
-- [ ] Set `dry_run=false` **and** `confirm_live=true`. Both are required for one real provider post.
-- [ ] Click **Run workflow** once.
-- [ ] Verify the provider result before retrying any ambiguous failure; durable reconciliation exists specifically to prevent duplicates.
+Publishing readiness does not imply engagement readiness.
 
-No Issue title, Issue label, schedule, repository dispatch, or other server-side event can initiate this publish path.
-
-## 10. Manual engagement only
-
-The shipped posture has engagement disabled, `autoReply:false`, `autoDmReply:false`, approval required, and no live accounts.
-
+- [ ] Keep engagement disabled during first-publish testing.
 - [ ] **SNS Engagement Autopilot** defaults to `dry_run=true`.
-- [ ] Do not enable engagement merely to test publishing.
-- [ ] If engagement is later intentionally redesigned, change its policy through review. Manual-Only currently rejects engagement activation while the lock is active.
-- [ ] Human-resolved engagement actions may be run only through an explicitly dispatched manual workflow and must remain subject to the runtime provider-mutation guard.
+- [ ] Do not enable `autoReply`, `autoDmReply`, or add live accounts merely because publishing works.
+- [ ] Manual-Only rejects engagement activation while the lock is active.
+- [ ] Human-resolved public engagement may run only through an explicit manual workflow path and still passes the provider-mutation runtime guard.
+- [ ] Private/DM behavior remains subject to the stricter privacy/manual-send rules in the engagement runtime.
 
-## 11. Manual control workflows
+## 10. Manual control workflows
 
-The following workflows are `workflow_dispatch` only and use explicit form inputs rather than stale Issue payloads:
+These operational workflows are explicit manual controls, not automation triggers:
 
-- **SNS Account Control** — safe pause/disable now; approval/auto remain fail-closed under Manual-Only.
-- **SNS Engagement Control** — deactivation is available; activation remains fail-closed under Manual-Only.
+- **SNS Account Control** — safe pause/disable operations; Manual-Only rejects approval/auto promotion.
+- **SNS Engagement Control** — deactivation is available; Manual-Only rejects activation.
 - **SNS ChatOps** — explicit preflight/dry-run/manual engagement commands.
-- **SNS Compliance Attestation** — records only an explicit owner/admin attestation; it does not perform the external provider action.
-- **SNS Human Feedback** — records feedback only when manually dispatched.
+- **SNS Compliance Attestation** — records an explicit owner/admin attestation only; it does not perform the external provider action.
+- **SNS Human Feedback** — records human feedback only when manually dispatched.
 
-## 12. Final safety verification
+## 11. Automatic operation remains a separate future change
 
-- [ ] `npm run manual-only-audit` is green.
-- [ ] No account uses `mode:auto`; accounts not actively under controlled manual testing are disabled.
-- [ ] Engagement remains disabled with `liveAccounts: []`, `autoReply:false`, and `autoDmReply:false`.
-- [ ] Every operational workflow has only `workflow_dispatch`; CI and Failure Watch are the only classified automatic infrastructure workflows and receive no SNS/provider secrets.
-- [ ] No operational workflow depends on `github.event.issue` or another event payload unavailable to `workflow_dispatch`.
-- [ ] No real post, reply, DM, follow, or like occurs except after an explicit manual workflow dispatch that passes the runtime guard.
+Finishing this checklist **does not start automatic SNS operation**. If the owner later explicitly asks to start automation, treat that as a separate reviewed change/PR that can modify the runtime policy and, only after review, reintroduce schedules/account automation/engagement automation as intended. Do not couple Manual Setup completion to automatic activation.
+
+## 12. Final Manual-Only safety verification
+
+- [ ] `npm test`, `npm run validate`, `npm run check`, `npm run coverage`, `npm run manual-only-audit`, `npm run secret-scan`, and `npm run smoke` are green.
+- [ ] `npm run doctor` / keyless preflight portions distinguish missing external credentials from code failure.
+- [ ] No account uses `mode:auto`; accounts not deliberately under controlled manual testing remain disabled.
+- [ ] Engagement remains disabled with `liveAccounts: []`, `autoReply:false`, `autoDmReply:false`, and `approvalRequired:true`.
+- [ ] Every operational workflow is explicitly classified and cannot gain an automatic trigger unnoticed.
+- [ ] `ci.yml` and `failure-watch.yml` are the only classified automatic GitHub-internal workflows and cannot receive SNS/OpenAI/provider secrets.
+- [ ] No operational workflow depends on stale Issue payload fields unavailable to `workflow_dispatch`.
+- [ ] Live provider mutation is rejected without the explicit manual invocation boundary; dry-run remains allowed.
+- [ ] No real post, reply, DM, follow, unfollow, or provider polling occurs except through an explicitly allowed/manual path.
