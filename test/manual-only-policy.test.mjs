@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +25,18 @@ async function withAuditFixture(run) {
   const root = await makeAuditFixture();
   try { return await run(root); }
   finally { await rm(root, { recursive: true, force: true }); }
+}
+
+function withManualInvocation(value, run) {
+  const previous = process.env.SNS_MANUAL_INVOCATION;
+  try {
+    if (value === undefined) delete process.env.SNS_MANUAL_INVOCATION;
+    else process.env.SNS_MANUAL_INVOCATION = value;
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.SNS_MANUAL_INVOCATION;
+    else process.env.SNS_MANUAL_INVOCATION = previous;
+  }
 }
 
 test('repository is locked to the complete Manual-Only posture', async () => {
@@ -75,20 +86,36 @@ test('Manual-Only rejects unclassified workflows and stale Issue event dependenc
   });
 });
 
-test('Manual-Only blocks activation, auto mode, and unattended provider mutation', () => {
+test('Manual-Only blocks activation and unsafe account modes', () => {
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'auto'), { code: 'MANUAL_ONLY_BLOCKED' });
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'approval'), { code: 'MANUAL_ONLY_BLOCKED' });
   assert.throws(() => assertEngagementActivationAllowed(policy, true), { code: 'MANUAL_ONLY_BLOCKED' });
 });
 
-test('dry-run never requires credentials or a provider mutation authorization', () => {
-  assert.equal(assertProviderMutationAllowed(policy, { dryRun: true }), true);
+test('dry-run never requires credentials or provider mutation authorization', () => {
+  withManualInvocation(undefined, () => {
+    assert.equal(assertProviderMutationAllowed(policy, { dryRun: true, source: 'dry-run-test' }), true);
+  });
 });
 
-test('live mutation requires the process-start workflow boundary marker', () => {
-  assert.equal(assertProviderMutationAllowed(policy, { source: 'manual' }), true);
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', `import { assertProviderMutationAllowed } from './src/ops/manual-only.mjs'; try { assertProviderMutationAllowed({manualOnly:true,requireExplicitManualInvocation:true},{source:'autopilot'}); process.exit(9) } catch (e) { if (e.code !== 'MANUAL_ONLY_BLOCKED') throw e }`], {
-    cwd: process.cwd(), env: { ...process.env, SNS_MANUAL_INVOCATION: '' }, encoding: 'utf8'
+test('live provider mutation is denied without an explicit manual invocation marker', () => {
+  withManualInvocation(undefined, () => {
+    assert.throws(
+      () => assertProviderMutationAllowed(policy, { source: 'autopilot' }),
+      { code: 'MANUAL_ONLY_BLOCKED' }
+    );
   });
-  assert.equal(child.status, 0, child.stderr);
+});
+
+test('live provider mutation is allowed only while the explicit manual invocation marker is present', () => {
+  withManualInvocation('true', () => {
+    assert.equal(assertProviderMutationAllowed(policy, { source: 'manual' }), true);
+  });
+
+  withManualInvocation('false', () => {
+    assert.throws(
+      () => assertProviderMutationAllowed(policy, { source: 'manual' }),
+      { code: 'MANUAL_ONLY_BLOCKED' }
+    );
+  });
 });
