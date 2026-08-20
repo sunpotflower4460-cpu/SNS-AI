@@ -21,14 +21,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Unit and integration checks
-        run: |
-          npm test
-          npm run validate
-          npm run check
-          npm run smoke
-          npm run secret-scan
-          npm run manual-only-audit
+      - name: Unit and integration tests
+        run: npm test
+      - name: Strict configuration validation
+        run: npm run validate
+      - name: Source syntax and import checks
+        run: npm run check
+      - name: Smoke checks
+        run: npm run smoke
+      - name: Secret scan
+        run: npm run secret-scan
+      - name: Manual-Only repository audit
+        run: npm run manual-only-audit
       - name: Source coverage audit
         run: npm run coverage
       - name: Parse every workflow YAML
