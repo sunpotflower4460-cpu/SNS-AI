@@ -49,20 +49,20 @@ jobs:
           args=(--strict)
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           npm run doctor -- "${args[@]}"
-      - name: Verify external credentials, models, and durable state without posting
+      - name: Verify publish credentials, models, and durable state without posting
         id: preflight_run
         shell: bash
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           node src/ops/live-preflight.mjs "${args[@]}"
-      - name: Verify X automation compliance acknowledgements
+      - name: Verify X automated-profile publishing compliance
         if: always() && steps.checkout.outcome == 'success'
         shell: bash
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
-          node src/ops/x-automation-compliance.mjs "${args[@]}"
+          node src/ops/x-posting-compliance.mjs "${args[@]}"
       - name: Persist encrypted OAuth2 bootstrap state
         if: always() && steps.checkout.outcome == 'success' && steps.preflight_run.outcome != 'skipped'
         shell: bash
