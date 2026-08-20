@@ -93,13 +93,12 @@ export function patchAccountLifecycle({ accountsConfig, policy = {}, accountId, 
   return { accountsConfig: next, account: accountId, target, evidence };
 }
 
-export async function setAccountLifecycle({ accountId, target }) {
-  const [accountsConfig, policy, history, metrics, operationMode] = await Promise.all([
+export async function setAccountLifecycle({ accountId, target, operationMode = null }) {
+  const [accountsConfig, policy, history, metrics] = await Promise.all([
     readJson(ACCOUNTS_FILE),
     readJson(ENGAGEMENT_POLICY_FILE, {}),
     readHistory(),
-    readMetricSnapshots(),
-    loadOperationMode()
+    readMetricSnapshots()
   ]);
   const patched = patchAccountLifecycle({ accountsConfig, policy, accountId, target, history, metrics, operationMode });
   await writeJsonAtomic(ACCOUNTS_FILE, patched.accountsConfig);
@@ -115,7 +114,12 @@ export async function setAccountLifecycle({ accountId, target }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const args = parseArgs(process.argv.slice(2));
-    const result = await setAccountLifecycle({ accountId: String(args.account || ''), target: String(args.target || '') });
+    const operationMode = await loadOperationMode();
+    const result = await setAccountLifecycle({
+      accountId: String(args.account || ''),
+      target: String(args.target || ''),
+      operationMode
+    });
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(JSON.stringify({ ok: false, code: error.code || null, error: String(error.message || error) }, null, 2));
