@@ -1,0 +1,141 @@
+name: SNS Account Control
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  control:
+    if: >
+      startsWith(github.event.issue.title, '[account-approval]') ||
+      startsWith(github.event.issue.title, '[account-auto]') ||
+      startsWith(github.event.issue.title, '[account-pause]') ||
+      startsWith(github.event.issue.title, '[account-disable]')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}
+      CONVENIENCE_HUB_REPOSITORY: ${{ vars.CONVENIENCE_HUB_REPOSITORY }}
+      CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
+      CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
+
+    steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized for account lifecycle changes."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Parse exact lifecycle command
+        id: command
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const title = process.env.ISSUE_TITLE || '';
+          const match = title.match(/^\[(account-approval|account-auto|account-pause|account-disable)\]\s+([A-Za-z0-9_.-]{1,80})$/);
+          if (!match) throw new Error('Use exactly: [account-approval|account-auto|account-pause|account-disable] ACCOUNT_ID');
+          const target = ({
+            'account-approval': 'approval',
+            'account-auto': 'auto',
+            'account-pause': 'pause',
+            'account-disable': 'disabled'
+          })[match[1]];
+          appendFileSync(process.env.GITHUB_OUTPUT, `account=${match[2]}\ntarget=${target}\n`);
+          NODE
+
+      - name: Refuse auto promotion while any health incident is open
+        if: steps.command.outputs.target == 'auto'
+        shell: bash
+        run: |
+          count=$(gh issue list --repo "$REPO" --state open --limit 100 --json title --jq '[.[] | select(.title | startswith("[health]"))] | length')
+          if [[ "$count" != "0" ]]; then
+            echo "::error::Auto promotion is blocked while an open [health] incident exists."
+            exit 1
+          fi
+
+      - name: Apply lifecycle transition in checkout
+        env:
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          TARGET: ${{ steps.command.outputs.target }}
+        run: node src/ops/account-control.mjs --account "$ACCOUNT" --target "$TARGET"
+
+      - name: Static safety checks
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+
+      - name: Live account preflight before enabling publishing
+        if: steps.command.outputs.target == 'approval' || steps.command.outputs.target == 'auto'
+        env:
+          ACCOUNT: ${{ steps.command.outputs.account }}
+        run: node src/ops/live-preflight.mjs --account "$ACCOUNT"
+
+      - name: Persist account lifecycle change
+        shell: bash
+        env:
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          TARGET: ${{ steps.command.outputs.target }}
+        run: |
+          if [[ -z "$(git status --porcelain -- config/accounts.json)" ]]; then
+            echo "No account config change needed."
+            exit 0
+          fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add config/accounts.json
+          git commit -m "ops: set ${ACCOUNT} lifecycle to ${TARGET}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Close command issue on success
+        if: success()
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ACCOUNT: ${{ steps.command.outputs.account }}
+          TARGET: ${{ steps.command.outputs.target }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "✅ SNS-AI moved \`${ACCOUNT}\` to lifecycle state \`${TARGET}\` after the required safety gates."
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
+
+      - name: Explain fail-closed rejection
+        if: failure()
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "❌ Account lifecycle change was not persisted. SNS-AI failed closed. Check the Actions log for the missing preflight, profile-compliance, controlled-publish, metrics, or health prerequisite."
