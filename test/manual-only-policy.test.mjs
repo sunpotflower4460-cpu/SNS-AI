@@ -86,6 +86,40 @@ test('Manual-Only rejects unclassified workflows and stale Issue event dependenc
   });
 });
 
+test('every forbidden operational trigger is rejected', async () => {
+  const cases = [
+    ['schedule', '  schedule:\n    - cron: "0 0 * * *"'],
+    ['push', '  push:\n    branches: [main]'],
+    ['issues', '  issues:\n    types: [opened]'],
+    ['workflow_call', '  workflow_call:'],
+    ['repository_dispatch', '  repository_dispatch:'],
+    ['pull_request_target', '  pull_request_target:']
+  ];
+
+  for (const [trigger, yaml] of cases) {
+    await withAuditFixture(async (root) => {
+      const file = join(root, '.github', 'workflows', 'health.yml');
+      await writeFile(file, `name: forbidden-${trigger}\non:\n${yaml}\npermissions:\n  contents: read\njobs: {}\n`);
+      const result = await auditManualOnly(root);
+      assert.equal(result.ok, false, `${trigger} unexpectedly passed Manual-Only audit`);
+      assert.match(result.errors.join('\n'), /workflow_dispatch|trigger/i);
+    });
+  }
+});
+
+test('GitHub-internal automatic workflows cannot receive provider or OpenAI secrets', async () => {
+  for (const workflow of ['ci.yml', 'failure-watch.yml']) {
+    await withAuditFixture(async (root) => {
+      const file = join(root, '.github', 'workflows', workflow);
+      const original = await readFile(file, 'utf8');
+      await writeFile(file, `${original}\n# forbidden provider credential reference\n# ${{ secrets.OPENAI_API_KEY }}\n`);
+      const result = await auditManualOnly(root);
+      assert.equal(result.ok, false, `${workflow} unexpectedly accepted a provider secret reference`);
+      assert.match(result.errors.join('\n'), /secret|credential/i);
+    });
+  }
+});
+
 test('Manual-Only blocks activation and unsafe account modes', () => {
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'auto'), { code: 'MANUAL_ONLY_BLOCKED' });
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'approval'), { code: 'MANUAL_ONLY_BLOCKED' });
