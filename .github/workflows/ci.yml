@@ -18,11 +18,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Focused test - Manual-Only policy
         run: node --test --test-concurrency=1 test/manual-only-policy.test.mjs
+      - name: Focused test - Provider mutation boundaries
+        run: node --test --test-concurrency=1 test/manual-only-provider-boundary.test.mjs
       - name: Focused test - Account lifecycle control
         run: node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
       - name: Focused test - Compliance attestation control
@@ -52,7 +56,7 @@ jobs:
         run: npm run check
       - name: Smoke checks
         run: npm run smoke
-      - name: Secret scan
+      - name: Secret scan (working tree + available history)
         run: npm run secret-scan
       - name: Manual-Only repository audit
         run: npm run manual-only-audit
