@@ -112,7 +112,7 @@ test('GitHub-internal automatic workflows cannot receive provider or OpenAI secr
     await withAuditFixture(async (root) => {
       const file = join(root, '.github', 'workflows', workflow);
       const original = await readFile(file, 'utf8');
-      await writeFile(file, `${original}\n# forbidden provider credential reference\n# ${{ secrets.OPENAI_API_KEY }}\n`);
+      await writeFile(file, `${original}\n# forbidden provider credential reference\n# \${{ secrets.OPENAI_API_KEY }}\n`);
       const result = await auditManualOnly(root);
       assert.equal(result.ok, false, `${workflow} unexpectedly accepted a provider secret reference`);
       assert.match(result.errors.join('\n'), /secret|credential/i);
