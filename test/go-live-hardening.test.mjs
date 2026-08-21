@@ -715,3 +715,101 @@ test('engagement/schedule docs do not overstate what liveAccounts, Manual-Only, 
   const actionsSection = readme.slice(readme.indexOf('## GitHub Actions'), readme.indexOf('## GitHub Actions') + 600);
   assert.match(actionsSection, /ci\.yml/, 'the GitHub Actions section opener must name its automatic-workflow exceptions inline');
 });
+
+// A second, independent re-audit (run after PR #83 merged) found four more docs the earlier passes
+// never touched: docs/MANUAL_EXTERNAL_SETUP_QUEUE.md and docs/ENGAGEMENT_AUTOMATION.md still told
+// operators to "ask ChatGPT" to create Issues titled `[compliance-x-profile] ACCOUNT_ID`,
+// `[account-approval] ACCOUNT_ID`, `[engagement-activate] ACCOUNT_ID`, etc. - the exact same dead
+// bracket-command pattern already fixed everywhere else, just missed because these two docs weren't
+// in the original audit's file list. docs/OPERATIONS.md and docs/AUTONOMY.md independently drifted
+// the OTHER way: they describe the pre-Manual-Only scheduled/autonomous architecture as the system's
+// current live behavior (confirmed against .github/workflows/engagement-scheduled.yml, which is now
+// a workflow_dispatch-only no-op stub, not the "runs every 30 minutes" polling both docs described).
+test('docs beyond the first audit pass do not describe dead bracket commands or claim schedules that do not exist', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const setupQueue = await readFile(`${DOCS_DIR}MANUAL_EXTERNAL_SETUP_QUEUE.md`, 'utf8');
+  const engagementAutomation = await readFile(`${DOCS_DIR}ENGAGEMENT_AUTOMATION.md`, 'utf8');
+  const operations = await readFile(`${DOCS_DIR}OPERATIONS.md`, 'utf8');
+  const autonomy = await readFile(`${DOCS_DIR}AUTONOMY.md`, 'utf8');
+
+  for (const doc of [setupQueue, engagementAutomation]) {
+    assert.doesNotMatch(doc, /\[compliance-x-profile\]|\[compliance-x-ai-reply\]|\[compliance-revoke-|\[account-approval\]|\[engagement-activate\]|\[engagement-deactivate\]|\[engagement-dry-run\]/, 'must not describe dead bracket-command Issue titles');
+    assert.match(doc, /[Mm]anual-Only/, 'must mention the current Manual-Only posture');
+  }
+  assert.match(setupQueue, /compliance-attestation\.yml|SNS Compliance Attestation/i);
+  assert.match(engagementAutomation, /engagement-control\.yml|SNS Engagement Control/i);
+  assert.match(engagementAutomation, /no-op/i, 'must say SNS Engagement Scheduled is currently a no-op, not real 30-minute polling');
+
+  for (const doc of [operations, autonomy]) {
+    assert.match(doc, /[Mm]anual-Only/, 'must mention the current Manual-Only posture instead of presenting the scheduled/autonomous design as current behavior');
+  }
+  assert.doesNotMatch(operations, /^\*\*SNS Autopilot\*\*は10分ごとに起動します。Scheduled runはliveです。/m, 'must not claim Autopilot is currently live-scheduled');
+});
+
+// The same independent re-audit flagged an inconsistency, not a bug in itself: autopilot.yml,
+// health.yml, intelligence.yml, learning.yml, maintenance.yml, metrics.yml, and policy.yml all carry
+// contents:write (metrics.yml also carries SOCIAL_CREDENTIALS_JSON) yet, unlike every other
+// write-capable operational workflow, had no "Authorize command actor" step - any repository
+// collaborator with plain GitHub write access, not just the owner or SNS_COMMAND_ADMINS, could spend
+// OpenAI budget, create Issues, or trigger a real provider read on any of these. None of them reach
+// live-mutation capability on their own (that still requires publish.yml/engagement-resolve.yml's
+// separate confirm_live gate), but leaving some operational workflows gated and others not is exactly
+// the kind of inconsistency this repo has repeatedly closed elsewhere in this same effort.
+test('every write-capable or secret-bearing operational workflow gates on the authorized-actor check', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  // ci.yml and failure-watch.yml are the two reviewed GitHub-internal automatic exceptions (see
+  // manual-only-audit.mjs's INFRASTRUCTURE_WORKFLOWS) - they must never receive SNS/provider secrets
+  // and are intentionally not actor-gated. engagement-scheduled.yml is a workflow_dispatch-only no-op
+  // stub (contents: read, no secrets, prints an explanation) with nothing to gate.
+  const exempt = new Set(['ci.yml', 'failure-watch.yml', 'engagement-scheduled.yml']);
+
+  const missing = [];
+  for (const name of files) {
+    if (exempt.has(name)) continue;
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    const grantsWrite = /^\s*contents:\s*write\s*$/m.test(yaml);
+    // Any secrets.* reference is treated as sensitive by default, except the one GitHub-managed
+    // token that isn't a repo-configured credential - this way a future workflow that introduces a
+    // new provider/credential secret is caught automatically instead of requiring this test to be
+    // updated in lockstep with every new secret name.
+    const NON_SENSITIVE_SECRETS = new Set(['GITHUB_TOKEN']);
+    const secretNames = [...yaml.matchAll(/secrets\.([A-Z0-9_]+)\b/g)].map((match) => match[1]);
+    const carriesSecret = secretNames.some((secretName) => !NON_SENSITIVE_SECRETS.has(secretName));
+    if (!grantsWrite && !carriesSecret) continue;
+    if (!/name:\s*Authorize command actor/.test(yaml) || !/SNS_COMMAND_ADMINS/.test(yaml)) missing.push(name);
+  }
+
+  assert.deepEqual(missing, [], `workflow(s) grant write access or a provider/OpenAI secret without gating on the authorized-actor check:\n${JSON.stringify(missing, null, 2)}`);
+});
+
+// CodeRabbit's review of this same PR caught a real, pre-existing bug in the "Authorize command
+// actor" pattern itself (present since publish.yml's original gate, and multiplied by adding the
+// same pattern to 8 more workflows in this PR): every step read `github.actor`, which GitHub
+// deliberately keeps pinned to the ORIGINAL dispatcher across a workflow re-run - a documented
+// anti-escalation feature for GitHub's own token/permission scoping, not something available to
+// gate a custom authorization check on. Any repository collaborator with plain "write" access (a
+// materially lower bar than being listed in SNS_COMMAND_ADMINS) can click "Re-run all jobs" on any
+// historical run the owner originally dispatched, and the actor check would still read the owner's
+// name and pass - even though this collaborator, not the owner, is who actually caused this
+// execution to spend OpenAI budget, touch provider secrets, or write to the repo. `github.triggering_actor`
+// is the field GitHub updates to reflect who actually triggered the current execution, including
+// re-runs, and is identical to github.actor for a normal (non-re-run) dispatch - see
+// https://github.blog/changelog/2022-07-19-differentiating-triggering-actor-from-executing-actor/.
+test('every "Authorize command actor" step reads github.triggering_actor, not the re-run-stale github.actor', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  const wrong = [];
+  for (const name of files) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    if (!/name:\s*Authorize command actor/.test(yaml)) continue;
+    if (/ACTOR:\s*\$\{\{\s*github\.actor\s*\}\}/.test(yaml)) wrong.push(name);
+    else if (!/ACTOR:\s*\$\{\{\s*github\.triggering_actor\s*\}\}/.test(yaml)) wrong.push(`${name} (unexpected ACTOR source)`);
+  }
+
+  assert.deepEqual(wrong, [], `workflow(s) gate on the re-run-stale github.actor instead of github.triggering_actor:\n${JSON.stringify(wrong, null, 2)}`);
+});

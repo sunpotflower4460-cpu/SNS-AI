@@ -25,6 +25,19 @@ jobs:
       SNS_DURABLE_BUDGETS: 'true'
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
     steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to run SNS Policy Watch."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

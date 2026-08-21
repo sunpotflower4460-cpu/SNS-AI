@@ -2,6 +2,8 @@
 
 Verified baseline: 2026-08-20.
 
+**This repository is currently locked to Manual-Only** (see `docs/MANUAL_ONLY_MODE.md`). This document describes the designed capability. The "Activation model" and "Runtime" sections below name the real `workflow_dispatch` Actions to use — there is no Issue-title command system — and `SNS Engagement Scheduled`'s actual current behavior is a manual-dispatch no-op, not the described 30-minute automatic polling; see the note in that section.
+
 ## Goal
 
 Run useful inbound community handling with minimal operator interruption:
@@ -29,14 +31,12 @@ controlled activation changes only the selected account to `approvalRequired: fa
 account to `liveAccounts`. Deactivation removes it from `liveAccounts` and restores the account override
 to `true`.
 
-Use the ChatGPT/GitHub Issue control bridge:
+Dispatch **SNS Engagement Control** (`engagement-control.yml`, `workflow_dispatch`) with `account: ACCOUNT_ID` and:
 
-```text
-[engagement-activate] ACCOUNT_ID
-[engagement-deactivate] ACCOUNT_ID
-```
+- `action: activate`
+- `action: deactivate`
 
-`[engagement-activate]` fails closed unless all repository-verifiable gates pass first:
+`action: activate` fails closed unless all repository-verifiable gates pass first (and, while Manual-Only is active, is rejected outright regardless of who runs it — see `docs/CHATOPS.md`):
 
 - account is enabled and not paused;
 - account is in `allowedAccounts`;
@@ -48,20 +48,21 @@ Use the ChatGPT/GitHub Issue control bridge:
 The control workflow then commits `config/accounts.json` and `config/engagement-policy.json` together.
 A failed runner therefore cannot persist a one-file half-activation.
 
-`[engagement-deactivate]` is the kill switch. It does not dismantle credentials or disable normal posting.
+`action: deactivate` is the kill switch. It does not dismantle credentials or disable normal posting, and is not blocked by Manual-Only.
 
-## Runtime: manual diagnostics + cost-aware scheduled operation
+## Runtime: manual diagnostics + (designed) cost-aware scheduled operation
 
-Two workflows intentionally coexist:
+Two workflows exist for two different purposes:
 
-### `SNS Engagement Autopilot`
+### `SNS Engagement Autopilot` (`engagement.yml`)
 
-Manual `workflow_dispatch` for setup, diagnostics, controlled dry-runs, and explicit operator runs.
+Manual `workflow_dispatch` for setup, diagnostics, controlled dry-runs, and explicit operator runs. This is the only way to actually run engagement discovery/classification today.
 
-### `SNS Engagement Scheduled`
+### `SNS Engagement Scheduled` (`engagement-scheduled.yml`)
 
-Runs every 30 minutes. A scheduled wake-up does **not** automatically mean a provider read.
-`src/engagement/scheduled.mjs` first applies a local, zero-network gate:
+**Currently a no-op under Manual-Only:** the workflow is `workflow_dispatch`-only, performs zero provider reads or polling, and just prints an explanation pointing at `SNS Engagement Autopilot` instead. The design below (`src/engagement/scheduled.mjs`) is not called by any workflow today; re-enabling it is a separate, deliberately reviewed change to both the runtime policy and this workflow's YAML (see `docs/GO_LIVE_CHECKLIST.md`).
+
+Designed to run every 30 minutes once re-enabled. A scheduled wake-up would **not** automatically mean a provider read — `src/engagement/scheduled.mjs` first applies a local, zero-network gate:
 
 - the account must be enabled, not paused, and present in `liveAccounts`;
 - if public auto-replies are enabled, the account must have one of its own published posts within the
@@ -134,11 +135,9 @@ automatically after activation. Human escalation is reserved for cases such as:
 - explicit requests to speak to a human;
 - low-confidence cases where an automatic reply should not be trusted.
 
-Those cases create a `[engagement-human]` Issue with `needs-human`.
+Those cases create a `[engagement-human] <account> <event-key>` Issue with the `needs-human` label.
 
-Public human-required replies can be resolved through ChatOps. Private human-required DMs deliberately
-remain manual-send exceptions so private message content and final reply text do not pass through a
-public GitHub Issue.
+Public human-required replies are resolved by dispatching **SNS Engagement Resolve** (`engagement-resolve.yml`) with the account/event_key from the Issue title, `action: reply` (with a non-empty `text` — a live `action: reply` with empty text is rejected) or `action: ignore`, `dry_run: false`, and `confirm_live: true` — not through `chatops.yml`, which is deliberately provider-offline and never touches engagement state. Private human-required DMs deliberately remain manual-send exceptions so private message content and final reply text do not pass through a public GitHub Issue.
 
 ## At-most-once delivery guard
 
