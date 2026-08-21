@@ -1,65 +1,37 @@
 name: SNS ChatOps
 
-# Safety routing notes used by static regression tests:
-# [preflight] and [dry-run] are explicit manual workflow_dispatch commands only.
-# Automated-engagement compliance lives in src/ops/x-automation-compliance.mjs and is intentionally
-# not executed by routine publish preflight; engagement activation has its own separate gate.
+# Manual-Only convenience surface.
+# This workflow is intentionally provider-offline: it never receives provider/OpenAI
+# credentials and never performs live publish, reply, DM, polling, or engagement actions.
+# Live publish preflight and publishing have dedicated explicit manual workflows.
 
 on:
   workflow_dispatch:
     inputs:
       command:
-        description: Manual command to run
+        description: Keyless manual command to run
         required: true
         default: preflight
         type: choice
-        options: [preflight, dry-run, engagement-dry-run, engagement-run, engagement-resolve]
+        options: [preflight, dry-run]
       account:
         description: Account ID from config/accounts.json
         required: true
         type: string
-      event_key:
-        description: 32-character event key for engagement-resolve only
-        required: false
-        type: string
-      resolution_action:
-        description: Resolution action for engagement-resolve
-        required: false
-        default: ignore
-        type: choice
-        options: [reply, ignore]
-      resolution_text:
-        description: Reply text for engagement-resolve when action=reply
-        required: false
-        type: string
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 concurrency:
-  group: sns-ai-write
+  group: sns-ai-chatops-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   command:
     runs-on: ubuntu-latest
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
-      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
-      MEDIA_SERVICE_TOKEN: ${{ secrets.MEDIA_SERVICE_TOKEN }}
-      GITHUB_TOKEN: ${{ github.token }}
-      GH_TOKEN: ${{ github.token }}
-      GITHUB_REPOSITORY: ${{ github.repository }}
-      SNS_MANUAL_INVOCATION: 'true'
-      SNS_DURABLE_BUDGETS: 'true'
-      SNS_DURABLE_STATE_BRANCH: sns-ai-state
       INPUT_COMMAND: ${{ inputs.command }}
       INPUT_ACCOUNT: ${{ inputs.account }}
-      INPUT_EVENT_KEY: ${{ inputs.event_key }}
-      INPUT_RESOLUTION_ACTION: ${{ inputs.resolution_action }}
-      INPUT_RESOLUTION_TEXT: ${{ inputs.resolution_text }}
       COMMAND_OUTPUT: /tmp/sns-chatops-output.txt
 
     steps:
@@ -84,134 +56,42 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate inputs and prepare resolution
+      - name: Validate inputs
         shell: bash
         run: |
           node --input-type=module <<'NODE'
-          import { writeFileSync } from 'node:fs';
           const command = String(process.env.INPUT_COMMAND || '').trim();
           const account = String(process.env.INPUT_ACCOUNT || '').trim();
-          if (!['preflight', 'dry-run', 'engagement-dry-run', 'engagement-run', 'engagement-resolve'].includes(command)) throw new Error('Unsupported ChatOps command.');
+          if (!['preflight', 'dry-run'].includes(command)) throw new Error('Unsupported ChatOps command.');
           if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
-          if (command === 'engagement-resolve') {
-            const eventKey = String(process.env.INPUT_EVENT_KEY || '').trim();
-            const action = String(process.env.INPUT_RESOLUTION_ACTION || 'ignore').trim().toLowerCase();
-            const text = String(process.env.INPUT_RESOLUTION_TEXT || '');
-            if (!/^[a-f0-9]{32}$/.test(eventKey)) throw new Error('engagement-resolve requires a valid 32-character event key.');
-            if (!['reply', 'ignore'].includes(action)) throw new Error('Resolution action must be reply or ignore.');
-            if (action === 'reply' && !text.trim()) throw new Error('Reply resolution requires non-empty text.');
-            writeFileSync('engagement-resolve.json', JSON.stringify({ account, eventKey, action, text }));
-          }
           NODE
 
-      - name: Runtime static guards
-        run: |
-          npm run validate
-          npm run check
-          npm run secret-scan
-          npm run manual-only-audit
-
-      - name: Restore durable engagement and OAuth state
-        shell: bash
-        run: bash scripts/engagement-durable-state.sh restore
-
-      - name: Execute Preflight
+      - name: Execute keyless preflight
         if: inputs.command == 'preflight'
         shell: bash
         run: |
           set -o pipefail
           {
-            status=0
-            npm run doctor -- --strict --account "$INPUT_ACCOUNT" || status=1
-            node src/ops/live-preflight.mjs --account "$INPUT_ACCOUNT" || status=1
-            node src/ops/x-posting-compliance.mjs --account "$INPUT_ACCOUNT" || status=1
-            exit "$status"
+            npm run validate
+            npm run check
+            npm run secret-scan
+            npm run manual-only-audit
+            npm run doctor
           } 2>&1 | tee "$COMMAND_OUTPUT"
 
-      - name: Execute Autopilot Dry Run
+      - name: Execute dry run
         if: inputs.command == 'dry-run'
         shell: bash
         run: |
           set -o pipefail
           node src/orchestrate.mjs --account "$INPUT_ACCOUNT" --force --dry-run 2>&1 | tee "$COMMAND_OUTPUT"
 
-      - name: Execute Engagement Dry Run
-        if: inputs.command == 'engagement-dry-run'
-        shell: bash
-        run: |
-          private_output=/tmp/sns-engagement-dry-run-private.txt
-          if node src/engagement/run.mjs --account "$INPUT_ACCOUNT" --dry-run >"$private_output" 2>&1; then
-            printf '%s\n' 'Engagement dry-run completed. Detailed interaction output is intentionally suppressed because it can contain private-DM-derived content.' > "$COMMAND_OUTPUT"
-          else
-            printf '%s\n' 'Engagement dry-run failed. Detailed interaction output is intentionally suppressed for privacy.' > "$COMMAND_OUTPUT"
-            exit 1
-          fi
-
-      - name: Execute Engagement Run
-        if: inputs.command == 'engagement-run'
-        shell: bash
-        run: |
-          private_output=/tmp/sns-engagement-run-private.txt
-          if node src/engagement/run.mjs --account "$INPUT_ACCOUNT" --manual-invocation >"$private_output" 2>&1; then
-            printf '%s\n' 'Manual engagement run completed. Detailed interaction output is intentionally suppressed for privacy.' > "$COMMAND_OUTPUT"
-          else
-            printf '%s\n' 'Manual engagement run failed. Detailed interaction output is intentionally suppressed for privacy.' > "$COMMAND_OUTPUT"
-            exit 1
-          fi
-
-      - name: Execute Engagement Resolution
-        if: inputs.command == 'engagement-resolve'
-        shell: bash
-        run: |
-          private_output=/tmp/sns-engagement-resolve-private.txt
-          if node src/engagement/run.mjs --resolve-file engagement-resolve.json --manual-invocation >"$private_output" 2>&1; then
-            printf '%s\n' 'Human-resolved engagement action completed. Detailed interaction output is intentionally suppressed for privacy.' > "$COMMAND_OUTPUT"
-          else
-            printf '%s\n' 'Human-resolved engagement action failed. Detailed interaction output is intentionally suppressed for privacy.' > "$COMMAND_OUTPUT"
-            exit 1
-          fi
-
-      - name: Persist durable engagement and OAuth state
-        if: always()
-        shell: bash
-        run: bash scripts/engagement-durable-state.sh persist
-
-      - name: Remove durable state workspace copies before main persistence
-        if: always()
-        shell: bash
-        run: |
-          rm -f \
-            data/engagement-state.json \
-            data/engagement-audit.jsonl \
-            data/x-oauth2-state.json \
-            data/engagement-delivery-ledger.json \
-            data/durable-usage-state.json
-
-      - name: Persist remaining safe runtime state
-        if: always()
-        shell: bash
-        run: |
-          paths=(data/usage.jsonl data/usage-state.json)
-          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then exit 0; fi
-          git config user.name "sns-ai-bot"
-          git config user.email "sns-ai-bot@users.noreply.github.com"
-          for path in "${paths[@]}"; do
-            [[ -e "$path" ]] && git add "$path"
-          done
-          git diff --cached --quiet && exit 0
-          git commit -m "chore: persist SNS ChatOps state"
-          for attempt in 1 2 3; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
-            sleep $((attempt * 3))
-          done
-          exit 1
-
       - name: Add privacy-safe run summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## SNS ChatOps'
+            echo '## SNS ChatOps (provider-offline)'
             echo
             echo "Command: \`$INPUT_COMMAND\`"
             echo "Account: \`$INPUT_ACCOUNT\`"
