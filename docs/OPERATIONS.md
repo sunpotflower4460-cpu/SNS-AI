@@ -2,6 +2,8 @@
 
 この文書は、**実接続 → controlled launch → 定期自動投稿 → 長期無人運用 → 障害対応**の手順です。
 
+**現在このリポジトリはManual-Onlyでロックされています**（[`docs/MANUAL_ONLY_MODE.md`](MANUAL_ONLY_MODE.md)）。§7「定期自動投稿」と§11「Metrics / Learning」が説明するschedule実行、および§16末尾の「定期実行」は、Manual-Onlyを別途レビューして解除した場合の設計上の挙動です。現在は全てのSNS操作workflowが`workflow_dispatch`のみで、schedule triggerは付いていません。実際の手動実行手順は[`docs/MANUAL_SETUP_CHECKLIST.md`](MANUAL_SETUP_CHECKLIST.md)を参照してください。
+
 ## 1. 接続前にCIが保証する範囲
 
 PR / main CIで次を実行します。
@@ -180,11 +182,11 @@ Preflight中にX tokenがrotateした場合、その暗号化stateは成功/失�
 7. 投稿URL/IDがhistoryへ保存されたことを確認
 8. SNS Metrics Collectorを確認
 9. Current Reportでmetricsが反映されることを確認
-10. 問題なければ`mode: auto`
+10. 問題なければ`mode: auto`（Manual-Only下では`account-control.yml`経由での`auto`遷移は拒否されます。到達するには`config/accounts.json`への別途レビュー済みの直接編集が必要です）
 
-## 7. 定期自動投稿
+## 7. 定期自動投稿（Manual-Only解除後の設計）
 
-**SNS Autopilot**は10分ごとに起動します。Scheduled runはliveです。`findDueSlots()`がアカウントtimezoneの`times`と`windowMinutes`を見て対象slotを拾います。
+**この節はManual-Onlyを別途レビューして解除し、scheduleを再導入した場合の設計です。現在**SNS Autopilot**は`workflow_dispatch`のみで、10分ごとには起動しません。** 解除後は、`findDueSlots()`がアカウントtimezoneの`times`と`windowMinutes`を見て対象slotを拾う設計です。
 
 同じslotは`account:date:time`のslot IDでstate管理するため、同一slotを再投稿しない設計です。
 
@@ -247,7 +249,9 @@ GitHub Release
 
 QA不合格素材はReleaseへ公開しません。設定回数内でQA指摘だけを反映して再生成します。
 
-## 11. Metrics / Learning
+## 11. Metrics / Learning（Manual-Only解除後の設計）
+
+**この節もManual-Only解除後のscheduleを前提とした設計です。現在はいずれも`workflow_dispatch`による手動実行のみです。** 解除後の想定cadence:
 
 - Metrics Collector: 毎時
 - Daily Learning: 毎日
@@ -321,4 +325,4 @@ provider側のbilling/credits/rate limitは別です。X API creditsとOpenAI AP
 - 1回以上のMetrics収集成功
 - Health Issueなし
 
-ここまで通った後、残る定期実行はGitHub Actions + configured scheduleが担当します。
+ここまで通った時点で完了するのは「1件の確認済みlive投稿」までです。`mode: auto`への遷移自体、Manual-Only下では`account-control.yml`経由で拒否されます。ここに書いた「残る定期実行はGitHub Actions + configured scheduleが担当」は、Manual-Onlyを別途レビューして解除した場合の設計であり、現在の挙動ではありません。
