@@ -745,3 +745,36 @@ test('docs beyond the first audit pass do not describe dead bracket commands or 
   }
   assert.doesNotMatch(operations, /^\*\*SNS Autopilot\*\*は10分ごとに起動します。Scheduled runはliveです。/m, 'must not claim Autopilot is currently live-scheduled');
 });
+
+// The same independent re-audit flagged an inconsistency, not a bug in itself: autopilot.yml,
+// health.yml, intelligence.yml, learning.yml, maintenance.yml, metrics.yml, and policy.yml all carry
+// contents:write (metrics.yml also carries SOCIAL_CREDENTIALS_JSON) yet, unlike every other
+// write-capable operational workflow, had no "Authorize command actor" step - any repository
+// collaborator with plain GitHub write access, not just the owner or SNS_COMMAND_ADMINS, could spend
+// OpenAI budget, create Issues, or trigger a real provider read on any of these. None of them reach
+// live-mutation capability on their own (that still requires publish.yml/engagement-resolve.yml's
+// separate confirm_live gate), but leaving some operational workflows gated and others not is exactly
+// the kind of inconsistency this repo has repeatedly closed elsewhere in this same effort.
+test('every write-capable or secret-bearing operational workflow gates on the authorized-actor check', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  // ci.yml and failure-watch.yml are the two reviewed GitHub-internal automatic exceptions (see
+  // manual-only-audit.mjs's INFRASTRUCTURE_WORKFLOWS) - they must never receive SNS/provider secrets
+  // and are intentionally not actor-gated. engagement-scheduled.yml is a workflow_dispatch-only no-op
+  // stub (contents: read, no secrets, prints an explanation) with nothing to gate.
+  const exempt = new Set(['ci.yml', 'failure-watch.yml', 'engagement-scheduled.yml']);
+
+  const missing = [];
+  for (const name of files) {
+    if (exempt.has(name)) continue;
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    const grantsWrite = /^\s*contents:\s*write\s*$/m.test(yaml);
+    const carriesSecret = /secrets\.(OPENAI_API_KEY|SOCIAL_CREDENTIALS_JSON|X_OAUTH2_STATE_KEY|MEDIA_SERVICE_TOKEN|CONVENIENCE_HUB_GITHUB_TOKEN)\b/.test(yaml);
+    if (!grantsWrite && !carriesSecret) continue;
+    if (!/name:\s*Authorize command actor/.test(yaml) || !/SNS_COMMAND_ADMINS/.test(yaml)) missing.push(name);
+  }
+
+  assert.deepEqual(missing, [], `workflow(s) grant write access or a provider/OpenAI secret without gating on the authorized-actor check:\n${JSON.stringify(missing, null, 2)}`);
+});
