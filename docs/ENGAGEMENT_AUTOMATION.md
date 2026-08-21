@@ -36,7 +36,7 @@ Dispatch **SNS Engagement Control** (`engagement-control.yml`, `workflow_dispatc
 - `action: activate`
 - `action: deactivate`
 
-`action: activate` fails closed unless all repository-verifiable gates pass first (and, while Manual-Only is active, is rejected outright regardless of who runs it — see `docs/CHATOPS_ACCOUNT_LIFECYCLE.md`):
+`action: activate` fails closed unless all repository-verifiable gates pass first (and, while Manual-Only is active, is rejected outright regardless of who runs it — see `docs/CHATOPS.md`):
 
 - account is enabled and not paused;
 - account is in `allowedAccounts`;
@@ -137,7 +137,7 @@ automatically after activation. Human escalation is reserved for cases such as:
 
 Those cases create a `[engagement-human] <account> <event-key>` Issue with the `needs-human` label.
 
-Public human-required replies are resolved by dispatching **SNS Engagement Resolve** (`engagement-resolve.yml`) with the account/event_key from the Issue title, `action: reply` or `ignore`, `dry_run: false`, and `confirm_live: true` — not through `chatops.yml`, which is deliberately provider-offline and never touches engagement state. Private human-required DMs deliberately remain manual-send exceptions so private message content and final reply text do not pass through a public GitHub Issue.
+Public human-required replies are resolved by dispatching **SNS Engagement Resolve** (`engagement-resolve.yml`) with the account/event_key from the Issue title, `action: reply` (with a non-empty `text` — a live `action: reply` with empty text is rejected) or `action: ignore`, `dry_run: false`, and `confirm_live: true` — not through `chatops.yml`, which is deliberately provider-offline and never touches engagement state. Private human-required DMs deliberately remain manual-send exceptions so private message content and final reply text do not pass through a public GitHub Issue.
 
 ## At-most-once delivery guard
 

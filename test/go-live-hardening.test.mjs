@@ -771,7 +771,13 @@ test('every write-capable or secret-bearing operational workflow gates on the au
     if (exempt.has(name)) continue;
     const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
     const grantsWrite = /^\s*contents:\s*write\s*$/m.test(yaml);
-    const carriesSecret = /secrets\.(OPENAI_API_KEY|SOCIAL_CREDENTIALS_JSON|X_OAUTH2_STATE_KEY|MEDIA_SERVICE_TOKEN|CONVENIENCE_HUB_GITHUB_TOKEN)\b/.test(yaml);
+    // Any secrets.* reference is treated as sensitive by default, except the one GitHub-managed
+    // token that isn't a repo-configured credential - this way a future workflow that introduces a
+    // new provider/credential secret is caught automatically instead of requiring this test to be
+    // updated in lockstep with every new secret name.
+    const NON_SENSITIVE_SECRETS = new Set(['GITHUB_TOKEN']);
+    const secretNames = [...yaml.matchAll(/secrets\.([A-Z0-9_]+)\b/g)].map((match) => match[1]);
+    const carriesSecret = secretNames.some((secretName) => !NON_SENSITIVE_SECRETS.has(secretName));
     if (!grantsWrite && !carriesSecret) continue;
     if (!/name:\s*Authorize command actor/.test(yaml) || !/SNS_COMMAND_ADMINS/.test(yaml)) missing.push(name);
   }
