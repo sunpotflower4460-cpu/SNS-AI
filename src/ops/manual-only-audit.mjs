@@ -6,9 +6,10 @@ import { loadRuntimePolicy } from './manual-only.mjs';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 export const OPERATIONAL_WORKFLOWS = new Set([
   'account-control.yml', 'autopilot.yml', 'chatops.yml', 'compliance-attestation.yml',
-  'engagement-control.yml', 'engagement-scheduled.yml', 'engagement.yml', 'feedback.yml',
-  'health.yml', 'hub-reconcile.yml', 'intelligence.yml', 'learning.yml', 'maintenance.yml',
-  'metrics.yml', 'policy.yml', 'preflight.yml', 'publish-reconcile.yml', 'publish.yml'
+  'engagement-control.yml', 'engagement-resolve.yml', 'engagement-scheduled.yml', 'engagement.yml',
+  'feedback.yml', 'health.yml', 'hub-reconcile.yml', 'intelligence.yml', 'learning.yml',
+  'maintenance.yml', 'metrics.yml', 'policy.yml', 'preflight.yml', 'publish-reconcile.yml',
+  'publish.yml'
 ]);
 
 export const INFRASTRUCTURE_WORKFLOWS = new Map([

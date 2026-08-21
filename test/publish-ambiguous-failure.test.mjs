@@ -17,6 +17,11 @@ import { getDurableClaim } from '../src/lib/durable-claim.mjs';
 // the suite before this file - every existing test either simulated a clean HTTP error response or
 // never drove a real network-level exception through the real publish() -> publishX() -> fetchJson()
 // stack.
+//
+// This file must run with `--import ./test/manual-invocation-harness.mjs` (npm test/coverage already
+// do this) so SNS_MANUAL_INVOCATION is set before the live-mutation path below runs - without it,
+// assertProviderMutationAllowed() rejects with MANUAL_ONLY_BLOCKED before the scenario under test is
+// even reached, which looks like a regression here but is a test-invocation gap, not a code bug.
 
 const CONFIG_FILE = fileURLToPath(new URL('../config/accounts.json', import.meta.url));
 const DURABLE_DIR = fileURLToPath(new URL('../data/durable-claims/', import.meta.url));

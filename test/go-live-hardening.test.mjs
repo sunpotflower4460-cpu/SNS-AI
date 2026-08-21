@@ -14,7 +14,11 @@ const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta
 // Regression coverage for the go-live audit: the gaps that would let an operator complete every
 // documented manual step and still end up with a system that silently does nothing.
 
-test('the approval issue body tells the operator that the "approved" label is what publishes', () => {
+test('the approval issue body tells the operator how to actually publish under Manual-Only', () => {
+  // publish.yml is workflow_dispatch-only (see docs/MANUAL_ONLY_MODE.md) - there is no `issues:
+  // [labeled]` or any other server-side trigger anywhere in .github/workflows/ that fires on this
+  // issue. The instructions must therefore point at the real mechanism (manually running the
+  // "Publish social post" Action with confirm_live=true), not at a label that nothing listens for.
   const account = 'music-tools-x';
   const slotId = 'music-tools-x:2026-08-18:09:00';
   const payload = githubTest.markedApprovalPayload({ account, slotId, text: 'draft text' }, account, slotId);
@@ -35,9 +39,22 @@ test('the approval issue body tells the operator that the "approved" label is wh
   assert.equal(trusted.slotId, slotId);
   assert.equal(trusted.text, 'draft text');
 
-  assert.match(body, /approved/, 'the body must name the label that triggers publishing');
+  const instructions = payload._howToPublish.join('\n');
+  assert.match(instructions, /Publish social post/, 'must name the actual Action that publishes');
+  assert.match(instructions, /workflow_dispatch/i, 'must say how that Action is triggered');
+  assert.match(instructions, /confirm_live:\s*true/, 'must state the explicit live-confirmation input required');
+  assert.match(instructions, new RegExp(`account:\\s*${account}`), 'must tell the operator the exact account input to use');
+  assert.match(instructions, /does NOT publish anything/i, 'must explicitly say the label/comment/close path does nothing');
   // The instruction must be the first thing a human sees, not buried under the draft metadata.
   assert.ok(Object.keys(payload)[0] === '_howToPublish', 'instructions must render first in the issue body');
+});
+
+test('publish.yml really has no label/issue trigger, so the approval instructions are not describing a dead mechanism the other way around either', async () => {
+  const yaml = await readFile(`${WORKFLOWS_DIR}publish.yml`, 'utf8');
+  const onBlock = /\non:\n((?:[ \t]+[^\n]*\n)*)/.exec(yaml);
+  assert.ok(onBlock, 'publish.yml must have an on: block');
+  assert.doesNotMatch(onBlock[1], /issues:/, 'publish.yml must not gain an issues:[labeled] trigger without updating the approval-issue instructions to match');
+  assert.match(onBlock[1], /workflow_dispatch:/);
 });
 
 test('the scheduled health report runs the readiness doctor in --strict mode so it can actually fail', async () => {
@@ -534,4 +551,167 @@ test('a failed slot write leaves the approval issue open for retry, instead of c
   assert.deepEqual(error.result?.closed, [], 'nothing was actually closed');
   assert.equal(error.result?.expiredSlots?.[0]?.applied, false);
   assert.ok(error.result?.expiredSlots?.[0]?.error, 'the failure reason must be attached for diagnosis');
+});
+
+// hub-reconcile.yml and publish-reconcile.yml write authoritative provider-confirmed state back to
+// main and finalize durable claims, yet - unlike every other write-capable operational workflow
+// (publish.yml, account-control.yml, engagement-control.yml, compliance-attestation.yml,
+// chatops.yml, feedback.yml) - they had no actor check at all: any repository collaborator with
+// generic write access, not just the owner or SNS_COMMAND_ADMINS, could trigger them.
+//
+// engagement.yml is a sharper case of the same bug: it unconditionally sets
+// SNS_MANUAL_INVOCATION: 'true' in its job env, which is the exact token
+// assertProviderMutationAllowed() (src/ops/manual-only.mjs) treats as proof a human deliberately
+// ran this as a manual workflow_dispatch. publish.yml hands out that same token under an actor
+// check plus an explicit confirm_live input; engagement.yml handed it out to any workflow_dispatch
+// caller with no actor check and no second confirmation. Today that gap is inert only because
+// config/engagement-policy.json's approvalRequired:true and empty liveAccounts (both enforced by
+// manual-only-audit.mjs) route every reply through a human-approval issue first - the same kind of
+// "safe only because an unrelated config layer happens to also block it" gap already fixed for
+// requireExplicitManualInvocation in src/ops/manual-only.mjs. Any workflow that grants this
+// specific credential must gate who can grant it, independent of what else currently blocks misuse.
+test('every workflow that sets SNS_MANUAL_INVOCATION or writes state back to main gates on the authorized-actor check', async () => {
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  const hasActorGate = (yaml) => /name:\s*Authorize command actor/.test(yaml) && /SNS_COMMAND_ADMINS/.test(yaml) && /github\.repository_owner/.test(yaml);
+
+  const mustGate = ['hub-reconcile.yml', 'publish-reconcile.yml'];
+  for (const name of mustGate) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    assert.ok(hasActorGate(yaml), `${name} writes authoritative state back to main but has no "Authorize command actor" step`);
+  }
+
+  for (const name of files) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    if (!/SNS_MANUAL_INVOCATION/.test(yaml)) continue;
+    assert.ok(hasActorGate(yaml), `${name} sets SNS_MANUAL_INVOCATION (grants the explicit-manual-invocation credential) but has no "Authorize command actor" step`);
+  }
+});
+
+// Every "[engagement-human] <account> <event-key>" escalation Issue told the operator to resolve it
+// through "[engagement-resolve]" - a bracket-command Issue-title syntax that, exactly like the old
+// "approved" label, nothing in .github/workflows/ ever listened for. src/engagement/run.mjs already
+// implements the resolve logic (resolveHumanEngagement, reachable via `--resolve-file`), but no
+// workflow called it, so a human who did everything the Issue told them to do could still never
+// actually send the reply or dismiss the escalation.
+test('a human-escalation engagement Issue points at a real, existing workflow instead of a dead bracket command', async () => {
+  const runSource = await readFile(fileURLToPath(new URL('../src/engagement/run.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(runSource, /\[engagement-resolve\]/, 'the dead bracket-command reference must be gone');
+  assert.match(runSource, /SNS Engagement Resolve/, 'the resolution text must name the real Action');
+  assert.match(runSource, /event_key:/, 'the resolution text must tell the operator the event_key input to use');
+  assert.match(runSource, /does NOT reply or dismiss anything/i, 'must explicitly say the label/comment/close path does nothing');
+
+  const workflow = await readFile(`${WORKFLOWS_DIR}engagement-resolve.yml`, 'utf8');
+  const onBlock = /\non:\n((?:[ \t]+[^\n]*\n)*)/.exec(workflow);
+  assert.ok(onBlock, 'engagement-resolve.yml must have an on: block');
+  assert.match(onBlock[1], /workflow_dispatch:/);
+  assert.doesNotMatch(onBlock[1], /schedule:|issues:|issue_comment:/, 'must stay workflow_dispatch-only under Manual-Only');
+  assert.match(workflow, /name:\s*Authorize command actor/);
+  assert.match(workflow, /SNS_COMMAND_ADMINS/);
+  assert.match(workflow, /confirm_live/);
+  assert.match(workflow, /run\.mjs --resolve-file/, 'must actually invoke the resolve entrypoint');
+});
+
+// docs/CHATOPS.md and docs/CHATOPS_ACCOUNT_LIFECYCLE.md used to describe an Issue-title-triggered
+// command system ("[preflight] <id>", "[account-approval] ACCOUNT_ID", etc.) that has never existed
+// in any workflow trigger - every operational workflow is workflow_dispatch-only. Docs describing a
+// control surface that does not exist are worse than no docs: an operator who follows them exactly
+// ends up with an Issue GitHub never acts on and no idea why nothing happened.
+test('ChatOps docs describe the real workflow_dispatch interface, not a dead Issue-title command system', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const chatops = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+  const lifecycle = await readFile(`${DOCS_DIR}CHATOPS_ACCOUNT_LIFECYCLE.md`, 'utf8');
+
+  for (const doc of [chatops, lifecycle]) {
+    assert.doesNotMatch(doc, /\[preflight\]|\[dry-run\]|\[engagement-dry-run\]|\[engagement-run\]|\[account-approval\]|\[account-auto\]|\[account-pause\]|\[account-disable\]/, 'must not describe dead bracket-command Issue titles');
+    assert.doesNotMatch(doc, /[Cc]reate an Issue with/, 'must not instruct the operator to create a command Issue');
+    assert.match(doc, /workflow_dispatch/, 'must name the actual trigger mechanism');
+  }
+
+  assert.match(chatops, /SNS_COMMAND_ADMINS/);
+  assert.match(chatops, /engagement-resolve\.yml/i, 'must document the workflow that actually resolves escalations');
+
+  assert.match(lifecycle, /manualOnly.*true|Manual-Only is active/i);
+  assert.match(lifecycle, /account-control\.yml/i);
+});
+
+// GO_LIVE_CHECKLIST.md, ACCOUNT_MUSIC_TOOLS_X.md, and README.md predate the Manual-Only pivot and
+// still described a scheduled/`approved`-label operating model that no longer exists: Autopilot,
+// Metrics, Intelligence, Learning, and Policy Watch all claimed fixed cron cadences (10-min polling,
+// hourly, every 6h, daily) when every one of those workflows is workflow_dispatch-only with no
+// schedule trigger, and the go-live checklist told the operator the same dead "add the approved
+// label" instruction already fixed in src/lib/github.mjs for the approval-issue payload itself.
+test('go-live docs describe the current Manual-Only posture, not the old scheduled/approved-label model', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+  const goLive = await readFile(`${DOCS_DIR}GO_LIVE_CHECKLIST.md`, 'utf8');
+  const musicToolsX = await readFile(`${DOCS_DIR}ACCOUNT_MUSIC_TOOLS_X.md`, 'utf8');
+  const readme = await readFile(`${REPO_ROOT}README.md`, 'utf8');
+
+  for (const doc of [goLive, musicToolsX, readme]) {
+    assert.doesNotMatch(doc, /\[preflight\]|\[dry-run\]|\[engagement-dry-run\]/, `${doc === goLive ? 'GO_LIVE_CHECKLIST.md' : doc === musicToolsX ? 'ACCOUNT_MUSIC_TOOLS_X.md' : 'README.md'} must not describe dead bracket-command Issue titles`);
+    assert.doesNotMatch(doc, /10分ごと|— 毎時|6時間ごと|— 毎日/, 'must not claim a fixed automatic cadence for a workflow_dispatch-only workflow');
+    assert.match(doc, /[Mm]anual-Only|manualOnly/, 'must mention the current Manual-Only posture');
+  }
+
+  assert.doesNotMatch(goLive, /labelを付ける」ことだけです/, 'must not tell the operator that a label triggers publishing');
+  assert.match(goLive, /confirm_live/, 'must name the real live-publish confirmation input');
+  assert.match(goLive, /engagement-resolve\.yml|SNS Engagement Resolve/i, 'must point at the workflow that actually resolves engagement escalations');
+
+  assert.doesNotMatch(musicToolsX, /adding the `approved` label to its approval Issue/i);
+});
+
+// docs/CHATOPS.md documented chatops.yml's "dry-run" command as a working, provider-offline
+// preview - but chatops.yml never sets OPENAI_API_KEY, and orchestrate.mjs's dry-run path
+// deliberately still calls the real OpenAI Responses API (see the comment on openaiRequest() in
+// src/lib/openai.mjs: "dry-run previews still call the real Responses API so an operator can
+// actually see what would be posted"). Every dispatch of that command would have failed with a
+// missing-credential error - CodeRabbit caught the contradiction between the "provider-offline"
+// framing and the dry-run command actually needing a provider credential it never receives. Fixed
+// by dropping the broken dry-run command from ChatOps entirely and pointing operators at SNS
+// Autopilot's dry_run input instead, which already carries the required credential.
+test('ChatOps does not advertise a dry-run command it structurally cannot run', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const chatops = await readFile(`${WORKFLOWS_DIR}chatops.yml`, 'utf8');
+  const chatopsDoc = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+
+  assert.doesNotMatch(chatops, /options:.*dry-run/, 'chatops.yml must not offer a command it cannot actually run without a credential it never receives');
+  assert.doesNotMatch(chatops, /if:\s*inputs\.command == 'dry-run'/);
+  assert.doesNotMatch(chatops, /orchestrate\.mjs/);
+  assert.match(chatops, /options:\s*\[preflight\]/);
+
+  assert.doesNotMatch(chatopsDoc, /`preflight` or `dry-run`/i);
+  assert.match(chatopsDoc, /SNS Autopilot/, 'must point operators at the workflow that can actually preview a generation');
+});
+
+// A second CodeRabbit pass on this same PR caught three more accuracy gaps in the just-rewritten
+// docs: the engagement descriptions said automatic sending only depended on liveAccounts/confidence,
+// omitting that approvalRequired:true (required today by manual-only-audit) routes every reply to a
+// human Issue regardless of those two; the go-live checklist implied lifting Manual-Only alone
+// restores engagement.yml's automatic polling, when the cron trigger itself lives in the workflow
+// YAML and needs its own edit; and README's Manual-Only framing said "all workflows"/"all execution"
+// while documenting ci.yml/failure-watch.yml as automatic exceptions two lines later.
+test('engagement/schedule docs do not overstate what liveAccounts, Manual-Only, or "all workflows" alone accomplish', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+  const chatopsDoc = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+  const musicToolsX = await readFile(`${DOCS_DIR}ACCOUNT_MUSIC_TOOLS_X.md`, 'utf8');
+  const goLive = await readFile(`${DOCS_DIR}GO_LIVE_CHECKLIST.md`, 'utf8');
+  const readme = await readFile(`${REPO_ROOT}README.md`, 'utf8');
+
+  for (const doc of [chatopsDoc, musicToolsX]) {
+    assert.match(doc, /approvalRequired/, 'engagement auto-send description must mention approvalRequired, not just liveAccounts/confidence');
+  }
+
+  assert.match(goLive, /workflowファイルへ`schedule:`を追加/, 'must say the workflow YAML itself needs a schedule: edit, not just the runtime policy');
+
+  assert.match(readme, /operator workflow/, 'must scope the Manual-Only claim to operator workflows, excluding the documented CI/Failure-Watch exceptions');
+  // Both places that claim "all workflows are workflow_dispatch-only" must mention the ci.yml/
+  // failure-watch.yml exception in the same breath, not just further down the document.
+  const introBanner = readme.slice(readme.indexOf('Manual-Onlyでロックされています'), readme.indexOf('## 主な自動化'));
+  assert.match(introBanner, /ci\.yml/, 'the intro Manual-Only banner must name its own automatic-workflow exceptions, not just the GitHub Actions section further down');
+  const actionsSection = readme.slice(readme.indexOf('## GitHub Actions'), readme.indexOf('## GitHub Actions') + 600);
+  assert.match(actionsSection, /ci\.yml/, 'the GitHub Actions section opener must name its automatic-workflow exceptions inline');
 });

@@ -3,7 +3,11 @@ name: SNS ChatOps
 # Manual-Only convenience surface.
 # This workflow is intentionally provider-offline: it never receives provider/OpenAI
 # credentials and never performs live publish, reply, DM, polling, or engagement actions.
-# Live publish preflight and publishing have dedicated explicit manual workflows.
+# Live publish preflight and publishing have dedicated explicit manual workflows. A generation
+# preview (what would be posted) is a "dry-run" command on SNS Autopilot instead - that workflow
+# already carries the OpenAI secret a real preview call to the Responses API requires (see the
+# comment on openaiRequest() in src/lib/openai.mjs). ChatOps deliberately never receives that
+# secret, so it cannot offer a working dry-run of its own.
 
 on:
   workflow_dispatch:
@@ -13,7 +17,7 @@ on:
         required: true
         default: preflight
         type: choice
-        options: [preflight, dry-run]
+        options: [preflight]
       account:
         description: Account ID from config/accounts.json
         required: true
@@ -62,7 +66,7 @@ jobs:
           node --input-type=module <<'NODE'
           const command = String(process.env.INPUT_COMMAND || '').trim();
           const account = String(process.env.INPUT_ACCOUNT || '').trim();
-          if (!['preflight', 'dry-run'].includes(command)) throw new Error('Unsupported ChatOps command.');
+          if (!['preflight'].includes(command)) throw new Error('Unsupported ChatOps command.');
           if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
           NODE
 
@@ -78,13 +82,6 @@ jobs:
             npm run manual-only-audit
             npm run doctor
           } 2>&1 | tee "$COMMAND_OUTPUT"
-
-      - name: Execute dry run
-        if: inputs.command == 'dry-run'
-        shell: bash
-        run: |
-          set -o pipefail
-          node src/orchestrate.mjs --account "$INPUT_ACCOUNT" --force --dry-run 2>&1 | tee "$COMMAND_OUTPUT"
 
       - name: Add privacy-safe run summary
         if: always()

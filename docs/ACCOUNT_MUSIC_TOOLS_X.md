@@ -2,6 +2,8 @@
 
 `music-tools-x` is the first production-oriented account profile for SNS-AI. It is intentionally committed in a non-posting state until external credentials and billing are ready.
 
+**This repository is currently locked to Manual-Only** (see `docs/MANUAL_ONLY_MODE.md`). Every workflow below is `workflow_dispatch`-only — there is no scheduled polling, no Issue-title command, and no `approved` label trigger. `mode: auto` is rejected by `account-control.yml` while Manual-Only is active regardless of who runs it; reaching it requires a separate code-reviewed change to `config/runtime-policy.json`. Sections below describing autonomous/steady-state behavior describe the state this account is built toward, not what runs today.
+
 ## Account concept
 
 **海外のまだ知られていない良いプラグインを発掘して、買う価値まで日本語で判断する。**
@@ -136,29 +138,29 @@ Add these directly in Repository Settings → Secrets and variables → Actions:
 
 ## Controlled activation sequence
 
-After the external setup above is complete:
+After the external setup above is complete, everything is run by manually dispatching GitHub Actions (Actions tab, or `gh workflow run`) — not by opening or labeling an Issue:
 
-1. change only `music-tools-x.enabled` to `true`; keep `mode: approval` for the first controlled publish
-2. from ChatGPT/GitHub ChatOps, run `[preflight] music-tools-x`
-3. run `[dry-run] music-tools-x` and inspect the generated post/research result
-4. if engagement OAuth2 is configured, run `[engagement-dry-run] music-tools-x`
-5. approve exactly **one** controlled real post by adding the `approved` label to its approval Issue
+1. change only `music-tools-x.enabled` to `true`; keep `mode: approval` for the first controlled publish (this itself requires a code-reviewed edit to `config/accounts.json` while Manual-Only is active — see `docs/MANUAL_ONLY_MODE.md`)
+2. dispatch **SNS ChatOps** with `command: preflight`, `account: music-tools-x`
+3. dispatch **SNS Autopilot** with `account: music-tools-x`, `force: true`, `dry_run: true` and inspect the generated post/research result in the run summary (a generation preview needs `OPENAI_API_KEY`, which the keyless ChatOps surface deliberately never receives — see `docs/CHATOPS.md`)
+4. if engagement OAuth2 is configured, dispatch **SNS Engagement Autopilot** with `account: music-tools-x`, `dry_run: true`
+5. approve exactly **one** controlled real post by dispatching **SNS Publish social post** with the account/text/media from the approval Issue, `dry_run: false`, and `confirm_live: true` — an Issue label, comment, or close does nothing
 6. verify `data/history.jsonl`, provider post ID, and subsequent metrics collection
-7. if that controlled publish and readiness checks are clean, change `mode` to `auto`
+7. only after Manual-Only itself has been separately reviewed and lifted for this purpose: if that controlled publish and readiness checks are clean, change `mode` to `auto`
 8. leave routine posting and eligible inbound engagement unattended; return to approval only after a safety brake, credential change, major account-policy change, or another explicit exception
 
-The goal is not to keep clicking approval buttons. The one controlled publish is a launch proof; steady-state operation is autonomous.
+The goal is not to keep clicking approval buttons. The one controlled publish is a launch proof; steady-state operation (once Manual-Only is separately lifted) is autonomous.
 
 ## Engagement steady state
 
-Once engagement credentials are ready and the account is enabled:
+Today, under Manual-Only, **SNS Engagement Autopilot** only runs when manually dispatched — there is no automatic polling. Once dispatched:
 
-- X mentions and eligible inbound DMs are polled automatically
-- routine high-confidence interactions are answered after a bounded human-like delay
+- routine high-confidence public replies to the account's own posts are answered automatically only if `config/engagement-policy.json`'s `approvalRequired` is `false`, the account is in `liveAccounts` (empty today), and confidence clears the configured threshold — today `approvalRequired: true` is required by `manual-only-audit`, so every reply currently goes through the `[engagement-human]` escalation Issue below regardless of `liveAccounts`/confidence
 - opt-outs, duplicate responses, unsolicited outreach, and daily caps are enforced before sending
-- difficult/high-stakes/low-confidence cases create `[engagement-human]` Issues instead of guessing
-- the connected ChatGPT condition-watch surfaces only those unresolved exception cases back into chat
-- private DM bodies are not copied into this public repository
+- difficult/high-stakes/low-confidence cases create `[engagement-human] <account> <event-key>` Issues instead of guessing; resolving one means manually dispatching **SNS Engagement Resolve** with that account/event_key, `dry_run: false`, and `confirm_live: true` — nothing else acts on these Issues
+- private DM bodies are not copied into this public repository; DM auto-reply is disabled (`autoDmReply: false`) and DM escalations must be handled directly in the SNS app
+
+If Manual-Only is later separately reviewed and lifted for scheduled polling, this becomes closer to "X mentions polled automatically, exception cases surfaced back into chat" — but that is a distinct future change, not the current behavior.
 
 ## Later optional expansion
 

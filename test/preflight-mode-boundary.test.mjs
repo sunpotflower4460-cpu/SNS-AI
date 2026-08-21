@@ -14,14 +14,19 @@ test('manual preflight boundaries keep chatops provider-offline and isolate enga
   const engagementControl = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   const manualPreflight = await readFile(`${ROOT}.github/workflows/preflight.yml`, 'utf8');
 
-  // ChatOps is a keyless/manual convenience surface only. It can run static preflight
-  // and a dry-run, but it must not receive provider credentials or run live/provider checks.
+  // ChatOps is a keyless/manual convenience surface only: static preflight, nothing that requires
+  // provider or OpenAI credentials. It must NOT offer a generation dry-run of its own - a real
+  // preview call to the OpenAI Responses API requires OPENAI_API_KEY (openaiRequest() in
+  // src/lib/openai.mjs deliberately calls the real API even during a dry-run so the preview shows
+  // real generated text), and ChatOps is designed to never receive that credential. The working
+  // dry-run preview lives on SNS Autopilot instead, which already carries OPENAI_API_KEY.
   assert.match(chatops, /workflow_dispatch:/);
   assert.doesNotMatch(chatops, /issue_comment:/);
   assert.doesNotMatch(chatops, /schedule:/);
   assert.match(chatops, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(chatops, /INPUT_ACCOUNT:\s*\$\{\{ inputs\.account \}\}/);
-  assert.match(chatops, /orchestrate\.mjs --account "\$INPUT_ACCOUNT" --force --dry-run/);
+  assert.doesNotMatch(chatops, /orchestrate\.mjs/, 'ChatOps must not run a generation path that needs OPENAI_API_KEY it never receives');
+  assert.doesNotMatch(chatops, /options:\s*\[preflight,\s*dry-run\]/);
   assert.doesNotMatch(chatops, /SOCIAL_CREDENTIALS_JSON/);
   assert.doesNotMatch(chatops, /OPENAI_API_KEY/);
   assert.doesNotMatch(chatops, /SNS_MANUAL_INVOCATION/);

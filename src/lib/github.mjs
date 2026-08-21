@@ -29,6 +29,8 @@ export async function githubRequest(path, options = {}) {
   return data;
 }
 
+// This label is cosmetic only - no workflow triggers on it (see approvalInstructions below for the
+// actual publish mechanism). Kept so an operator can still mark issues for their own tracking.
 export async function ensureApprovalLabel() {
   const { repository } = githubContext();
   const [owner, repo] = repository.split('/');
@@ -41,7 +43,7 @@ export async function ensureApprovalLabel() {
     method: 'POST',
     body: JSON.stringify({
       name: 'approved',
-      description: 'Publish an SNS-AI approval draft',
+      description: 'Operator tracking marker only - does not trigger publishing. See the issue body for how to publish.',
       color: '2da44e'
     })
   });
@@ -55,22 +57,37 @@ function approvalMarker(accountId, slotId) {
   return { kind: 'sns-ai-approval', version: 1, account: String(accountId), slotId: String(slotId) };
 }
 
-// The publish workflow triggers ONLY on the `approved` label (see the `issues: [labeled]` trigger and
-// the `github.event.label.name == 'approved'` condition in .github/workflows/publish.yml). Nothing else
-// - not a comment, not closing the issue - publishes anything. Since the whole issue body must stay
-// parseable (trustedApprovalPayload and publish.yml both run JSON.parse over it in full), these
-// operator instructions live INSIDE the JSON as a leading field rather than as prose appended after it.
-// Declared first so it renders at the top of the issue, where a human actually looks.
-const APPROVAL_INSTRUCTIONS = [
-  'TO PUBLISH: add the "approved" label to this issue.',
-  'Commenting on or closing this issue does NOT publish anything.',
-  'TO REJECT: close this issue without adding the label.',
-  'Only the repository owner, or a user listed in the SNS_COMMAND_ADMINS repository variable, can publish.',
-  'Everything below is the generated draft and its provenance metadata; do not edit it.'
-];
+// publish.yml is workflow_dispatch-only under the repo's Manual-Only posture (see
+// docs/MANUAL_ONLY_MODE.md and docs/MANUAL_SETUP_CHECKLIST.md) - there is no `issues: [labeled]` (or
+// any other) server-side trigger anywhere in .github/workflows/ that fires on this issue. Adding a
+// label, commenting, or closing the issue does NOT publish anything; GitHub has nothing listening for
+// it. The `approved` label (still created by ensureApprovalLabel below) is now a purely cosmetic
+// visual marker an operator may apply by hand for their own tracking - it triggers no workflow.
+//
+// The only way to actually publish this draft is to manually run the "Publish social post" Action
+// (workflow_dispatch) with the account/text/media below, `dry_run: false`, and `confirm_live: true`.
+// Since the whole issue body must stay JSON.parse-able (trustedApprovalPayload and stale-approvals.mjs
+// both parse it in full), these operator instructions live INSIDE the JSON as a leading field rather
+// than as prose appended after it. Declared first so it renders at the top of the issue, where a human
+// actually looks.
+function approvalInstructions(payload) {
+  return [
+    'TO PUBLISH: manually run the "Publish social post" GitHub Action (workflow_dispatch) with these inputs:',
+    `  account: ${payload.account}`,
+    `  text: (copy the "text" field below exactly)`,
+    payload.mediaUrl ? `  media_url: ${payload.mediaUrl}` : '  media_url: (leave blank; no media on this draft)',
+    payload.mediaUrl ? `  media_type: ${payload.mediaType || 'image'}` : '  media_type: (leave as default; no media on this draft)',
+    '  dry_run: false',
+    '  confirm_live: true',
+    'Adding a label, commenting, or closing this issue does NOT publish anything - nothing listens for it.',
+    'TO REJECT: close this issue without running the workflow. No action is required to reject.',
+    'Only the repository owner, or a user listed in the SNS_COMMAND_ADMINS repository variable, can run that Action.',
+    'Everything below is the generated draft and its provenance metadata; do not edit it.'
+  ];
+}
 
 function markedApprovalPayload(payload, accountId, slotId) {
-  return { _howToPublish: APPROVAL_INSTRUCTIONS, ...payload, _snsAi: approvalMarker(accountId, slotId) };
+  return { _howToPublish: approvalInstructions(payload), ...payload, _snsAi: approvalMarker(accountId, slotId) };
 }
 
 export function trustedApprovalPayload(issue) {

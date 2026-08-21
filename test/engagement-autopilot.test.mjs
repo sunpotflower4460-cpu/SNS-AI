@@ -302,14 +302,16 @@ test('engagement workflow persists only privacy-safe state files', async () => {
 test('ChatOps stays provider-offline and cannot execute engagement mutations', async () => {
   const workflow = await readFile(`${ROOT}.github/workflows/chatops.yml`, 'utf8');
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /options: \[preflight, dry-run\]/);
+  assert.match(workflow, /options: \[preflight\]/);
   assert.match(workflow, /INPUT_COMMAND: \$\{\{ inputs\.command \}\}/);
   assert.match(workflow, /INPUT_ACCOUNT: \$\{\{ inputs\.account \}\}/);
   assert.match(workflow, /if: inputs\.command == 'preflight'/);
-  assert.match(workflow, /if: inputs\.command == 'dry-run'/);
-  assert.match(workflow, /orchestrate\.mjs --account "\$INPUT_ACCOUNT" --force --dry-run/);
   assert.match(workflow, /permissions:\s*\n\s*contents:\s*read/);
   assert.doesNotMatch(workflow, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|SNS_MANUAL_INVOCATION/);
+  // ChatOps must not run a generation preview at all - it needs OPENAI_API_KEY, which this
+  // keyless surface deliberately never receives (see docs/CHATOPS.md; the working dry-run
+  // preview lives on SNS Autopilot, which already carries that credential).
+  assert.doesNotMatch(workflow, /orchestrate\.mjs/);
   assert.doesNotMatch(workflow, /engagement-dry-run|engagement-run|engagement-resolve/);
   assert.doesNotMatch(workflow, /live-preflight\.mjs|x-posting-compliance\.mjs|x-automation-compliance\.mjs/);
   assert.doesNotMatch(workflow, /git add data\/|git push|durable-usage-state/);

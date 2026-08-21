@@ -153,3 +153,30 @@ test('live provider mutation is allowed only while the explicit manual invocatio
     );
   });
 });
+
+test('requireExplicitManualInvocation cannot be turned off independently of manualOnly', () => {
+  // manual-only-audit.mjs already requires requireExplicitManualInvocation:true at the CI-config
+  // layer, but code invoked outside that workflow step (e.g. a direct `node src/publish.mjs` run)
+  // never runs the audit script. If a config edit drops or flips just this one field while
+  // manualOnly:true stays untouched (still reading as fully locked), the explicit-invocation
+  // requirement must not silently disappear here.
+  const driftedPolicy = { manualOnly: true, requireExplicitManualInvocation: false };
+  withManualInvocation(undefined, () => {
+    assert.throws(
+      () => assertProviderMutationAllowed(driftedPolicy, { source: 'autopilot' }),
+      { code: 'MANUAL_ONLY_BLOCKED' }
+    );
+  });
+
+  const missingFieldPolicy = { manualOnly: true };
+  withManualInvocation(undefined, () => {
+    assert.throws(
+      () => assertProviderMutationAllowed(missingFieldPolicy, { source: 'autopilot' }),
+      { code: 'MANUAL_ONLY_BLOCKED' }
+    );
+  });
+
+  withManualInvocation('true', () => {
+    assert.equal(assertProviderMutationAllowed(driftedPolicy, { source: 'manual' }), true);
+  });
+});
