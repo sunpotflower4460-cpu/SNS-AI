@@ -23,31 +23,17 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Focused test - Manual-Only policy
+      - name: Focused Manual-Only policy
         run: node --test --test-concurrency=1 test/manual-only-policy.test.mjs
-      - name: Focused test - Provider mutation boundaries
+      - name: Focused provider mutation boundaries
         run: node --test --test-concurrency=1 test/manual-only-provider-boundary.test.mjs
-      - name: E1 engagement-audit-retention
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-audit-retention.test.mjs
-      - name: E2 engagement-autonomous-control
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
-      - name: E3 engagement-autopilot
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-autopilot.test.mjs
-      - name: E4 engagement-delivery-ledger
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-delivery-ledger.test.mjs
-      - name: E5 engagement-optout-retention
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-optout-retention.test.mjs
-      - name: E6 engagement-pagination
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-pagination.test.mjs
-      - name: E7 engagement-policy-v4
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-policy-v4.test.mjs
-      - name: E8 engagement-preflight
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-preflight.test.mjs
-      - name: E9 engagement-runtime-e2e
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-runtime-e2e.test.mjs
-      - name: E10 engagement-workflow-state
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-workflow-state.test.mjs
-      - name: E11 experiment-brake-guardrails
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/experiment-brake-guardrails.test.mjs
+      - name: Harness E-G
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/e*.test.mjs test/f*.test.mjs test/g*.test.mjs
+      - name: Harness I-M
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/i*.test.mjs test/m*.test.mjs
+      - name: Harness O-R
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/o*.test.mjs test/p*.test.mjs test/r*.test.mjs
+      - name: Harness S-X
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/s*.test.mjs test/t*.test.mjs test/w*.test.mjs test/x*.test.mjs
       - name: Unit and integration tests
         run: npm test
