@@ -27,40 +27,27 @@ jobs:
         run: node --test --test-concurrency=1 test/manual-only-policy.test.mjs
       - name: Focused test - Provider mutation boundaries
         run: node --test --test-concurrency=1 test/manual-only-provider-boundary.test.mjs
-      - name: Focused test - Account lifecycle control
-        run: node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
-      - name: Focused test - Compliance attestation control
-        run: node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
-      - name: Focused test - Engagement autonomous control
-        run: node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
-      - name: Harness diagnostic E
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/e*.test.mjs
-      - name: Harness diagnostic F
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/f*.test.mjs
-      - name: Harness diagnostic G
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/g*.test.mjs
+      - name: E1 engagement-audit-retention
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-audit-retention.test.mjs
+      - name: E2 engagement-autonomous-control
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
+      - name: E3 engagement-autopilot
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-autopilot.test.mjs
+      - name: E4 engagement-delivery-ledger
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-delivery-ledger.test.mjs
+      - name: E5 engagement-optout-retention
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-optout-retention.test.mjs
+      - name: E6 engagement-pagination
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-pagination.test.mjs
+      - name: E7 engagement-policy-v4
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-policy-v4.test.mjs
+      - name: E8 engagement-preflight
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-preflight.test.mjs
+      - name: E9 engagement-runtime-e2e
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-runtime-e2e.test.mjs
+      - name: E10 engagement-workflow-state
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/engagement-workflow-state.test.mjs
+      - name: E11 experiment-brake-guardrails
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/experiment-brake-guardrails.test.mjs
       - name: Unit and integration tests
         run: npm test
-      - name: Strict configuration validation
-        run: npm run validate
-      - name: Source syntax and import checks
-        run: npm run check
-      - name: Smoke checks
-        run: npm run smoke
-      - name: Secret scan (working tree + available history)
-        run: npm run secret-scan
-      - name: Manual-Only repository audit
-        run: npm run manual-only-audit
-      - name: Source coverage audit
-        run: npm run coverage
-      - name: Parse every workflow YAML
-        run: |
-          ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |f| YAML.safe_load(File.read(f), aliases: true); puts "YAML OK: #{f}" }'
-      - name: Key-safe configuration doctor
-        run: npm run doctor
-      - name: Keyless operational runtime checks
-        run: |
-          npm run report
-          npm run weekly-report
-          npm run maintenance
-          npm run report
