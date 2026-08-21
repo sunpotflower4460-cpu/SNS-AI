@@ -14,7 +14,11 @@ const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta
 // Regression coverage for the go-live audit: the gaps that would let an operator complete every
 // documented manual step and still end up with a system that silently does nothing.
 
-test('the approval issue body tells the operator that the "approved" label is what publishes', () => {
+test('the approval issue body tells the operator how to actually publish under Manual-Only', () => {
+  // publish.yml is workflow_dispatch-only (see docs/MANUAL_ONLY_MODE.md) - there is no `issues:
+  // [labeled]` or any other server-side trigger anywhere in .github/workflows/ that fires on this
+  // issue. The instructions must therefore point at the real mechanism (manually running the
+  // "Publish social post" Action with confirm_live=true), not at a label that nothing listens for.
   const account = 'music-tools-x';
   const slotId = 'music-tools-x:2026-08-18:09:00';
   const payload = githubTest.markedApprovalPayload({ account, slotId, text: 'draft text' }, account, slotId);
@@ -35,9 +39,22 @@ test('the approval issue body tells the operator that the "approved" label is wh
   assert.equal(trusted.slotId, slotId);
   assert.equal(trusted.text, 'draft text');
 
-  assert.match(body, /approved/, 'the body must name the label that triggers publishing');
+  const instructions = payload._howToPublish.join('\n');
+  assert.match(instructions, /Publish social post/, 'must name the actual Action that publishes');
+  assert.match(instructions, /workflow_dispatch/i, 'must say how that Action is triggered');
+  assert.match(instructions, /confirm_live:\s*true/, 'must state the explicit live-confirmation input required');
+  assert.match(instructions, new RegExp(`account:\\s*${account}`), 'must tell the operator the exact account input to use');
+  assert.match(instructions, /does NOT publish anything/i, 'must explicitly say the label/comment/close path does nothing');
   // The instruction must be the first thing a human sees, not buried under the draft metadata.
   assert.ok(Object.keys(payload)[0] === '_howToPublish', 'instructions must render first in the issue body');
+});
+
+test('publish.yml really has no label/issue trigger, so the approval instructions are not describing a dead mechanism the other way around either', async () => {
+  const yaml = await readFile(`${WORKFLOWS_DIR}publish.yml`, 'utf8');
+  const onBlock = /\non:\n((?:[ \t]+[^\n]*\n)*)/.exec(yaml);
+  assert.ok(onBlock, 'publish.yml must have an on: block');
+  assert.doesNotMatch(onBlock[1], /issues:/, 'publish.yml must not gain an issues:[labeled] trigger without updating the approval-issue instructions to match');
+  assert.match(onBlock[1], /workflow_dispatch:/);
 });
 
 test('the scheduled health report runs the readiness doctor in --strict mode so it can actually fail', async () => {

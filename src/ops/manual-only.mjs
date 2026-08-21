@@ -29,6 +29,15 @@ export function isExplicitManualInvocation() {
 
 export function assertProviderMutationAllowed(policy, { dryRun = false, source } = {}) {
   if (dryRun || policy?.manualOnly !== true) return true;
-  if (policy.requireExplicitManualInvocation === true && !isExplicitManualInvocation()) throw manualOnlyError(`an unattended provider mutation (source: ${source || 'unknown'})`);
+  // requireExplicitManualInvocation used to gate this independently of manualOnly, so a config edit
+  // that dropped or flipped just that one field (leaving manualOnly:true untouched, still reading as
+  // fully locked) silently removed the SNS_MANUAL_INVOCATION requirement - the one thing that actually
+  // distinguishes a human-run workflow_dispatch from an unattended call. manual-only-audit.mjs already
+  // requires this field to be true at the CI-config layer; that must not be the only place enforcing
+  // it, since code invoked outside that workflow step (e.g. a direct `node src/publish.mjs` run) never
+  // executes the audit script. The explicit-invocation marker is now required unconditionally whenever
+  // manualOnly is true, regardless of this field's value - it is not a separate, independently
+  // disable-able knob.
+  if (!isExplicitManualInvocation()) throw manualOnlyError(`an unattended provider mutation (source: ${source || 'unknown'})`);
   return true;
 }
