@@ -19,10 +19,14 @@ test('manual preflight boundaries keep chatops provider-offline and isolate enga
   assert.match(chatops, /workflow_dispatch:/);
   assert.doesNotMatch(chatops, /issue_comment:/);
   assert.doesNotMatch(chatops, /schedule:/);
-  assert.match(chatops, /INPUT_ACCOUNT:\s*\$\{\{ github\.event\.inputs\.account \}\}/);
+  assert.match(chatops, /permissions:\s*\n\s*contents:\s*read/);
+  assert.match(chatops, /INPUT_ACCOUNT:\s*\$\{\{ inputs\.account \}\}/);
   assert.match(chatops, /orchestrate\.mjs --account "\$INPUT_ACCOUNT" --force --dry-run/);
   assert.doesNotMatch(chatops, /SOCIAL_CREDENTIALS_JSON/);
   assert.doesNotMatch(chatops, /OPENAI_API_KEY/);
+  assert.doesNotMatch(chatops, /SNS_MANUAL_INVOCATION/);
+  assert.doesNotMatch(chatops, /engagement-run/);
+  assert.doesNotMatch(chatops, /engagement-resolve/);
   assert.doesNotMatch(chatops, executable('src/ops/live-preflight.mjs'));
   assert.doesNotMatch(chatops, executable('src/ops/x-posting-compliance.mjs'));
   assert.doesNotMatch(chatops, executable('src/ops/x-automation-compliance.mjs'));
