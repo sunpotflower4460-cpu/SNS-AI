@@ -33,14 +33,20 @@ jobs:
         run: node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
       - name: Focused test - Engagement autonomous control
         run: node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
-      - name: Harness diagnostic A
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/a*.test.mjs
-      - name: Harness diagnostic B
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/b*.test.mjs
-      - name: Harness diagnostic C
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/c*.test.mjs
-      - name: Harness diagnostic D
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/d*.test.mjs
+      - name: Harness diagnostic - deprecated-media-skip
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/deprecated-media-skip.test.mjs
+      - name: Harness diagnostic - dry-run-budget-isolation
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/dry-run-budget-isolation.test.mjs
+      - name: Harness diagnostic - dry-run-circuit-isolation
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/dry-run-circuit-isolation.test.mjs
+      - name: Harness diagnostic - durable-budget
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/durable-budget.test.mjs
+      - name: Harness diagnostic - durable-claim-remote-race
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/durable-claim-remote-race.test.mjs
+      - name: Harness diagnostic - durable-claim-remote
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/durable-claim-remote.test.mjs
+      - name: Harness diagnostic - durable-lock-recovery
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/durable-lock-recovery.test.mjs
       - name: Unit and integration tests
         run: npm test
       - name: Strict configuration validation
