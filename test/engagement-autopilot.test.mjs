@@ -299,32 +299,22 @@ test('engagement workflow persists only privacy-safe state files', async () => {
   assert.doesNotMatch(workflow, /engagement-inbox|dm-body|message-body/i);
 });
 
-test('ChatOps dispatch-only commands suppress engagement details and persist only explicit remaining state', async () => {
+test('ChatOps stays provider-offline and cannot execute engagement mutations', async () => {
   const workflow = await readFile(`${ROOT}.github/workflows/chatops.yml`, 'utf8');
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /options: \[preflight, dry-run, engagement-dry-run, engagement-run, engagement-resolve\]/);
+  assert.match(workflow, /options: \[preflight, dry-run\]/);
   assert.match(workflow, /INPUT_COMMAND: \$\{\{ inputs\.command \}\}/);
   assert.match(workflow, /INPUT_ACCOUNT: \$\{\{ inputs\.account \}\}/);
   assert.match(workflow, /if: inputs\.command == 'preflight'/);
   assert.match(workflow, /if: inputs\.command == 'dry-run'/);
-  assert.match(workflow, /if: inputs\.command == 'engagement-dry-run'/);
-  assert.match(workflow, /if: inputs\.command == 'engagement-run'/);
-  assert.match(workflow, /if: inputs\.command == 'engagement-resolve'/);
-  assert.match(workflow, /--resolve-file engagement-resolve\.json --manual-invocation/);
   assert.match(workflow, /orchestrate\.mjs --account "\$INPUT_ACCOUNT" --force --dry-run/);
-  assert.match(workflow, /live-preflight\.mjs --account "\$INPUT_ACCOUNT"/);
-  assert.match(workflow, /x-posting-compliance\.mjs --account "\$INPUT_ACCOUNT"/);
-  assert.doesNotMatch(workflow, /node src\/ops\/x-automation-compliance\.mjs/);
-  assert.match(workflow, /status=0[\s\S]*doctor[\s\S]*\|\| status=1[\s\S]*live-preflight[\s\S]*\|\| status=1/);
-  assert.match(workflow, /sns-engagement-dry-run-private\.txt/);
-  assert.match(workflow, /sns-engagement-run-private\.txt/);
-  assert.match(workflow, /sns-engagement-resolve-private\.txt/);
-  assert.match(workflow, /Detailed interaction output is intentionally suppressed/);
-  assert.match(workflow, /paths=\(data\/usage\.jsonl data\/usage-state\.json\)/);
-  assert.doesNotMatch(workflow, /git add data\//);
-  assert.match(workflow, /data\/durable-usage-state\.json/);
-  assert.match(workflow, /REDACTED_OPENAI_KEY/);
+  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read/);
+  assert.doesNotMatch(workflow, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|SNS_MANUAL_INVOCATION/);
+  assert.doesNotMatch(workflow, /engagement-dry-run|engagement-run|engagement-resolve/);
+  assert.doesNotMatch(workflow, /live-preflight\.mjs|x-posting-compliance\.mjs|x-automation-compliance\.mjs/);
+  assert.doesNotMatch(workflow, /git add data\/|git push|durable-usage-state/);
   assert.doesNotMatch(workflow, /github\.event\.issue/);
+  assert.match(workflow, /REDACTED_OPENAI_KEY/);
 });
 
 test('publish-only Live Preflight does not run the engagement automation compliance gate', async () => {
