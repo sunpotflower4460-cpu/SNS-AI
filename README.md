@@ -5,6 +5,8 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 アカウントごとに人格・目的・読者・禁止事項を分離し、
 **情報収集 → 複数案生成 → 選定 → 画像/動画生成 → 公開前QA → 投稿 → 反応計測 → 安全監視 → 学習 → A/B実験 → 改善 → 報告 → 保守**まで循環させます。
 
+**現在このリポジトリはManual-Onlyでロックされています**（[`docs/MANUAL_ONLY_MODE.md`](docs/MANUAL_ONLY_MODE.md)）。以下の自動化はコードとして実装済みですが、`config/runtime-policy.json`の`manualOnly: true`により、scheduleは全workflowから外され、`mode: auto`への遷移も拒否されます。現時点では**全て`workflow_dispatch`による手動実行のみ**です。自動実行を再開するのは別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](docs/MANUAL_SETUP_CHECKLIST.md) §11）。
+
 ## 主な自動化
 
 - X / Instagramの複数アカウント管理
@@ -45,12 +47,12 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 
 ## 運転モード
 
-- `auto` — 定刻に生成し、検証を通過した内容を公式APIで投稿
-- `approval` — 投稿案をGitHub Issueへ作り、承認後に投稿
-- `manual` — Actions / `[publish]` Issue / ChatGPT経由の明示投稿
+- `auto` — 定刻に生成し、検証を通過した内容を公式APIで投稿（Manual-Only中は`account-control.yml`経由での遷移が拒否されます）
+- `approval` — 投稿案をGitHub Issueへ作り、**SNS Publish social post**を手動実行して承認後に投稿
+- `manual` — `SNS Publish social post`（`workflow_dispatch`）による明示投稿
 - `pause` — 停止
 
-Issue経由の`[publish]` / `[feedback]`は、リポジトリ所有者またはRepository Variable `SNS_COMMAND_ADMINS` に登録したユーザーだけが実行できます。
+投稿・feedback記録の実行（`SNS Publish social post` / `SNS Human Feedback`）は、リポジトリ所有者またはRepository Variable `SNS_COMMAND_ADMINS` に登録したユーザーだけが実行できます（各workflowのActor authorization step）。Issue title/label/commentをトリガーとするworkflowは存在しません。
 
 ## 自律ループ
 
@@ -303,7 +305,7 @@ InstagramはProfessional（Business / Creator）アカウントを使い、Insta
 ## 任意のRepository Variables
 
 - `OPENAI_MODEL` — 投稿生成モデルの上書き。**ただし`config/accounts.json`の`defaults.generation.model`が設定されている間は効きません**（defaultsが全アカウントにmergeされ、`account.generation.model`が常に優先されるため）。モデルを変えるならconfig側を編集してください。
-- `SNS_COMMAND_ADMINS` — Issue/手動workflowの追加操作許可ユーザー、カンマ区切り。approval Issueに`approved` labelを付けられるのもここに載ったユーザーとrepository ownerだけです。**repositoryをOrganization配下へ移す場合は必須です** — `publish.yml`は`github.actor`を`github.repository_owner`と比較するため、org配下では個人アカウントが一致することはありません。
+- `SNS_COMMAND_ADMINS` — 手動workflowの追加操作許可ユーザー、カンマ区切り。各操作系workflowのActor authorization stepが`github.actor`をこのリストとrepository ownerに照合し、一致しなければ実行を拒否します（approval Issueの`approved` labelは現在operatorの目印用に残るだけの表示専用ラベルで、どのworkflowもlabelでは判定しません）。**repositoryをOrganization配下へ移す場合は必須です** — `publish.yml`は`github.actor`を`github.repository_owner`と比較するため、org配下では個人アカウントが一致することはありません。
 - `APPROVAL_MAX_AGE_DAYS` — approval Issueの自動失効日数（既定7）
 
 環境変数（workflowで設定、Repository Variableではありません）:
@@ -331,20 +333,29 @@ PreflightはSNS投稿や画像/動画generationを行いません。したがっ
 
 ## GitHub Actions
 
-- **SNS Autopilot** — 10分ごと
-- **SNS Metrics Collector** — 毎時
-- **SNS Trend Intelligence** — 6時間ごと
-- **SNS Daily Learning** — 毎日
-- **Publish social post** — manual / Issue / approval
+Manual-Only下では**全てworkflow_dispatch（手動実行）のみ**で、scheduleは付いていません。`.github/workflows/`にIssue title / label / commentをトリガーとするworkflowは存在しません。
+
+- **SNS Autopilot** — 投稿candidate生成・approval issue作成（`force` / `dry_run`指定可）
+- **SNS Publish social post** — 実投稿。`dry_run: false`かつ`confirm_live: true`の両方を指定した場合のみ実publish
+- **SNS Engagement Autopilot** — 自分の投稿への返信を検知・分類・下書き。approval Issue経由が基本
+- **SNS Engagement Resolve** — `[engagement-human]` Issueへの返信/却下を実際に実行する唯一の手段
+- **SNS Metrics Collector** — 投稿後メトリクス取得
+- **SNS Trend Intelligence** — Trend Brief更新
+- **SNS Daily Learning** — 戦略更新
+- **SNS Account Control** — アカウントlifecycle変更（`approval`/`auto`はManual-Only中は拒否）
+- **SNS Engagement Control** — engagement activate/deactivate（`activate`はManual-Only中は拒否）
+- **SNS Compliance Attestation** — X automated-profile / AI-reply承認の記録
+- **SNS ChatOps** — provider-offlineなkeyless preflight/dry-run
+- **SNS Hub Reconcile** / **SNS Publish Readback Reconcile** — Hub/provider状態の照合
 - **SNS Human Feedback** — 明示フィードバック保存
 - **SNS Health Report** — readiness / operating report
 - **SNS Live Preflight** — 実投稿・有料media生成をせず認証と外部前提を確認
-- **SNS Failure Watch** — Workflow障害Issue
 - **SNS Maintenance** — retention / archive / stale approval / generated media cleanup
-- **SNS Policy Watch** — X / Instagram公式情報の定期確認
-- **SNS-AI CI** — test / config / syntax / smoke / secret scan / workflow YAML / operational runtime
+- **SNS Policy Watch** — X / Instagram公式情報の確認
+- **SNS-AI CI** — test / config / syntax / smoke / secret scan / workflow YAML / operational runtime（push / pull_requestで自動実行される数少ない例外）
+- **SNS Failure Watch** — Workflow障害Issue（`workflow_run`完了で自動実行されるもう一つの例外）
 
-状態を書き換えるworkflowは`concurrency: sns-ai-write`で直列化します。
+状態を書き換えるworkflowは`concurrency: sns-ai-write`で直列化します。すべての操作系workflowは`SNS_COMMAND_ADMINS`またはrepository ownerのみ実行できます（各workflowのActor authorization step）。
 
 ## 主な記録
 
@@ -370,10 +381,10 @@ PreflightはSNS投稿や画像/動画generationを行いません。したがっ
 4. `config/accounts.json`へ実アカウントを追加し、まず`enabled: true / mode: approval`
 5. **SNS Live Preflight**を実行
 6. **SNS Autopilot**を`force=true / dry_run=true`で実行
-7. 内蔵mediaを使う場合は最初のcontrolled image/video generation + 1件のapproval投稿を確認
+7. 内蔵mediaを使う場合は最初のcontrolled image/video generation + 1件のapproval投稿を確認（**SNS Publish social post**を`dry_run: false` / `confirm_live: true`で手動実行。approval Issueへのlabel付与では何も起きません）
 8. **SNS Metrics Collector**で投稿後データ取得を確認
-9. 問題なければ`mode: auto`
-10. 以後は10分pollingが設定slotを拾い、自動投稿→計測→学習を継続
+9. ここまでがManual-Only下で完了できる範囲です。`mode: auto`への遷移は`account-control.yml`経由では現在拒否されるため、到達するには`config/runtime-policy.json`を対象にした別途レビュー済みの変更が必要です（[`docs/MANUAL_ONLY_MODE.md`](docs/MANUAL_ONLY_MODE.md)）
+10. Manual-Onlyを別途レビューして解除しscheduleを再導入した場合のみ、以後は自動pollingが設定slotを拾い、自動投稿→計測→学習を継続します
 
 詳細な運用手順は`docs/OPERATIONS.md`、AIが変更してよい範囲/いけない範囲は`docs/AUTONOMY.md`を参照してください。
 

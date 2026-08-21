@@ -2,6 +2,8 @@
 
 実アカウントを`mode: auto`へ切り替える前の最終チェックリストです。
 
+**このリポジトリは現在Manual-Onlyロック中です**（[`docs/MANUAL_ONLY_MODE.md`](MANUAL_ONLY_MODE.md)）。`config/runtime-policy.json`の`manualOnly: true`により、`mode: auto`（および`approval`への新規遷移）は`account-control.yml`経由では拒否されます — 到達するにはcode reviewを経た`config/accounts.json`の直接編集が必要です。同様に、投稿・エンゲージメントのscheduled自動実行も現在は存在しません（全workflowが`workflow_dispatch`のみ）。本チェックリストは「§Gの一件の確認済みlive投稿まで」を対象とし、§H（`auto`後の定期poll）はManual-Onlyを別途レビューして解除した後の話です。実務上の完了条件は[`docs/MANUAL_SETUP_CHECKLIST.md`](MANUAL_SETUP_CHECKLIST.md)を参照してください。
+
 アカウント別の具体的な手順書がある場合は、そちらを併読してください（例: [`docs/ACCOUNT_MUSIC_TOOLS_X.md`](ACCOUNT_MUSIC_TOOLS_X.md)）。本チェックリストは全アカウント共通の汎用版です。
 
 セクションC/Dは X、Eは Instagram 用です。Dは X で画像/動画を投稿する場合だけ必要で、text-onlyのXアカウントではスキップできます。
@@ -20,9 +22,7 @@
 
 `sns-ai-state`は外部SNSへpublishする直前にslot claimを耐久保存する専用branchです。通常の履歴/state pushが投稿後に失敗しても、次runが同じslotを再送しないための最後のidempotency guardとして使います。削除しないでください。
 
-`SNS Autopilot`（投稿用）は毎時`03,13,23,33,43,53`分にpollします。投稿scheduleはアカウントtimezoneの`times` + `windowMinutes`で判定します。返信エンゲージメント用の別workflow `SNS Engagement Autopilot` はこれとは別物で、§Iのとおり現在手動実行のみです。
-
-GitHub Actionsのscheduleはhard real-timeではありません。public repositoryは60日間repository activityがない場合scheduled workflowsが自動無効化され得るため、長期休止後はActions状態を確認してください。
+`SNS Autopilot`（投稿用）は`workflow_dispatch`のみで、現在scheduleは付いていません（Manual-Onlyの一部としてcronは意図的に外されています）。投稿scheduleの判定自体（アカウントtimezoneの`times` + `windowMinutes`）はロジックとして残っていますが、手動で都度Actionsから実行するまでは何も起きません。Manual-Onlyを別途レビューして解除した場合にscheduleを再導入する話は§Hを参照してください。返信エンゲージメント用の別workflow `SNS Engagement Autopilot` も同様に`workflow_dispatch`のみです（§Iのとおり）。
 
 ## B. OpenAI API
 
@@ -115,20 +115,22 @@ Instagram publishingは`graph.instagram.com/{api_version}`のcontainer flowを�
 - [ ] generated draftを確認
 - [ ] media利用時controlled generation success
 - [ ] approval modeで実投稿1件success
-  - **投稿を実行する操作は「approval Issueに `approved` labelを付ける」ことだけです。** Issueへのコメントやcloseでは何も起きません。却下する場合はlabelを付けずにcloseします。
-  - labelを付けられるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです（`.github/workflows/publish.yml`のActor authorization step）。
-  - label付与後に何も起きない場合は、labelを一度外して付け直してください（共有concurrency group `sns-ai-write`が混み合っていた場合、pending runがキャンセルされることがまれにあります）。
+  - **投稿を実行する操作は「`SNS Publish social post` Action（`workflow_dispatch`）をapproval Issue記載のaccount/text/mediaで、`dry_run: false`かつ`confirm_live: true`で手動実行する」ことだけです。** Issueへのlabel付与・コメント・closeでは何も起きません（このworkflowに`issues:`トリガーは存在しません）。却下する場合は何もせずIssueをcloseします。
+  - Actionを実行できるのはrepository ownerか、Repository Variable `SNS_COMMAND_ADMINS`に記載されたユーザーのみです（`.github/workflows/publish.yml`のActor authorization step）。
+  - 実行後に何も起きない場合は、共有concurrency group `sns-ai-write`が混み合っていないか（他のworkflowが同時実行中でないか）を確認してください。
 - [ ] `data/history.jsonl`へproviderPostId保存
 - [ ] Metrics Collector success
 - [ ] `data/metrics.jsonl`へsnapshot保存
 - [ ] Current Reportへ反映
 - [ ] open Health Issueなし
 
-**ここまで全て通った後だけ`mode: auto`へ変更します。**
+**ここまで全て通った後だけ`mode: auto`へ変更します。** ただし現在Manual-Onlyがロック中のため、`account-control.yml`経由での`approval`/`auto`遷移は誰が実行しても拒否されます。到達するには`config/runtime-policy.json`と`config/accounts.json`を対象にした別途レビュー済みのPRが必要です（[`docs/MANUAL_ONLY_MODE.md`](MANUAL_ONLY_MODE.md)）。
 
-## H. Auto後
+## H. Auto後（Manual-Only解除後の将来状態）
 
-Autopilotが定期pollし、due slotに対して:
+**この節はManual-Onlyを別途レビューして解除し、scheduleを再導入した場合の話です。現在のリポジトリはこの状態ではありません。** Manual-Only下では`SNS Autopilot`はscheduleを持たず、`workflow_dispatch`で明示実行した分しか動きません。
+
+Manual-Only解除後、Autopilotが定期pollすれば、due slotに対して:
 
 ```text
 research / history / strategy
@@ -169,8 +171,11 @@ Circuit Breaker、Anomaly Brake、daily budget、Failure Watchは`auto`後も有
 - [ ] `xAiReplyBotApprovalConfirmedAccounts`にアカウントを追加（X側のAI自動返信に関する承認記録）
 - [ ] `xAutomationProfileComplianceConfirmedAccounts`にアカウントを追加
 - [ ] `liveAccounts`にアカウントを追加 ← **これを追加するまで一切動きません**
-- [ ] **SNS Engagement Autopilot を手動実行**し、生成された`[engagement-human]` Issueの内容を確認
-- [ ] 数件を人の目で確認してから、必要なら`engagement.yml`のcronを復活させる
+- [ ] **SNS Engagement Autopilot を手動実行**し、生成された`[engagement-human] <account> <event-key>` Issueの内容を確認
+  - このIssueへのlabel付与・コメント・closeでは何も起きません。返信または却下は**`SNS Engagement Resolve` Action（`workflow_dispatch`）をIssue記載のaccount/event_keyで、`dry_run: false`かつ`confirm_live: true`で手動実行する**ことだけが実際に効きます（`.github/workflows/engagement-resolve.yml`）。
+- [ ] 数件を人の目で確認する
+
+`engagement.yml`のscheduleを再導入する（cronを戻す）ことは、それ自体が`config/runtime-policy.json`を対象にした別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](MANUAL_SETUP_CHECKLIST.md) §11）。この節の完了は「手動実行での有効化」までを指し、自動実行の再開を意味しません。
 
 `liveAccounts`が空の間は、workflowを実行してもアカウントがフィルタで除外され、
 外部APIを一切呼ばずに`nothing_enabled`で終了します（課金も発生しません）。

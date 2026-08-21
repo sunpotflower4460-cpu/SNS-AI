@@ -635,3 +635,29 @@ test('ChatOps docs describe the real workflow_dispatch interface, not a dead Iss
   assert.match(lifecycle, /manualOnly.*true|Manual-Only is active/i);
   assert.match(lifecycle, /account-control\.yml/i);
 });
+
+// GO_LIVE_CHECKLIST.md, ACCOUNT_MUSIC_TOOLS_X.md, and README.md predate the Manual-Only pivot and
+// still described a scheduled/`approved`-label operating model that no longer exists: Autopilot,
+// Metrics, Intelligence, Learning, and Policy Watch all claimed fixed cron cadences (10-min polling,
+// hourly, every 6h, daily) when every one of those workflows is workflow_dispatch-only with no
+// schedule trigger, and the go-live checklist told the operator the same dead "add the approved
+// label" instruction already fixed in src/lib/github.mjs for the approval-issue payload itself.
+test('go-live docs describe the current Manual-Only posture, not the old scheduled/approved-label model', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+  const goLive = await readFile(`${DOCS_DIR}GO_LIVE_CHECKLIST.md`, 'utf8');
+  const musicToolsX = await readFile(`${DOCS_DIR}ACCOUNT_MUSIC_TOOLS_X.md`, 'utf8');
+  const readme = await readFile(`${REPO_ROOT}README.md`, 'utf8');
+
+  for (const doc of [goLive, musicToolsX, readme]) {
+    assert.doesNotMatch(doc, /\[preflight\]|\[dry-run\]|\[engagement-dry-run\]/, `${doc === goLive ? 'GO_LIVE_CHECKLIST.md' : doc === musicToolsX ? 'ACCOUNT_MUSIC_TOOLS_X.md' : 'README.md'} must not describe dead bracket-command Issue titles`);
+    assert.doesNotMatch(doc, /10分ごと|— 毎時|6時間ごと|— 毎日/, 'must not claim a fixed automatic cadence for a workflow_dispatch-only workflow');
+    assert.match(doc, /[Mm]anual-Only|manualOnly/, 'must mention the current Manual-Only posture');
+  }
+
+  assert.doesNotMatch(goLive, /labelを付ける」ことだけです/, 'must not tell the operator that a label triggers publishing');
+  assert.match(goLive, /confirm_live/, 'must name the real live-publish confirmation input');
+  assert.match(goLive, /engagement-resolve\.yml|SNS Engagement Resolve/i, 'must point at the workflow that actually resolves engagement escalations');
+
+  assert.doesNotMatch(musicToolsX, /adding the `approved` label to its approval Issue/i);
+});
