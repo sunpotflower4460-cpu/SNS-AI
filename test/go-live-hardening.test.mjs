@@ -612,3 +612,26 @@ test('a human-escalation engagement Issue points at a real, existing workflow in
   assert.match(workflow, /confirm_live/);
   assert.match(workflow, /run\.mjs --resolve-file/, 'must actually invoke the resolve entrypoint');
 });
+
+// docs/CHATOPS.md and docs/CHATOPS_ACCOUNT_LIFECYCLE.md used to describe an Issue-title-triggered
+// command system ("[preflight] <id>", "[account-approval] ACCOUNT_ID", etc.) that has never existed
+// in any workflow trigger - every operational workflow is workflow_dispatch-only. Docs describing a
+// control surface that does not exist are worse than no docs: an operator who follows them exactly
+// ends up with an Issue GitHub never acts on and no idea why nothing happened.
+test('ChatOps docs describe the real workflow_dispatch interface, not a dead Issue-title command system', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const chatops = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+  const lifecycle = await readFile(`${DOCS_DIR}CHATOPS_ACCOUNT_LIFECYCLE.md`, 'utf8');
+
+  for (const doc of [chatops, lifecycle]) {
+    assert.doesNotMatch(doc, /\[preflight\]|\[dry-run\]|\[engagement-dry-run\]|\[engagement-run\]|\[account-approval\]|\[account-auto\]|\[account-pause\]|\[account-disable\]/, 'must not describe dead bracket-command Issue titles');
+    assert.doesNotMatch(doc, /[Cc]reate an Issue with/, 'must not instruct the operator to create a command Issue');
+    assert.match(doc, /workflow_dispatch/, 'must name the actual trigger mechanism');
+  }
+
+  assert.match(chatops, /SNS_COMMAND_ADMINS/);
+  assert.match(chatops, /engagement-resolve\.yml/i, 'must document the workflow that actually resolves escalations');
+
+  assert.match(lifecycle, /manualOnly.*true|Manual-Only is active/i);
+  assert.match(lifecycle, /account-control\.yml/i);
+});
