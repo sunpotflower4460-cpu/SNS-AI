@@ -57,15 +57,15 @@ test('unknown accounts and lifecycle targets are rejected',()=>{
   assert.throws(()=>patchAccountLifecycle({accountsConfig:fixture(),policy:{},accountId:'bad id',target:'pause'}),error=>error.code==='ACCOUNT_ID_INVALID');
 });
 
-test('account control workflow exposes bounded ChatGPT-safe lifecycle commands',async()=>{
+test('account control workflow is an explicit manual form and Manual-Only keeps activation fail-closed',async()=>{
   const workflow=await readFile(`${ROOT}.github/workflows/account-control.yml`,'utf8');
-  assert.match(workflow,/\[account-approval\]/);
-  assert.match(workflow,/\[account-auto\]/);
-  assert.match(workflow,/\[account-pause\]/);
-  assert.match(workflow,/\[account-disable\]/);
-  assert.match(workflow,/steps\.command\.outputs\.target == 'auto'/);
+  assert.match(workflow,/workflow_dispatch:/);
+  assert.match(workflow,/account:\n\s+description: Account ID/);
+  assert.match(workflow,/target:\n\s+description:/);
+  assert.match(workflow,/options: \[approval, auto, pause, disabled\]/);
+  assert.match(workflow,/src\/ops\/account-control\.mjs --account/);
   assert.match(workflow,/live-preflight\.mjs --account/);
-  assert.match(workflow,/open \[health\] incident/);
-  assert.match(workflow,/git push origin HEAD:main/);
+  assert.match(workflow,/npm run manual-only-audit/);
+  assert.doesNotMatch(workflow,/github\.event\.issue/);
   assert.doesNotMatch(workflow,/cancel-in-progress:\s*true/);
 });

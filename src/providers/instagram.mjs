@@ -1,4 +1,5 @@
 import { fetchJson } from '../lib/http.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,6 +26,11 @@ function publishContainerForm(containerId) {
   return form;
 }
 
+async function assertLiveMutationAllowed(source) {
+  const runtimePolicy = await loadRuntimePolicy();
+  assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
+}
+
 async function waitForContainer({ base, containerId, accessToken, timeoutMinutes = 5, pollSeconds = 3 }) {
   const deadline = Date.now() + Math.max(1, Number(timeoutMinutes)) * 60_000;
   while (Date.now() < deadline) {
@@ -40,23 +46,10 @@ async function waitForContainer({ base, containerId, accessToken, timeoutMinutes
   throw new Error(`Instagram container did not finish processing within ${Math.max(1, Number(timeoutMinutes))} minute(s).`);
 }
 
-// `fields=id,username` is satisfied by instagram_business_basic alone, so the old check proved only
-// that the token was valid - not that the account is Professional, and not that
-// instagram_business_content_publish was ever granted. Both only surfaced at the first real publish,
-// after a full paid generation had already been spent.
-//
-// content_publishing_limit is the right probe: it is read-only, costs nothing, requires the publish
-// permission, and returns the account's remaining 24h quota, which is worth seeing anyway. Its failure
-// is classified rather than assumed - only an explicit permission/OAuth error is treated as proof of a
-// missing scope, because a false blocker here would stop a working account from launching.
 const PROFESSIONAL_ACCOUNT_TYPES = new Set(['BUSINESS', 'MEDIA_CREATOR', 'CREATOR']);
 
 function permissionDenied(error) {
   const code = Number(error?.body?.error?.code);
-  // 200-299 already covers 200; code 10 ("Application does not have permission for this action") is a
-  // distinct value outside that range and is kept explicitly. Code 190 (invalid/expired OAuth token) is
-  // deliberately NOT included here - that is an auth problem, not a missing scope, and must not be
-  // reported as "grant instagram_business_content_publish" when the real fix is reauthenticating.
   if (code === 10 || (code >= 200 && code <= 299)) return true;
   return /permission|scope|not authorized|insufficient/i.test(String(error?.message || ''));
 }
@@ -68,8 +61,6 @@ async function accountProfile(base, credential) {
       headers: authHeaders(credential.accessToken)
     });
   } catch (error) {
-    // account_type is not guaranteed on every API variant; never let an unknown field break the
-    // identity check the rest of preflight depends on.
     if (Number(error?.status) !== 400) throw error;
     return fetchJson(`${base}/${credential.igUserId}?fields=id,username`, {
       method: 'GET',
@@ -122,6 +113,7 @@ export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image
     return { dryRun: true, platform: 'instagram', text, mediaUrl, mediaType, apiVersion };
   }
 
+  await assertLiveMutationAllowed('publish:instagram');
   const base = `https://graph.instagram.com/${apiVersion}`;
   const createUrl = `${base}/${credential.igUserId}/media`;
   let containerId;
@@ -153,6 +145,7 @@ export async function publishInstagram({ text = '', mediaUrl, mediaType = 'image
 
   const publishUrl = `${base}/${credential.igUserId}/media_publish`;
   try {
+    await assertLiveMutationAllowed('publish:instagram:media-publish');
     const published = await fetchJson(publishUrl, {
       method: 'POST',
       headers: authHeaders(credential.accessToken),

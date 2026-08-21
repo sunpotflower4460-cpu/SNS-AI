@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { fetchJson, downloadMedia } from '../lib/http.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 import { xOAuth2FetchJson, verifyXOAuth2Session } from './x-oauth2.mjs';
 
 const CREATE_POST_URL = 'https://api.x.com/2/tweets';
@@ -67,9 +68,15 @@ function createPostPayload({ text = '', mediaIds = [], paidPartnership = false }
   return payload;
 }
 
+async function assertLiveMutationAllowed(source) {
+  const runtimePolicy = await loadRuntimePolicy();
+  assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
+}
+
 async function setAltText(mediaId, text, credentials) {
   const payload = mediaMetadataPayload(mediaId, text);
   if (!payload.metadata.alt_text.text) return;
+  await assertLiveMutationAllowed('publish:x:media-metadata');
   await xOAuth2FetchJson(MEDIA_METADATA_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -77,11 +84,6 @@ async function setAltText(mediaId, text, credentials) {
   }, credentials);
 }
 
-// X caps image uploads at 5 MB while media.maxHostedImageBytes defaults to 15 MB, so an oversized image
-// passes generation, QA and hosting and only dies here - as a bare Error with no code, which trips the
-// resilience circuit and pauses the account for a pure config mismatch. MEDIA_HOSTING_TOO_LARGE is the
-// existing classification for exactly this: excluded from the circuit and persisted as a terminal skip,
-// so the slot stops re-paying for generation on every poll.
 export const X_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function oversizedImage(message) {
@@ -97,13 +99,13 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   try {
     ({ bytes, contentType } = await downloadMedia(mediaUrl, { maxBytes }));
   } catch (error) {
-    // downloadMedia enforces the same ceiling and rejects before buffering; classify that identically.
     if (/too large|exceeds/i.test(String(error?.message || ''))) throw oversizedImage(`X image exceeds the 5 MB API upload limit: ${error.message}`);
     throw error;
   }
   if (!contentType.startsWith('image/')) throw new Error(`X image publisher expected image media; got ${contentType}.`);
   if (bytes.byteLength > maxBytes) throw oversizedImage('X image exceeds the 5 MB API upload limit.');
 
+  await assertLiveMutationAllowed('publish:x:image-upload');
   const body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -116,6 +118,7 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
 }
 
 async function initializeVideo(bytes, contentType, credentials) {
+  await assertLiveMutationAllowed('publish:x:video-initialize');
   const body = await xOAuth2FetchJson(MEDIA_INIT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -132,6 +135,7 @@ async function appendVideo(mediaId, bytes, credentials) {
   for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
     const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkBytes));
     const url = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/append`;
+    await assertLiveMutationAllowed('publish:x:video-append');
     await xOAuth2FetchJson(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -164,20 +168,12 @@ async function uploadVideo(mediaUrl, credentials) {
   const mediaId = await initializeVideo(bytes, contentType, credentials);
   await appendVideo(mediaId, bytes, credentials);
   const finalizeUrl = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/finalize`;
+  await assertLiveMutationAllowed('publish:x:video-finalize');
   const finalized = await xOAuth2FetchJson(finalizeUrl, { method: 'POST' }, credentials);
   await waitVideoProcessing(mediaId, finalized, credentials);
   return mediaId;
 }
 
-// X historically reports the token's permission level in an `x-access-level` response header
-// (`read`, `read-write`, `read-write-directmessages`). A token minted while the app was still set to
-// "Read" authenticates perfectly against GET /2/users/me - which is the ENTIRE preflight for a
-// text-only account - and only fails at the first real POST /2/tweets, with a 403 carrying no
-// error.code, which then trips the resilience circuit and pauses the account.
-//
-// The header is not a documented part of the v2 contract, so this is strictly opportunistic: absence
-// yields `unknown` and changes nothing. Only an explicit read-only value is treated as a finding, and
-// that value is unambiguous when present.
 function readAccessLevel(headerValue) {
   const value = String(headerValue || '').trim().toLowerCase();
   if (!value) return { level: 'unknown', canWrite: null };
@@ -209,6 +205,7 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   if (!text && !mediaUrl) throw new Error('X requires text or mediaUrl.');
   if (dryRun) return { dryRun: true, platform: 'x', text, mediaUrl: mediaUrl || null, mediaType, mediaAltText: mediaAltText || null, paidPartnership: Boolean(paidPartnership) };
 
+  await assertLiveMutationAllowed('publish:x');
   const payload = createPostPayload({ text, paidPartnership });
   if (mediaUrl) {
     try {
@@ -224,6 +221,7 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
 
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
   try {
+    await assertLiveMutationAllowed('publish:x:create-post');
     const body = mediaUrl
       ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
       : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });

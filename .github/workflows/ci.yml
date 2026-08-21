@@ -18,17 +18,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - name: Unit and integration checks
-        run: |
-          npm test
-          npm run validate
-          npm run check
-          npm run smoke
-          npm run secret-scan
-          npm run manual-only-audit
+      - name: Focused test - Manual-Only policy
+        run: node --test --test-concurrency=1 test/manual-only-policy.test.mjs
+      - name: Focused test - Provider mutation boundaries
+        run: node --test --test-concurrency=1 test/manual-only-provider-boundary.test.mjs
+      - name: Focused test - Account lifecycle control
+        run: node --test --test-concurrency=1 test/account-lifecycle-control.test.mjs
+      - name: Focused test - Compliance attestation control
+        run: node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
+      - name: Focused test - Engagement autonomous control
+        run: node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
+      - name: Diagnostic test group A-D
+        continue-on-error: true
+        run: node --test --test-concurrency=1 test/a*.test.mjs test/b*.test.mjs test/c*.test.mjs test/d*.test.mjs
+      - name: Diagnostic test group E-G
+        continue-on-error: true
+        run: node --test --test-concurrency=1 test/e*.test.mjs test/f*.test.mjs test/g*.test.mjs
+      - name: Diagnostic test group I-M
+        continue-on-error: true
+        run: node --test --test-concurrency=1 test/i*.test.mjs test/m*.test.mjs
+      - name: Diagnostic test group O-R
+        continue-on-error: true
+        run: node --test --test-concurrency=1 test/o*.test.mjs test/p*.test.mjs test/r*.test.mjs
+      - name: Diagnostic test group S-X
+        continue-on-error: true
+        run: node --test --test-concurrency=1 test/s*.test.mjs test/t*.test.mjs test/w*.test.mjs test/x*.test.mjs
+      - name: Unit and integration tests
+        run: npm test
+      - name: Strict configuration validation
+        run: npm run validate
+      - name: Source syntax and import checks
+        run: npm run check
+      - name: Smoke checks
+        run: npm run smoke
+      - name: Secret scan (working tree + available history)
+        run: npm run secret-scan
+      - name: Manual-Only repository audit
+        run: npm run manual-only-audit
       - name: Source coverage audit
         run: npm run coverage
       - name: Parse every workflow YAML

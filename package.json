@@ -6,8 +6,8 @@
   "description": "Multi-account autonomous social publishing, analytics, experiments, learning and operations engine for X and Instagram via GitHub Actions.",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1",
-    "coverage": "SNS_MANUAL_INVOCATION=true node --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-lines=90 --test-coverage-branches=60 --test-coverage-functions=82",
+    "test": "node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1",
+    "coverage": "node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include='src/**/*.mjs' --test-coverage-lines=90 --test-coverage-branches=60 --test-coverage-functions=82",
     "check": "node src/ops/check-all.mjs",
     "validate": "node src/validate-strict-config.mjs",
     "autopilot": "node src/orchestrate.mjs",

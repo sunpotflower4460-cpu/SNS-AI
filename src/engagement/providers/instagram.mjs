@@ -1,4 +1,5 @@
 import { fetchJson } from '../../lib/http.mjs';
+import { assertProviderMutationAllowed, loadRuntimePolicy } from '../../ops/manual-only.mjs';
 
 const DEFAULT_MAX_PAGES = 5;
 const ABSOLUTE_MAX_PAGES = 20;
@@ -76,6 +77,11 @@ async function paginateGraphEdge(firstPage, { accessToken, kind = 'edge', maxPag
   return mergeGraphEdgePages(pages);
 }
 
+async function assertLiveMutationAllowed(source) {
+  const runtimePolicy = await loadRuntimePolicy();
+  assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
+}
+
 export function buildInstagramCommentsUrl({ mediaId, apiVersion = 'v25.0', after } = {}) {
   const url = new URL(`${apiBase(apiVersion)}/${id(mediaId, 'mediaId')}/comments`);
   url.searchParams.set('fields', 'id,from,text,timestamp,parent_id');
@@ -131,6 +137,7 @@ export async function sendInstagramCommentReply({ accessToken, commentId, messag
   const payload = buildInstagramCommentReplyPayload({ message });
   const url = `${apiBase(apiVersion)}/${id(commentId, 'commentId')}/replies`;
   if (dryRun) return { dryRun: true, platform: 'instagram', action: 'comment-reply', url, payload };
+  await assertLiveMutationAllowed('engagement:instagram:comment-reply');
   return fetchJson(url, { method: 'POST', headers: auth(accessToken, true), body: JSON.stringify(payload), retries: 0 });
 }
 
@@ -138,6 +145,7 @@ export async function sendInstagramPrivateReply({ accessToken, igUserId, comment
   const payload = buildInstagramPrivateReplyPayload({ commentId, message });
   const url = `${apiBase(apiVersion)}/${id(igUserId, 'igUserId')}/messages`;
   if (dryRun) return { dryRun: true, platform: 'instagram', action: 'private-reply', url, payload };
+  await assertLiveMutationAllowed('engagement:instagram:private-reply');
   return fetchJson(url, { method: 'POST', headers: auth(accessToken, true), body: JSON.stringify(payload), retries: 0 });
 }
 
@@ -145,6 +153,7 @@ export async function sendInstagramDm({ accessToken, igUserId, recipientId, mess
   const payload = buildInstagramDmPayload({ recipientId, message });
   const url = `${apiBase(apiVersion)}/${id(igUserId, 'igUserId')}/messages`;
   if (dryRun) return { dryRun: true, platform: 'instagram', action: 'dm', url, payload };
+  await assertLiveMutationAllowed('engagement:instagram:dm');
   return fetchJson(url, { method: 'POST', headers: auth(accessToken, true), body: JSON.stringify(payload), retries: 0 });
 }
 

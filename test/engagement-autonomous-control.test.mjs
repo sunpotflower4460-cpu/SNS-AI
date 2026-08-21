@@ -242,19 +242,22 @@ test('scheduled runner executes due accounts sequentially and reports healthy/de
   assert.equal(degraded.state, 'degraded');
 });
 
-test('scheduled and control workflows expose only bounded engagement automation', async () => {
+test('Manual-Only keeps scheduled engagement inert and exposes bounded manual control', async () => {
   const scheduled = await readFile(`${ROOT}.github/workflows/engagement-scheduled.yml`, 'utf8');
   const activeScheduled = scheduled.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
   assert.match(activeScheduled, /^\s*workflow_dispatch:/m);
   assert.doesNotMatch(activeScheduled, /^\s*schedule:/m);
   assert.doesNotMatch(activeScheduled, /^\s*-\s*cron:/m);
-  assert.match(scheduled, /node src\/engagement\/scheduled\.mjs/);
+  assert.doesNotMatch(scheduled, /node src\/engagement\/scheduled\.mjs/);
+  assert.doesNotMatch(scheduled, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|X_OAUTH2_STATE_KEY/);
+  assert.match(scheduled, /npm run manual-only-audit/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
-  assert.match(control, /\[engagement-activate\]/);
-  assert.match(control, /\[engagement-deactivate\]/);
+  assert.match(control, /workflow_dispatch:/);
+  assert.match(control, /options: \[activate, deactivate\]/);
   assert.match(control, /live-preflight\.mjs --account/);
   assert.match(control, /x-automation-compliance\.mjs --account/);
   assert.match(control, /--activate/);
   assert.match(control, /--deactivate/);
+  assert.doesNotMatch(control, /github\.event\.issue/);
 });

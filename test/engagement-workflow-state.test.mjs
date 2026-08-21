@@ -46,14 +46,11 @@ test('engagement durable sync refuses to fall back to main and includes the deli
   assert.match(script, /data\/engagement-delivery-ledger\.json/);
 });
 
-test('ChatOps engagement commands use the same durable state boundary', async () => {
+test('provider-offline ChatOps does not restore, persist, or receive durable engagement state', async () => {
   const workflow = await chatopsText();
-  assert.match(workflow, /SNS_DURABLE_STATE_BRANCH:\s*sns-ai-state/);
-  assert.match(workflow, /engagement-durable-state\.sh restore/);
-  assert.match(workflow, /engagement-durable-state\.sh persist/);
-  const persistIndex = workflow.indexOf('Persist durable engagement and OAuth state');
-  const removeIndex = workflow.indexOf('Remove durable state workspace copies before main persistence');
-  const mainPersistIndex = workflow.indexOf('Persist remaining safe runtime state');
-  assert.ok(persistIndex >= 0 && removeIndex > persistIndex && mainPersistIndex > removeIndex);
-  assert.match(workflow.slice(removeIndex, mainPersistIndex), /data\/engagement-delivery-ledger\.json/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /permissions:\s*\n\s*contents:\s*read/);
+  assert.doesNotMatch(workflow, /SNS_DURABLE_STATE_BRANCH|SNS_DURABLE_BUDGETS/);
+  assert.doesNotMatch(workflow, /engagement-durable-state\.sh\s+(restore|persist)/);
+  assert.doesNotMatch(workflow, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|X_OAUTH2_STATE_KEY/);
 });

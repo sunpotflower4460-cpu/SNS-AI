@@ -161,13 +161,18 @@ test('explicit durable mode fails closed when GitHub runtime metadata is unavail
   });
 });
 
-test('production cost-consuming workflows opt into the shared durable counter', async () => {
-  for (const name of ['autopilot.yml', 'engagement.yml', 'chatops.yml', 'intelligence.yml', 'policy.yml']) {
+test('provider-capable cost workflows use durable counters while provider-offline ChatOps stays keyless', async () => {
+  for (const name of ['autopilot.yml', 'engagement.yml', 'intelligence.yml', 'policy.yml']) {
     const text = await readFile(`${ROOT}.github/workflows/${name}`, 'utf8');
     assert.match(text, /SNS_DURABLE_BUDGETS:\s*['"]?true['"]?/);
     assert.match(text, /SNS_DURABLE_STATE_BRANCH:\s*sns-ai-state/);
     assert.match(text, /GITHUB_REPOSITORY:\s*\$\{\{ github\.repository \}\}/);
   }
+
+  const chatops = await readFile(`${ROOT}.github/workflows/chatops.yml`, 'utf8');
+  assert.match(chatops, /permissions:\s*\n\s*contents:\s*read/);
+  assert.doesNotMatch(chatops, /SNS_DURABLE_BUDGETS|SNS_DURABLE_STATE_BRANCH|GITHUB_REPOSITORY/);
+  assert.doesNotMatch(chatops, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|X_OAUTH2_STATE_KEY/);
 });
 
 test('durable state helpers stay opt-in and recognize GitHub CAS conflicts', () => {

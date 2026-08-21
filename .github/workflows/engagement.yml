@@ -10,7 +10,7 @@ on:
       dry_run:
         description: Classify and draft without sending or persisting terminal actions
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -50,6 +50,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
 
       # The shared helper restores/persists only privacy-safe engagement runtime files, including
       # data/engagement-state.json and data/engagement-audit.jsonl, on sns-ai-state rather than main.
@@ -68,7 +69,7 @@ jobs:
         run: |
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${INPUT_DRY_RUN:-false}" == "true" ]]; then args+=(--dry-run); fi
+          if [[ "${INPUT_DRY_RUN:-true}" == "true" ]]; then args+=(--dry-run); fi
           node src/engagement/run.mjs --manual-invocation "${args[@]}"
 
       - name: Persist privacy-safe engagement state to durable branch
