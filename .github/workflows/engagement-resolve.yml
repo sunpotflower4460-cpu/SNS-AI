@@ -1,0 +1,145 @@
+name: SNS Engagement Resolve
+
+# The only way to act on a "[engagement-human] <account> <event-key>" escalation Issue: reply to
+# or ignore ONE public interaction that engagement.yml already routed to a human decision. This is
+# deliberately a separate workflow from engagement.yml (discovery/classification only) and from
+# chatops.yml (provider-offline, never receives send credentials) because this is the one place
+# that can actually place a live reply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: Account ID from config/accounts.json
+        required: true
+        type: string
+      event_key:
+        description: The event key from the "[engagement-human] <account> <event-key>" Issue title
+        required: true
+        type: string
+      action:
+        description: reply sends the text below; ignore closes the escalation without replying
+        required: false
+        default: reply
+        type: choice
+        options: [reply, ignore]
+      text:
+        description: Reply text (required when action is reply; ignored otherwise)
+        required: false
+        type: string
+      dry_run:
+        description: Validate without sending or closing the Issue
+        required: false
+        default: true
+        type: boolean
+      confirm_live:
+        description: Must be true together with dry_run=false before one real reply/close is allowed
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      INPUT_ACCOUNT: ${{ inputs.account }}
+      INPUT_EVENT_KEY: ${{ inputs.event_key }}
+      INPUT_ACTION: ${{ inputs.action }}
+      INPUT_TEXT: ${{ inputs.text }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_CONFIRM_LIVE: ${{ inputs.confirm_live }}
+
+    steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to resolve engagement escalations."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        id: checkout
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Build explicitly manual resolve payload
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const account = String(process.env.INPUT_ACCOUNT || '').trim();
+          const eventKey = String(process.env.INPUT_EVENT_KEY || '').trim();
+          const action = String(process.env.INPUT_ACTION || 'reply').trim();
+          const dryRun = String(process.env.INPUT_DRY_RUN || 'true').toLowerCase() === 'true';
+          const confirmLive = String(process.env.INPUT_CONFIRM_LIVE || 'false').toLowerCase() === 'true';
+          if (!/^[A-Za-z0-9_.-]{1,80}$/.test(account)) throw new Error('A valid account id is required.');
+          if (!/^[a-f0-9]{32}$/.test(eventKey)) throw new Error('event_key must be the 32-character hex key from the escalation Issue title.');
+          if (!['reply', 'ignore'].includes(action)) throw new Error('action must be reply or ignore.');
+          if (action === 'reply' && !dryRun && !String(process.env.INPUT_TEXT || '').trim()) throw new Error('A non-empty text is required to send a live reply.');
+          if (!dryRun && !confirmLive) throw new Error('Live resolution requires both dry_run=false and confirm_live=true.');
+          const payload = { account, eventKey, action, text: process.env.INPUT_TEXT || '', dryRun };
+          writeFileSync('resolve-payload.json', JSON.stringify(payload));
+          NODE
+
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+          npm run manual-only-audit
+
+      - name: Restore durable engagement state
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh restore
+
+      - name: Resolve engagement escalation
+        id: resolve_run
+        env:
+          SNS_MANUAL_INVOCATION: 'true'
+        run: node src/engagement/run.mjs --resolve-file resolve-payload.json
+
+      - name: Persist privacy-safe engagement state to durable branch
+        if: always() && steps.checkout.outcome == 'success' && steps.resolve_run.outcome != 'skipped'
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh persist
+
+      - name: Add run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Manual SNS engagement resolution'
+            echo
+            echo "Account: \`$INPUT_ACCOUNT\`"
+            echo "Action: \`$INPUT_ACTION\`"
+            echo "Dry run: \`$INPUT_DRY_RUN\`"
+            if [[ "${INPUT_DRY_RUN:-true}" == "false" ]]; then
+              echo 'A live provider mutation or Issue close was explicitly requested by this workflow dispatch.'
+            else
+              echo 'No live provider mutation was requested.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

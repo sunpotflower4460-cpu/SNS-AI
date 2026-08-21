@@ -264,8 +264,22 @@ async function createHumanIssue({ accountId, event, key, decision, policy }) {
     publicInteraction: isPublic,
     publicExcerpt: isPublic ? String(event.text || '').slice(0, excerptLimit) : null,
     privateContentOmitted: !isPublic,
+    // engagement.yml (this Issue's creator) is workflow_dispatch-only, same as every other
+    // operational workflow under Manual-Only (see docs/MANUAL_ONLY_MODE.md) - nothing in
+    // .github/workflows/ listens for a label, comment, or close on this issue. The only way to
+    // actually reply or dismiss is to manually run the "SNS Engagement Resolve" Action.
     resolution: isPublic
-      ? 'ChatGPT can submit a public reply through [engagement-resolve].'
+      ? [
+          'TO REPLY OR DISMISS: manually run the "SNS Engagement Resolve" GitHub Action (workflow_dispatch) with these inputs:',
+          `  account: ${accountId}`,
+          `  event_key: ${key}`,
+          '  action: reply (or ignore to dismiss without replying)',
+          '  text: (your reply text; required only for action=reply)',
+          '  dry_run: false',
+          '  confirm_live: true',
+          'Adding a label, commenting, or closing this issue does NOT reply or dismiss anything - nothing listens for it.',
+          'Only the repository owner, or a user listed in the SNS_COMMAND_ADMINS repository variable, can run that Action.'
+        ].join(' ')
       : 'Private DM content and reply text must not be copied into this public repository. Use the chat decision to draft the response, then send it manually in the SNS app if a human response is required.'
   };
   return githubRequest(`/repos/${owner}/${repo}/issues`, {

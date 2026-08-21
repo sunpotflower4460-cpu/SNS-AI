@@ -588,3 +588,27 @@ test('every workflow that sets SNS_MANUAL_INVOCATION or writes state back to mai
     assert.ok(hasActorGate(yaml), `${name} sets SNS_MANUAL_INVOCATION (grants the explicit-manual-invocation credential) but has no "Authorize command actor" step`);
   }
 });
+
+// Every "[engagement-human] <account> <event-key>" escalation Issue told the operator to resolve it
+// through "[engagement-resolve]" - a bracket-command Issue-title syntax that, exactly like the old
+// "approved" label, nothing in .github/workflows/ ever listened for. src/engagement/run.mjs already
+// implements the resolve logic (resolveHumanEngagement, reachable via `--resolve-file`), but no
+// workflow called it, so a human who did everything the Issue told them to do could still never
+// actually send the reply or dismiss the escalation.
+test('a human-escalation engagement Issue points at a real, existing workflow instead of a dead bracket command', async () => {
+  const runSource = await readFile(fileURLToPath(new URL('../src/engagement/run.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(runSource, /\[engagement-resolve\]/, 'the dead bracket-command reference must be gone');
+  assert.match(runSource, /SNS Engagement Resolve/, 'the resolution text must name the real Action');
+  assert.match(runSource, /event_key:/, 'the resolution text must tell the operator the event_key input to use');
+  assert.match(runSource, /does NOT reply or dismiss anything/i, 'must explicitly say the label/comment/close path does nothing');
+
+  const workflow = await readFile(`${WORKFLOWS_DIR}engagement-resolve.yml`, 'utf8');
+  const onBlock = /\non:\n((?:[ \t]+[^\n]*\n)*)/.exec(workflow);
+  assert.ok(onBlock, 'engagement-resolve.yml must have an on: block');
+  assert.match(onBlock[1], /workflow_dispatch:/);
+  assert.doesNotMatch(onBlock[1], /schedule:|issues:|issue_comment:/, 'must stay workflow_dispatch-only under Manual-Only');
+  assert.match(workflow, /name:\s*Authorize command actor/);
+  assert.match(workflow, /SNS_COMMAND_ADMINS/);
+  assert.match(workflow, /confirm_live/);
+  assert.match(workflow, /run\.mjs --resolve-file/, 'must actually invoke the resolve entrypoint');
+});
