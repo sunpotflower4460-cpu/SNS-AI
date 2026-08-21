@@ -33,16 +33,14 @@ jobs:
         run: node --test --test-concurrency=1 test/compliance-attestation-control.test.mjs
       - name: Focused test - Engagement autonomous control
         run: node --test --test-concurrency=1 test/engagement-autonomous-control.test.mjs
-      - name: Harness diagnostic A-D
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/a*.test.mjs test/b*.test.mjs test/c*.test.mjs test/d*.test.mjs
-      - name: Harness diagnostic E-G
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/e*.test.mjs test/f*.test.mjs test/g*.test.mjs
-      - name: Harness diagnostic I-M
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/i*.test.mjs test/m*.test.mjs
-      - name: Harness diagnostic O-R
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/o*.test.mjs test/p*.test.mjs test/r*.test.mjs
-      - name: Harness diagnostic S-X
-        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/s*.test.mjs test/t*.test.mjs test/w*.test.mjs test/x*.test.mjs
+      - name: Harness diagnostic A
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/a*.test.mjs
+      - name: Harness diagnostic B
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/b*.test.mjs
+      - name: Harness diagnostic C
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/c*.test.mjs
+      - name: Harness diagnostic D
+        run: node --import ./test/manual-invocation-harness.mjs --test --test-concurrency=1 test/d*.test.mjs
       - name: Unit and integration tests
         run: npm test
       - name: Strict configuration validation
