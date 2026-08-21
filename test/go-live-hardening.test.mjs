@@ -552,3 +552,39 @@ test('a failed slot write leaves the approval issue open for retry, instead of c
   assert.equal(error.result?.expiredSlots?.[0]?.applied, false);
   assert.ok(error.result?.expiredSlots?.[0]?.error, 'the failure reason must be attached for diagnosis');
 });
+
+// hub-reconcile.yml and publish-reconcile.yml write authoritative provider-confirmed state back to
+// main and finalize durable claims, yet - unlike every other write-capable operational workflow
+// (publish.yml, account-control.yml, engagement-control.yml, compliance-attestation.yml,
+// chatops.yml, feedback.yml) - they had no actor check at all: any repository collaborator with
+// generic write access, not just the owner or SNS_COMMAND_ADMINS, could trigger them.
+//
+// engagement.yml is a sharper case of the same bug: it unconditionally sets
+// SNS_MANUAL_INVOCATION: 'true' in its job env, which is the exact token
+// assertProviderMutationAllowed() (src/ops/manual-only.mjs) treats as proof a human deliberately
+// ran this as a manual workflow_dispatch. publish.yml hands out that same token under an actor
+// check plus an explicit confirm_live input; engagement.yml handed it out to any workflow_dispatch
+// caller with no actor check and no second confirmation. Today that gap is inert only because
+// config/engagement-policy.json's approvalRequired:true and empty liveAccounts (both enforced by
+// manual-only-audit.mjs) route every reply through a human-approval issue first - the same kind of
+// "safe only because an unrelated config layer happens to also block it" gap already fixed for
+// requireExplicitManualInvocation in src/ops/manual-only.mjs. Any workflow that grants this
+// specific credential must gate who can grant it, independent of what else currently blocks misuse.
+test('every workflow that sets SNS_MANUAL_INVOCATION or writes state back to main gates on the authorized-actor check', async () => {
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  const hasActorGate = (yaml) => /name:\s*Authorize command actor/.test(yaml) && /SNS_COMMAND_ADMINS/.test(yaml) && /github\.repository_owner/.test(yaml);
+
+  const mustGate = ['hub-reconcile.yml', 'publish-reconcile.yml'];
+  for (const name of mustGate) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    assert.ok(hasActorGate(yaml), `${name} writes authoritative state back to main but has no "Authorize command actor" step`);
+  }
+
+  for (const name of files) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    if (!/SNS_MANUAL_INVOCATION/.test(yaml)) continue;
+    assert.ok(hasActorGate(yaml), `${name} sets SNS_MANUAL_INVOCATION (grants the explicit-manual-invocation credential) but has no "Authorize command actor" step`);
+  }
+});
