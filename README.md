@@ -345,7 +345,7 @@ Manual-Only下では**全てworkflow_dispatch（手動実行）のみ**で、sch
 - **SNS Account Control** — アカウントlifecycle変更（`approval`/`auto`はManual-Only中は拒否）
 - **SNS Engagement Control** — engagement activate/deactivate（`activate`はManual-Only中は拒否）
 - **SNS Compliance Attestation** — X automated-profile / AI-reply承認の記録
-- **SNS ChatOps** — provider-offlineなkeyless preflight/dry-run
+- **SNS ChatOps** — provider-offlineなkeyless preflight（生成previewは`OPENAI_API_KEY`が必要なため対象外。previewは**SNS Autopilot**の`dry_run: true`を使用）
 - **SNS Hub Reconcile** / **SNS Publish Readback Reconcile** — Hub/provider状態の照合
 - **SNS Human Feedback** — 明示フィードバック保存
 - **SNS Health Report** — readiness / operating report

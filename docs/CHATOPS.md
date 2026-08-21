@@ -12,10 +12,10 @@ Keyless and provider-offline: it never receives `OPENAI_API_KEY`, `SOCIAL_CREDEN
 
 Inputs:
 
-- `command`: `preflight` or `dry-run`
+- `command`: `preflight` (the only option)
 - `account`: account ID from `config/accounts.json`
 
-`preflight` runs `validate` / `check` / `secret-scan` / `manual-only-audit` / `doctor` and reports the result in the run summary (secrets redacted). `dry-run` runs `src/orchestrate.mjs --account <id> --force --dry-run` and reports what it would have generated.
+`preflight` runs `validate` / `check` / `secret-scan` / `manual-only-audit` / `doctor` and reports the result in the run summary (secrets redacted). This surface intentionally does not offer a generation dry-run: a real preview call to the OpenAI Responses API requires `OPENAI_API_KEY` (this is deliberate — see the comment on `openaiRequest()` in `src/lib/openai.mjs` — a dry-run preview still calls the real API so the operator sees real generated text), and ChatOps is designed to never receive provider/OpenAI credentials at all. To preview what an account would generate, dispatch **SNS Autopilot** with `dry_run: true` instead — it already carries `OPENAI_API_KEY`.
 
 ## SNS Publish social post (`publish.yml`)
 

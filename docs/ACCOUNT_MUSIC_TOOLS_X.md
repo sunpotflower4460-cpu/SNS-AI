@@ -142,7 +142,7 @@ After the external setup above is complete, everything is run by manually dispat
 
 1. change only `music-tools-x.enabled` to `true`; keep `mode: approval` for the first controlled publish (this itself requires a code-reviewed edit to `config/accounts.json` while Manual-Only is active — see `docs/MANUAL_ONLY_MODE.md`)
 2. dispatch **SNS ChatOps** with `command: preflight`, `account: music-tools-x`
-3. dispatch **SNS ChatOps** with `command: dry-run`, `account: music-tools-x` and inspect the generated post/research result in the run summary
+3. dispatch **SNS Autopilot** with `account: music-tools-x`, `force: true`, `dry_run: true` and inspect the generated post/research result in the run summary (a generation preview needs `OPENAI_API_KEY`, which the keyless ChatOps surface deliberately never receives — see `docs/CHATOPS.md`)
 4. if engagement OAuth2 is configured, dispatch **SNS Engagement Autopilot** with `account: music-tools-x`, `dry_run: true`
 5. approve exactly **one** controlled real post by dispatching **SNS Publish social post** with the account/text/media from the approval Issue, `dry_run: false`, and `confirm_live: true` — an Issue label, comment, or close does nothing
 6. verify `data/history.jsonl`, provider post ID, and subsequent metrics collection

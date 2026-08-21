@@ -661,3 +661,27 @@ test('go-live docs describe the current Manual-Only posture, not the old schedul
 
   assert.doesNotMatch(musicToolsX, /adding the `approved` label to its approval Issue/i);
 });
+
+// docs/CHATOPS.md documented chatops.yml's "dry-run" command as a working, provider-offline
+// preview - but chatops.yml never sets OPENAI_API_KEY, and orchestrate.mjs's dry-run path
+// deliberately still calls the real OpenAI Responses API (see the comment on openaiRequest() in
+// src/lib/openai.mjs: "dry-run previews still call the real Responses API so an operator can
+// actually see what would be posted"). Every dispatch of that command would have failed with a
+// missing-credential error - CodeRabbit caught the contradiction between the "provider-offline"
+// framing and the dry-run command actually needing a provider credential it never receives. Fixed
+// by dropping the broken dry-run command from ChatOps entirely and pointing operators at SNS
+// Autopilot's dry_run input instead, which already carries the required credential.
+test('ChatOps does not advertise a dry-run command it structurally cannot run', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const chatops = await readFile(`${WORKFLOWS_DIR}chatops.yml`, 'utf8');
+  const chatopsDoc = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+
+  assert.doesNotMatch(chatops, /options:.*dry-run/, 'chatops.yml must not offer a command it cannot actually run without a credential it never receives');
+  assert.doesNotMatch(chatops, /if:\s*inputs\.command == 'dry-run'/);
+  assert.doesNotMatch(chatops, /orchestrate\.mjs/);
+  assert.match(chatops, /options:\s*\[preflight\]/);
+
+  assert.doesNotMatch(chatopsDoc, /`preflight` or `dry-run`/i);
+  assert.match(chatopsDoc, /SNS Autopilot/, 'must point operators at the workflow that can actually preview a generation');
+});
