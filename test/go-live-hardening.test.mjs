@@ -778,3 +778,32 @@ test('every write-capable or secret-bearing operational workflow gates on the au
 
   assert.deepEqual(missing, [], `workflow(s) grant write access or a provider/OpenAI secret without gating on the authorized-actor check:\n${JSON.stringify(missing, null, 2)}`);
 });
+
+// CodeRabbit's review of this same PR caught a real, pre-existing bug in the "Authorize command
+// actor" pattern itself (present since publish.yml's original gate, and multiplied by adding the
+// same pattern to 8 more workflows in this PR): every step read `github.actor`, which GitHub
+// deliberately keeps pinned to the ORIGINAL dispatcher across a workflow re-run - a documented
+// anti-escalation feature for GitHub's own token/permission scoping, not something available to
+// gate a custom authorization check on. Any repository collaborator with plain "write" access (a
+// materially lower bar than being listed in SNS_COMMAND_ADMINS) can click "Re-run all jobs" on any
+// historical run the owner originally dispatched, and the actor check would still read the owner's
+// name and pass - even though this collaborator, not the owner, is who actually caused this
+// execution to spend OpenAI budget, touch provider secrets, or write to the repo. `github.triggering_actor`
+// is the field GitHub updates to reflect who actually triggered the current execution, including
+// re-runs, and is identical to github.actor for a normal (non-re-run) dispatch - see
+// https://github.blog/changelog/2022-07-19-differentiating-triggering-actor-from-executing-actor/.
+test('every "Authorize command actor" step reads github.triggering_actor, not the re-run-stale github.actor', async () => {
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => /\.ya?ml$/.test(name));
+  assert.ok(files.length > 0, 'expected to find workflow files to check');
+
+  const wrong = [];
+  for (const name of files) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    if (!/name:\s*Authorize command actor/.test(yaml)) continue;
+    if (/ACTOR:\s*\$\{\{\s*github\.actor\s*\}\}/.test(yaml)) wrong.push(name);
+    else if (!/ACTOR:\s*\$\{\{\s*github\.triggering_actor\s*\}\}/.test(yaml)) wrong.push(`${name} (unexpected ACTOR source)`);
+  }
+
+  assert.deepEqual(wrong, [], `workflow(s) gate on the re-run-stale github.actor instead of github.triggering_actor:\n${JSON.stringify(wrong, null, 2)}`);
+});
