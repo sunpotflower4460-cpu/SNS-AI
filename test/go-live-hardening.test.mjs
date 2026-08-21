@@ -685,3 +685,33 @@ test('ChatOps does not advertise a dry-run command it structurally cannot run', 
   assert.doesNotMatch(chatopsDoc, /`preflight` or `dry-run`/i);
   assert.match(chatopsDoc, /SNS Autopilot/, 'must point operators at the workflow that can actually preview a generation');
 });
+
+// A second CodeRabbit pass on this same PR caught three more accuracy gaps in the just-rewritten
+// docs: the engagement descriptions said automatic sending only depended on liveAccounts/confidence,
+// omitting that approvalRequired:true (required today by manual-only-audit) routes every reply to a
+// human Issue regardless of those two; the go-live checklist implied lifting Manual-Only alone
+// restores engagement.yml's automatic polling, when the cron trigger itself lives in the workflow
+// YAML and needs its own edit; and README's Manual-Only framing said "all workflows"/"all execution"
+// while documenting ci.yml/failure-watch.yml as automatic exceptions two lines later.
+test('engagement/schedule docs do not overstate what liveAccounts, Manual-Only, or "all workflows" alone accomplish', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+  const chatopsDoc = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+  const musicToolsX = await readFile(`${DOCS_DIR}ACCOUNT_MUSIC_TOOLS_X.md`, 'utf8');
+  const goLive = await readFile(`${DOCS_DIR}GO_LIVE_CHECKLIST.md`, 'utf8');
+  const readme = await readFile(`${REPO_ROOT}README.md`, 'utf8');
+
+  for (const doc of [chatopsDoc, musicToolsX]) {
+    assert.match(doc, /approvalRequired/, 'engagement auto-send description must mention approvalRequired, not just liveAccounts/confidence');
+  }
+
+  assert.match(goLive, /workflowファイルへ`schedule:`を追加/, 'must say the workflow YAML itself needs a schedule: edit, not just the runtime policy');
+
+  assert.match(readme, /operator workflow/, 'must scope the Manual-Only claim to operator workflows, excluding the documented CI/Failure-Watch exceptions');
+  // Both places that claim "all workflows are workflow_dispatch-only" must mention the ci.yml/
+  // failure-watch.yml exception in the same breath, not just further down the document.
+  const introBanner = readme.slice(readme.indexOf('Manual-Onlyでロックされています'), readme.indexOf('## 主な自動化'));
+  assert.match(introBanner, /ci\.yml/, 'the intro Manual-Only banner must name its own automatic-workflow exceptions, not just the GitHub Actions section further down');
+  const actionsSection = readme.slice(readme.indexOf('## GitHub Actions'), readme.indexOf('## GitHub Actions') + 600);
+  assert.match(actionsSection, /ci\.yml/, 'the GitHub Actions section opener must name its automatic-workflow exceptions inline');
+});

@@ -5,7 +5,7 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 アカウントごとに人格・目的・読者・禁止事項を分離し、
 **情報収集 → 複数案生成 → 選定 → 画像/動画生成 → 公開前QA → 投稿 → 反応計測 → 安全監視 → 学習 → A/B実験 → 改善 → 報告 → 保守**まで循環させます。
 
-**現在このリポジトリはManual-Onlyでロックされています**（[`docs/MANUAL_ONLY_MODE.md`](docs/MANUAL_ONLY_MODE.md)）。以下の自動化はコードとして実装済みですが、`config/runtime-policy.json`の`manualOnly: true`により、scheduleは全workflowから外され、`mode: auto`への遷移も拒否されます。現時点では**全て`workflow_dispatch`による手動実行のみ**です。自動実行を再開するのは別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](docs/MANUAL_SETUP_CHECKLIST.md) §11）。
+**現在このリポジトリはManual-Onlyでロックされています**（[`docs/MANUAL_ONLY_MODE.md`](docs/MANUAL_ONLY_MODE.md)）。以下の自動化はコードとして実装済みですが、`config/runtime-policy.json`の`manualOnly: true`により、SNSを操作するoperator workflow（投稿・エンゲージメント・アカウント制御など）のscheduleは全て外され、`mode: auto`への遷移も拒否されます。これらのoperator workflowは現時点では**全て`workflow_dispatch`による手動実行のみ**です（`ci.yml`と`failure-watch.yml`はGitHub内部の自動workflowで、この対象外の例外として引き続き自動実行されます — 詳細は「GitHub Actions」節）。自動実行を再開するのは別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](docs/MANUAL_SETUP_CHECKLIST.md) §11）。
 
 ## 主な自動化
 
@@ -333,7 +333,7 @@ PreflightはSNS投稿や画像/動画generationを行いません。したがっ
 
 ## GitHub Actions
 
-Manual-Only下では**全てworkflow_dispatch（手動実行）のみ**で、scheduleは付いていません。`.github/workflows/`にIssue title / label / commentをトリガーとするworkflowは存在しません。
+Manual-Only下ではSNSを操作するoperator workflowは**全てworkflow_dispatch（手動実行）のみ**で、scheduleは付いていません（`ci.yml`と`failure-watch.yml`はGitHub内部の自動workflowとして例外的に自動実行されます — 下記参照）。`.github/workflows/`にIssue title / label / commentをトリガーとするworkflowは存在しません。
 
 - **SNS Autopilot** — 投稿candidate生成・approval issue作成（`force` / `dry_run`指定可）
 - **SNS Publish social post** — 実投稿。`dry_run: false`かつ`confirm_live: true`の両方を指定した場合のみ実publish

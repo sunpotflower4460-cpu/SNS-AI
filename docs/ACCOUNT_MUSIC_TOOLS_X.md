@@ -155,7 +155,7 @@ The goal is not to keep clicking approval buttons. The one controlled publish is
 
 Today, under Manual-Only, **SNS Engagement Autopilot** only runs when manually dispatched — there is no automatic polling. Once dispatched:
 
-- routine high-confidence public replies to the account's own posts are answered automatically only if the account is in `config/engagement-policy.json`'s `liveAccounts` (empty today) and confidence clears the configured threshold
+- routine high-confidence public replies to the account's own posts are answered automatically only if `config/engagement-policy.json`'s `approvalRequired` is `false`, the account is in `liveAccounts` (empty today), and confidence clears the configured threshold — today `approvalRequired: true` is required by `manual-only-audit`, so every reply currently goes through the `[engagement-human]` escalation Issue below regardless of `liveAccounts`/confidence
 - opt-outs, duplicate responses, unsolicited outreach, and daily caps are enforced before sending
 - difficult/high-stakes/low-confidence cases create `[engagement-human] <account> <event-key>` Issues instead of guessing; resolving one means manually dispatching **SNS Engagement Resolve** with that account/event_key, `dry_run: false`, and `confirm_live: true` — nothing else acts on these Issues
 - private DM bodies are not copied into this public repository; DM auto-reply is disabled (`autoDmReply: false`) and DM escalations must be handled directly in the SNS app

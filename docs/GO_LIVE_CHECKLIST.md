@@ -175,7 +175,7 @@ Circuit Breaker、Anomaly Brake、daily budget、Failure Watchは`auto`後も有
   - このIssueへのlabel付与・コメント・closeでは何も起きません。返信または却下は**`SNS Engagement Resolve` Action（`workflow_dispatch`）をIssue記載のaccount/event_keyで、`dry_run: false`かつ`confirm_live: true`で手動実行する**ことだけが実際に効きます（`.github/workflows/engagement-resolve.yml`）。
 - [ ] 数件を人の目で確認する
 
-`engagement.yml`のscheduleを再導入する（cronを戻す）ことは、それ自体が`config/runtime-policy.json`を対象にした別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](MANUAL_SETUP_CHECKLIST.md) §11）。この節の完了は「手動実行での有効化」までを指し、自動実行の再開を意味しません。
+`engagement.yml`のscheduleを再導入する（cronを戻す）ことは、それ自体が別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](MANUAL_SETUP_CHECKLIST.md) §11）。**`config/runtime-policy.json`のManual-Only解除だけでは自動pollingは復活しません** — cronのtriggerは`.github/workflows/engagement.yml`のYAML自体に書くものなので、そのworkflowファイルへ`schedule:`を追加する編集も同じレビュー済み変更に含める必要があります。この節の完了は「手動実行での有効化」までを指し、自動実行の再開を意味しません。
 
 `liveAccounts`が空の間は、workflowを実行してもアカウントがフィルタで除外され、
 外部APIを一切呼ばずに`nothing_enabled`で終了します（課金も発生しません）。
