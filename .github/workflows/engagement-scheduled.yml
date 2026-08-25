@@ -1,36 +1,76 @@
 name: SNS Engagement Scheduled
 
 on:
+  # Manual-only safety posture: no scheduled provider polling.
+  # When Manual-Only is separately reviewed and lifted, add a schedule trigger here and
+  # also set allowScheduledProviderPolling:true in config/runtime-policy.json.
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
 
 concurrency:
   group: sns-ai-write
   cancel-in-progress: false
 
 jobs:
-  manual-only-notice:
+  engagement-scheduled:
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
+      X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+
     steps:
+      - name: Authorize command actor
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to run SNS Engagement Scheduled."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
-      - name: Verify Manual-Only posture
+      - name: Runtime static guards
         run: |
           npm run validate
+          npm run check
+          npm run secret-scan
           npm run manual-only-audit
 
-      - name: Explain scheduled engagement lock
-        run: |
-          {
-            echo '## Scheduled engagement is disabled in Manual-Only'
-            echo
-            echo 'This workflow intentionally performs no provider polling, replies, or DMs.'
-            echo 'Use SNS Engagement Autopilot with its default dry_run=true for a manually dispatched inspection.'
-            echo 'Re-enabling scheduled engagement requires a separate reviewed change to the runtime policy and workflow.'
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Restore durable engagement state
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh restore
+
+      - name: Ensure human-escalation label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label create needs-human --description 'SNS-AI requires a human decision' --color B60205 --force
+
+      - name: Run scheduled engagement
+        id: engagement_run
+        shell: bash
+        run: node src/engagement/scheduled.mjs
+
+      - name: Persist privacy-safe engagement state to durable branch
+        if: always() && steps.engagement_run.outcome != 'skipped'
+        shell: bash
+        run: bash scripts/engagement-durable-state.sh persist

@@ -1,0 +1,20 @@
+{
+  "slotId": "example-x:manual:2026-08-13T00:01",
+  "status": "published",
+  "createdAt": "2026-08-25T04:45:46.281Z",
+  "updatedAt": "2026-08-25T04:45:46.287Z",
+  "account": "example-x",
+  "platform": "x",
+  "source": "auto",
+  "text": "Top-level integration test post.",
+  "textHash": "beba17b556d8d83ff153",
+  "mediaUrl": null,
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "post-123",
+  "publishedAt": "2026-08-25T04:45:46.286Z"
+}

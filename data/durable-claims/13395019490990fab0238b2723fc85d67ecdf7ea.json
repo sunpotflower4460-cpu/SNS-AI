@@ -1,0 +1,21 @@
+{
+  "slotId": "example-x:test:failure",
+  "status": "publish_unknown",
+  "createdAt": "2026-08-25T04:45:46.294Z",
+  "updatedAt": "2026-08-25T04:45:46.297Z",
+  "account": "example-x",
+  "platform": "x",
+  "source": "integration-test",
+  "text": "Forced publish failure.",
+  "textHash": "091865f97ef6a881117c",
+  "mediaUrl": null,
+  "mediaType": null,
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "errorStatus": 500,
+  "publishStage": "create-post",
+  "lastError": "HTTP 500: forced publish failure"
+}

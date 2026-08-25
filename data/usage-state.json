@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "accounts": {
+    "image-moderation-empty": {
+      "localDate": "2026-08-25",
+      "counts": {
+        "openai": 7
+      }
+    }
+  },
+  "updatedAt": "2026-08-25T04:45:41.288Z"
+}

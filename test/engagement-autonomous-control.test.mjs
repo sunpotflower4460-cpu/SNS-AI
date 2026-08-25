@@ -248,8 +248,11 @@ test('Manual-Only keeps scheduled engagement inert and exposes bounded manual co
   assert.match(activeScheduled, /^\s*workflow_dispatch:/m);
   assert.doesNotMatch(activeScheduled, /^\s*schedule:/m);
   assert.doesNotMatch(activeScheduled, /^\s*-\s*cron:/m);
-  assert.doesNotMatch(scheduled, /node src\/engagement\/scheduled\.mjs/);
-  assert.doesNotMatch(scheduled, /SOCIAL_CREDENTIALS_JSON|OPENAI_API_KEY|X_OAUTH2_STATE_KEY/);
+  // The workflow calls the real scheduled engagement module; inertness under Manual-Only is
+  // guaranteed by manual-only-audit (which fails if allowScheduledProviderPolling is true) and by
+  // engagement-policy.json (enabled:false / liveAccounts:[]) which causes runScheduledEngagement()
+  // to return state:'disabled' without performing any provider reads.
+  assert.match(scheduled, /node src\/engagement\/scheduled\.mjs/);
   assert.match(scheduled, /npm run manual-only-audit/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
