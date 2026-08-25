@@ -1,0 +1,20 @@
+{
+  "slotId": "integration-x:manual:2026-08-12T15:00",
+  "status": "published",
+  "createdAt": "2026-08-25T04:36:52.988Z",
+  "updatedAt": "2026-08-25T04:36:52.993Z",
+  "account": "integration-x",
+  "platform": "x",
+  "source": "auto",
+  "text": "Automated integration test post.",
+  "textHash": "96b2f6e502145b84fbcc",
+  "mediaUrl": null,
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "post-integration",
+  "publishedAt": "2026-08-25T04:36:52.992Z"
+}
