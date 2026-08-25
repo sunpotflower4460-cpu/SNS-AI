@@ -1,8 +1,8 @@
 {
   "slotId": "example-x:test:failure",
   "status": "publish_unknown",
-  "createdAt": "2026-08-25T04:36:53.284Z",
-  "updatedAt": "2026-08-25T04:36:53.286Z",
+  "createdAt": "2026-08-25T04:44:31.414Z",
+  "updatedAt": "2026-08-25T04:44:31.416Z",
   "account": "example-x",
   "platform": "x",
   "source": "integration-test",

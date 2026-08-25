@@ -1,8 +1,8 @@
 {
   "slotId": "example-x:manual:2026-08-13T00:01",
   "status": "published",
-  "createdAt": "2026-08-25T04:36:53.273Z",
-  "updatedAt": "2026-08-25T04:36:53.277Z",
+  "createdAt": "2026-08-25T04:44:31.401Z",
+  "updatedAt": "2026-08-25T04:44:31.407Z",
   "account": "example-x",
   "platform": "x",
   "source": "auto",
@@ -16,5 +16,5 @@
     "paidPartnership": false
   },
   "providerPostId": "post-123",
-  "publishedAt": "2026-08-25T04:36:53.276Z"
+  "publishedAt": "2026-08-25T04:44:31.406Z"
 }

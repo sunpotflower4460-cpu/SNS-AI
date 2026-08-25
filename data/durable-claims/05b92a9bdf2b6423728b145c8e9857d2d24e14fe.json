@@ -1,8 +1,8 @@
 {
   "slotId": "integration-x:manual:2026-08-12T15:00",
   "status": "published",
-  "createdAt": "2026-08-25T04:36:52.988Z",
-  "updatedAt": "2026-08-25T04:36:52.993Z",
+  "createdAt": "2026-08-25T04:44:30.929Z",
+  "updatedAt": "2026-08-25T04:44:30.934Z",
   "account": "integration-x",
   "platform": "x",
   "source": "auto",
@@ -16,5 +16,5 @@
     "paidPartnership": false
   },
   "providerPostId": "post-integration",
-  "publishedAt": "2026-08-25T04:36:52.992Z"
+  "publishedAt": "2026-08-25T04:44:30.933Z"
 }

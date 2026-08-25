@@ -337,6 +337,7 @@ Manual-Only下ではSNSを操作するoperator workflowは**全てworkflow_dispa
 
 - **SNS Autopilot** — 投稿candidate生成・approval issue作成（`force` / `dry_run`指定可）
 - **SNS Publish social post** — 実投稿。`dry_run: false`かつ`confirm_live: true`の両方を指定した場合のみ実publish
+- **SNS Engagement Scheduled** — `config/engagement-policy.json`の`liveAccounts`と投稿後ウィンドウに従い、最近の自投稿への返信/DMを自動ポーリング・処理する定期実行用。Manual-Only中は`allowScheduledProviderPolling:false`と`liveAccounts:[]`でfail-closedになるため副作用なし。scheduleを追加するには`config/runtime-policy.json`の`allowScheduledProviderPolling:true`設定も必要
 - **SNS Engagement Autopilot** — 自分の投稿への返信を検知・分類・下書き。approval Issue経由が基本
 - **SNS Engagement Resolve** — `[engagement-human]` Issueへの返信/却下を実際に実行する唯一の手段
 - **SNS Metrics Collector** — 投稿後メトリクス取得

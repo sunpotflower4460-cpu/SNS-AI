@@ -10,7 +10,7 @@ This file records tasks that cannot be completed safely from repository code alo
 - Affiliate publishing remains disabled.
 - Engagement code/configuration is available for dry-run/preflight, but `config/engagement-policy.json` keeps `liveAccounts: []`, so no automated inbound reply/DM can be sent yet.
 - X automated-profile transparency is a posting gate. X AI-reply written approval and reply/DM OAuth2 scopes are separate engagement gates and do **not** block text-only publishing before engagement is activated.
-- `SNS Engagement Scheduled` (`engagement-scheduled.yml`) is currently a no-op stub under Manual-Only: it runs only on manual `workflow_dispatch`, performs no provider reads, and just prints an explanation. The real polling logic in `src/engagement/scheduled.mjs` is not called by any workflow today. Manually dispatching **SNS Engagement Autopilot** is the only way to actually run engagement discovery/classification right now; once dispatched, every actual provider read is bounded by `maxInboundFetchesPerDay` and, after activation, reads only inside the recent-own-post window unless DM automation is explicitly enabled.
+- `SNS Engagement Scheduled` (`engagement-scheduled.yml`) は`allowScheduledProviderPolling:false`と`liveAccounts:[]`により、Manual-Only中はfail-closedで実質何もしません（エラーなしで`state: disabled`を返します）。手動`workflow_dispatch`でテスト実行は可能です。scheduled engagement（定期ポーリング）を有効化するには、`config/runtime-policy.json`の`allowScheduledProviderPolling`を`true`にし、workflowにscheduleトリガーを追加する別途レビュー済みの変更が必要です。それまでは**SNS Engagement Autopilot**の手動実行が唯一のengagement discovery/classificationの手段です。
 
 ## Affiliate applications
 
