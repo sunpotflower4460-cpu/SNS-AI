@@ -20,3 +20,28 @@ test('persistent opt-outs are never evicted when routine actor cooldown cache ex
     storeTest.MAX_ACTIVE_ACTORS_PER_ACCOUNT
   );
 });
+
+test('terminal engagement event guards survive active-event compaction', () => {
+  const now = Date.parse('2026-08-20T00:00:00Z');
+  const events = {
+    humanOld: { status: 'human', updatedAt: '2026-07-20T00:00:00Z' },
+    ignoredRecent: { status: 'ignored', updatedAt: '2026-08-19T00:00:00Z' },
+    sentRecent: { status: 'sent', updatedAt: '2026-08-18T00:00:00Z' },
+    expiredTerminal: { status: 'human', updatedAt: '2026-06-01T00:00:00Z' }
+  };
+  for (let i = 0; i < storeTest.MAX_EVENTS_PER_ACCOUNT + 40; i += 1) {
+    events[`pending-${i}`] = {
+      status: 'pending',
+      updatedAt: new Date(now - i * 1000).toISOString()
+    };
+  }
+  const compacted = storeTest.compactEvents(events, now);
+  assert.equal(compacted.humanOld?.status, 'human');
+  assert.equal(compacted.ignoredRecent?.status, 'ignored');
+  assert.equal(compacted.sentRecent?.status, 'sent');
+  assert.equal(compacted.expiredTerminal, undefined);
+  assert.equal(
+    Object.values(compacted).filter((row) => row?.status === 'pending').length,
+    storeTest.MAX_EVENTS_PER_ACCOUNT
+  );
+});

@@ -289,6 +289,8 @@ test('Manual-Only keeps scheduled engagement inert and exposes bounded manual co
   // SNS_MANUAL_INVOCATION must be granted only on workflow_dispatch. A future schedule: trigger must
   // not inherit the explicit-manual-invocation credential or unattended cron bypasses the gate.
   assert.match(scheduled, /SNS_MANUAL_INVOCATION:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'/);
+  assert.match(scheduled, /confirm_live/);
+  assert.match(scheduled, /Confirm live manual dispatch/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   assert.match(control, /workflow_dispatch:/);

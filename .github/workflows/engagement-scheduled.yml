@@ -5,6 +5,12 @@ on:
   # When Manual-Only is separately reviewed and lifted, add a schedule trigger here and
   # also set allowScheduledProviderPolling:true in config/runtime-policy.json.
   workflow_dispatch:
+    inputs:
+      confirm_live:
+        description: Must be true before real scheduled engagement polling/sends are allowed on manual dispatch
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -29,6 +35,7 @@ jobs:
       SNS_MANUAL_INVOCATION: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
       SNS_DURABLE_BUDGETS: 'true'
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      INPUT_CONFIRM_LIVE: ${{ inputs.confirm_live }}
 
     steps:
       - name: Authorize command actor
@@ -42,6 +49,15 @@ jobs:
           normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
           if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
             echo "::error::Actor '$ACTOR' is not authorized to run SNS Engagement Scheduled."
+            exit 1
+          fi
+
+      - name: Confirm live manual dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          if [[ "${INPUT_CONFIRM_LIVE:-false}" != "true" ]]; then
+            echo "::error::SNS Engagement Scheduled manual dispatch requires confirm_live=true (scheduled.mjs always runs dryRun=false)."
             exit 1
           fi
 

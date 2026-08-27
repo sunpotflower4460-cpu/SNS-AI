@@ -162,7 +162,7 @@ test('explicit durable mode fails closed when GitHub runtime metadata is unavail
 });
 
 test('provider-capable cost workflows use durable counters while provider-offline ChatOps stays keyless', async () => {
-  for (const name of ['autopilot.yml', 'engagement.yml', 'intelligence.yml', 'policy.yml']) {
+  for (const name of ['autopilot.yml', 'engagement.yml', 'engagement-resolve.yml', 'engagement-scheduled.yml', 'intelligence.yml', 'policy.yml']) {
     const text = await readFile(`${ROOT}.github/workflows/${name}`, 'utf8');
     assert.match(text, /SNS_DURABLE_BUDGETS:\s*['"]?true['"]?/);
     assert.match(text, /SNS_DURABLE_STATE_BRANCH:\s*sns-ai-state/);

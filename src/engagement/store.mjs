@@ -34,10 +34,26 @@ export async function loadEngagementState() {
   return await readJson(STATE_FILE, { schemaVersion: 2, accounts: {} });
 }
 
-function compactEvents(events = {}) {
-  return Object.fromEntries(Object.entries(events)
-    .sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')))
-    .slice(0, MAX_EVENTS_PER_ACCOUNT));
+function compactEvents(events = {}, now = Date.now()) {
+  // Terminal outcomes are duplicate/escalation guards, not disposable cache. Evicting `human` /
+  // `ignored` / `sent` after the 600-row active cap made processEvent treat old interactions as new
+  // (auto-reply or duplicate human Issues). Keep them time-bounded like the delivery ledger.
+  const TERMINAL = new Set(['human', 'ignored', 'opted_out', 'delivery_handled', 'sent']);
+  const TERMINAL_RETENTION_MS = 35 * 24 * 60 * 60_000;
+  const terminal = [];
+  const active = [];
+  for (const entry of Object.entries(events)) {
+    const [, row] = entry;
+    if (TERMINAL.has(String(row?.status || ''))) {
+      const at = Date.parse(row?.updatedAt || row?.resolvedAt || row?.sentAt || '');
+      if (!Number.isFinite(at) || now - at <= TERMINAL_RETENTION_MS) terminal.push(entry);
+      continue;
+    }
+    active.push(entry);
+  }
+  active.sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')));
+  terminal.sort(([, a], [, b]) => String(b?.updatedAt || '').localeCompare(String(a?.updatedAt || '')));
+  return Object.fromEntries([...terminal, ...active.slice(0, MAX_EVENTS_PER_ACCOUNT)]);
 }
 
 function compactActors(actors = {}) {
