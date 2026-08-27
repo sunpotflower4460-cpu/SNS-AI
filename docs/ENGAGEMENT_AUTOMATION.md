@@ -2,7 +2,7 @@
 
 Verified baseline: 2026-08-20.
 
-**This repository is currently locked to Manual-Only** (see `docs/MANUAL_ONLY_MODE.md`). This document describes the designed capability. The "Activation model" and "Runtime" sections below name the real `workflow_dispatch` Actions to use — there is no Issue-title command system — and `SNS Engagement Scheduled`'s actual current behavior is a manual-dispatch no-op, not the described 30-minute automatic polling; see the note in that section.
+**This repository is currently locked to Manual-Only** (see `docs/MANUAL_ONLY_MODE.md`). This document describes the designed capability. The "Activation model" and "Runtime" sections below name the real `workflow_dispatch` Actions to use — there is no Issue-title command system — and `SNS Engagement Scheduled` is wired to the real polling module but stays inert under Manual-Only (`allowScheduledProviderPolling:false`, plus `enabled:false` / `liveAccounts:[]`); see the note in that section.
 
 ## Goal
 
@@ -60,7 +60,7 @@ Manual `workflow_dispatch` for setup, diagnostics, controlled dry-runs, and expl
 
 ### `SNS Engagement Scheduled` (`engagement-scheduled.yml`)
 
-**Currently a no-op under Manual-Only:** the workflow is `workflow_dispatch`-only, performs zero provider reads or polling, and just prints an explanation pointing at `SNS Engagement Autopilot` instead. The design below (`src/engagement/scheduled.mjs`) is not called by any workflow today; re-enabling it is a separate, deliberately reviewed change to both the runtime policy and this workflow's YAML (see `docs/GO_LIVE_CHECKLIST.md`).
+**Inert under Manual-Only (not a print-only stub):** the workflow is `workflow_dispatch`-only and calls `node src/engagement/scheduled.mjs`. Runtime policy requires `allowScheduledProviderPolling:false` (and `manualOnly:true`) so `runScheduledEngagement()` returns `state:'disabled'` with no provider reads, even if engagement policy were misconfigured. Re-enabling automatic polling is a separate, deliberately reviewed change to both `config/runtime-policy.json` and this workflow's YAML (add `schedule:`; see `docs/GO_LIVE_CHECKLIST.md`).
 
 Designed to run every 30 minutes once re-enabled. A scheduled wake-up would **not** automatically mean a provider read — `src/engagement/scheduled.mjs` first applies a local, zero-network gate:
 

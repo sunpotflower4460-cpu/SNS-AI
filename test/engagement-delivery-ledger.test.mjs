@@ -168,6 +168,66 @@ test('remote delivery claim uses sns-ai-state CAS and stores privacy-safe metada
   });
 });
 
+test('successful sent marks are durable and later remote sync never demotes local terminals', async () => {
+  await withLedgerSandbox(async () => {
+    process.env.GITHUB_TOKEN = 'test-token';
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.SNS_DURABLE_STATE_BRANCH = 'sns-ai-state';
+
+    const sentKey = 'd'.repeat(32);
+    const nextKey = 'e'.repeat(32);
+    let remote = {
+      schemaVersion: 1,
+      records: {
+        [sentKey]: {
+          account: 'music-tools-x',
+          platform: 'x',
+          kind: 'reply',
+          publicInteraction: true,
+          status: 'sending',
+          attempts: 1,
+          createdAt: '2026-08-20T00:00:00Z',
+          startedAt: '2026-08-20T00:00:00Z',
+          updatedAt: '2026-08-20T00:00:00Z',
+          issueNumber: null
+        }
+      }
+    };
+    let sha = 'sha-0';
+    const puts = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET') {
+        return jsonResponse({ content: Buffer.from(`${JSON.stringify(remote)}\n`).toString('base64'), sha });
+      }
+      const request = JSON.parse(options.body);
+      remote = JSON.parse(Buffer.from(request.content, 'base64').toString('utf8'));
+      puts.push(remote.records[sentKey]?.status);
+      sha = `sha-${puts.length}`;
+      return jsonResponse({ content: { sha } });
+    };
+
+    // Seed local with the remote sending claim, then mark sent (default durable:true).
+    await beginDelivery({ key: sentKey, accountId: 'music-tools-x', platform: 'x', kind: 'reply', publicInteraction: true });
+    // Force remote back to sending to simulate a stale Contents API view while local is ahead.
+    remote.records[sentKey].status = 'sending';
+    await markDelivery(sentKey, 'sent');
+    assert.equal(remote.records[sentKey].status, 'sent');
+    assert.equal((await getDeliveryRecord(sentKey)).status, 'sent');
+
+    // Pretend remote lagged again before the next event claim — merge must keep `sent`.
+    remote.records[sentKey].status = 'sending';
+    const next = await beginDelivery({ key: nextKey, accountId: 'music-tools-x', platform: 'x', kind: 'reply', publicInteraction: true });
+    assert.equal(next.claimed, true);
+    assert.equal(remote.records[sentKey].status, 'sent');
+    assert.equal((await getDeliveryRecord(sentKey)).status, 'sent');
+    assert.equal(deliveryTest.preferRecord(
+      { status: 'sent', updatedAt: '2026-08-20T01:00:00Z' },
+      { status: 'sending', updatedAt: '2026-08-20T00:00:00Z' }
+    ).status, 'sent');
+  });
+});
+
 test('run path reserves durable delivery before provider send and never stores private payload in ledger', async () => {
   const run = await readFile(`${ROOT}src/engagement/run.mjs`, 'utf8');
   const ledger = await readFile(`${ROOT}src/engagement/delivery-ledger.mjs`, 'utf8');
@@ -178,5 +238,6 @@ test('run path reserves durable delivery before provider send and never stores p
   assert.ok(guarded.indexOf('beginDelivery') < guarded.indexOf('sendResponse(account, event, text, false)'));
   assert.match(guarded, /ENGAGEMENT_DELIVERY_UNKNOWN|deliveryUnknownError/);
   assert.match(run, /\[engagement-delivery-unknown\]/);
+  assert.match(guarded, /markDelivery\(key, 'sent', \{\}, \{ durable: true \}\)/);
   assert.doesNotMatch(ledger, /event\.text|participantId|responseText|decision\.response/);
 });

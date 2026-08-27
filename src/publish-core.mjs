@@ -62,10 +62,15 @@ async function bestEffort(label, task, warnings) {
 }
 
 function assertClaimProvenance(payload, account, claim) {
-  if (claim?.account && String(claim.account) !== String(payload.account)) {
+  if (!claim) return;
+  const needsIdentity = ['published', 'publishing', 'publish_unknown'].includes(String(claim.status || ''));
+  if (needsIdentity && (!claim.account || !claim.platform)) {
+    throw validationError(`Durable claim missing account/platform provenance for slot "${payload.slotId}".`);
+  }
+  if (claim.account && String(claim.account) !== String(payload.account)) {
     throw validationError(`Durable claim account mismatch for slot "${payload.slotId}".`);
   }
-  if (claim?.platform && String(claim.platform) !== String(account.platform)) {
+  if (claim.platform && String(claim.platform) !== String(account.platform)) {
     throw validationError(`Durable claim platform mismatch for slot "${payload.slotId}".`);
   }
 }
@@ -88,7 +93,9 @@ async function reconcilePublishedReplay(payload, account, claim) {
   const history = await readHistory();
   const postId = claim?.providerPostId || null;
   const alreadyRecorded = history.some((row) => row.status === 'published'
-    && ((payload.slotId && row.slotId === payload.slotId) || (postId && String(row.providerPostId) === String(postId))));
+    && ((payload.slotId && row.slotId === payload.slotId) || (postId && String(row.providerPostId) === String(postId)))
+    && (!row.account || String(row.account) === String(payload.account))
+    && (!row.platform || String(row.platform) === String(account.platform)));
   let recovered = false;
   let recoveryIncomplete = false;
 

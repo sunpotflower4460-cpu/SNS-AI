@@ -7,11 +7,20 @@ const STATE_FILE = fileURLToPath(new URL('../../data/x-oauth2-state.json', impor
 const TOKEN_URL = 'https://api.x.com/2/oauth2/token';
 const REFRESH_SKEW_MS = 5 * 60_000;
 const memory = new Map();
+const refreshQueues = new Map();
 
 function credentialId(credential) {
   if (credential?.oauth2StateId) return String(credential.oauth2StateId);
   const stable = `${credential?.consumerKey || ''}:${credential?.accessToken || ''}`;
   return createHash('sha256').update(stable).digest('hex').slice(0, 24);
+}
+
+function withRefreshLock(credential, task) {
+  const id = credentialId(credential);
+  const previous = refreshQueues.get(id) || Promise.resolve();
+  const run = previous.then(task, task);
+  refreshQueues.set(id, run.then(() => undefined, () => undefined));
+  return run;
 }
 
 function encryptionKey() {
@@ -79,31 +88,46 @@ function refreshHeaders(credential) {
   return headers;
 }
 
-export async function refreshXOAuth2(credential) {
-  const current = (await readPersisted(credential)) || initialSession(credential);
-  const refreshToken = String(current.refreshToken || credential?.oauth2RefreshToken || '');
-  const clientId = String(credential?.oauth2ClientId || '');
-  if (!refreshToken) throw new Error('X OAuth2 refresh requires credential.oauth2RefreshToken from offline.access authorization.');
-  if (!clientId) throw new Error('X OAuth2 refresh requires credential.oauth2ClientId.');
+export async function refreshXOAuth2(credential, { force = false, staleAccessToken = null, allowReuse = true } = {}) {
+  return withRefreshLock(credential, async () => {
+    // Re-read under the lock so a concurrent refresh that already rotated the token is reused
+    // instead of burning the previous refresh token a second time.
+    memory.delete(credentialId(credential));
+    const current = (await readPersisted(credential)) || initialSession(credential);
+    const refreshToken = String(current.refreshToken || credential?.oauth2RefreshToken || '');
+    const clientId = String(credential?.oauth2ClientId || '');
+    if (!refreshToken) throw new Error('X OAuth2 refresh requires credential.oauth2RefreshToken from offline.access authorization.');
+    if (!clientId) throw new Error('X OAuth2 refresh requires credential.oauth2ClientId.');
 
-  const params = new URLSearchParams({ refresh_token: refreshToken, grant_type: 'refresh_token' });
-  if (!credential?.oauth2ClientSecret) params.set('client_id', clientId);
-  const body = await fetchJson(TOKEN_URL, {
-    method: 'POST',
-    headers: refreshHeaders(credential),
-    body: params.toString()
+    const expires = Date.parse(current.expiresAt || '');
+    const stillFresh = Boolean(current.accessToken)
+      && Number.isFinite(expires)
+      && expires > Date.now() + REFRESH_SKEW_MS;
+    if (allowReuse && stillFresh) {
+      if (!force) return current;
+      // 401-forced refresh: reuse only when another waiter already rotated past the stale token.
+      if (staleAccessToken && current.accessToken !== staleAccessToken) return current;
+    }
+
+    const params = new URLSearchParams({ refresh_token: refreshToken, grant_type: 'refresh_token' });
+    if (!credential?.oauth2ClientSecret) params.set('client_id', clientId);
+    const body = await fetchJson(TOKEN_URL, {
+      method: 'POST',
+      headers: refreshHeaders(credential),
+      body: params.toString()
+    });
+    if (!body?.access_token) throw new Error('X OAuth2 refresh returned no access_token.');
+    const expiresIn = Number(body.expires_in || 7200);
+    const session = {
+      accessToken: String(body.access_token),
+      refreshToken: String(body.refresh_token || refreshToken),
+      expiresAt: new Date(Date.now() + Math.max(60, expiresIn) * 1000).toISOString(),
+      scope: body.scope || current.scope || null,
+      tokenType: body.token_type || 'bearer'
+    };
+    await persist(credential, session);
+    return session;
   });
-  if (!body?.access_token) throw new Error('X OAuth2 refresh returned no access_token.');
-  const expiresIn = Number(body.expires_in || 7200);
-  const session = {
-    accessToken: String(body.access_token),
-    refreshToken: String(body.refresh_token || refreshToken),
-    expiresAt: new Date(Date.now() + Math.max(60, expiresIn) * 1000).toISOString(),
-    scope: body.scope || current.scope || null,
-    tokenType: body.token_type || 'bearer'
-  };
-  await persist(credential, session);
-  return session;
 }
 
 export async function getXOAuth2Session(credential, { forceRefresh = false } = {}) {
@@ -112,7 +136,15 @@ export async function getXOAuth2Session(credential, { forceRefresh = false } = {
   const expires = Date.parse(session.expiresAt || '');
   const needsBootstrap = !persisted && Boolean(session.refreshToken);
   const expiring = Number.isFinite(expires) && expires <= Date.now() + REFRESH_SKEW_MS;
-  if (forceRefresh || needsBootstrap || !session.accessToken || expiring) return refreshXOAuth2(credential);
+  if (forceRefresh || needsBootstrap || !session.accessToken || expiring) {
+    return refreshXOAuth2(credential, {
+      force: forceRefresh,
+      staleAccessToken: forceRefresh ? session.accessToken : null,
+      // First-run bootstrap must hit the token endpoint so the encrypted state file is created,
+      // even when the credential payload already carries a not-yet-expired access token.
+      allowReuse: !needsBootstrap
+    });
+  }
   return session;
 }
 

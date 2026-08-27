@@ -121,5 +121,7 @@ test('Instagram pagination fails closed when the provider still exposes a next p
 test('Failure Watch subscribes to scheduled engagement failures', async () => {
   const workflow = await readFile(`${ROOT}.github/workflows/failure-watch.yml`, 'utf8');
   assert.match(workflow, /- SNS Engagement Autopilot/);
+  assert.match(workflow, /- SNS Engagement Scheduled/);
+  assert.match(workflow, /- SNS Engagement Resolve/);
   assert.match(workflow, /failure|timed_out|cancelled/);
 });

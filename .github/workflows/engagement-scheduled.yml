@@ -23,6 +23,7 @@ jobs:
       X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_MANUAL_INVOCATION: 'true'
       SNS_DURABLE_BUDGETS: 'true'
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
 

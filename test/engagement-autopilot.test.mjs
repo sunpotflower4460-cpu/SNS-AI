@@ -83,6 +83,8 @@ test('live engagement fails closed if an X AI reply account is activated before 
   };
   assert.throws(() => liveEngagementAccount(gatedPolicy, 'music-tools-x'), (error) => error.code === 'ENGAGEMENT_PLATFORM_APPROVAL_REQUIRED');
   assert.equal(liveEngagementAccount({ ...gatedPolicy, xAiReplyBotApprovalConfirmedAccounts: ['music-tools-x'] }, 'music-tools-x'), true);
+  assert.equal(liveEngagementAccount({ allowedAccounts: ['music-tools-x'] }, 'music-tools-x'), false, 'missing liveAccounts must fail closed');
+  assert.equal(liveEngagementAccount({ allowedAccounts: ['music-tools-x'], liveAccounts: null }, 'music-tools-x'), false);
 });
 
 test('X automation compliance preflight blocks missing profile disclosure and AI reply approval', async () => {
