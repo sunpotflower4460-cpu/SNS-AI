@@ -1,4 +1,4 @@
-import { findNearDuplicate } from './duplicate.mjs';
+import { findNearDuplicate, safeDuplicateThreshold } from './duplicate.mjs';
 import { platformTextLimit, validateDraftText, xWeightedLength } from './safety.mjs';
 import { rankCandidates, shouldExplore } from './strategy-rank.mjs';
 import { consumeUsage } from '../ops/budget.mjs';
@@ -194,7 +194,7 @@ function generationPrompt(accountId, account, history, context, feedback) {
 // effect. To change the model, edit config (per account, or defaults.generation.model) - not the
 // variable. The env fallback is kept for direct/local invocation against a config without that default.
 export async function generatePost(accountId, account, history = [], context = {}) {
-  const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = Number(account.generation?.duplicateThreshold ?? 0.72);
+  const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = safeDuplicateThreshold(account.generation?.duplicateThreshold, 0.72);
   const model = account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5'; const explore = shouldExplore(context.slotId || new Date().toISOString(), account.learning?.exploreRate ?? context.strategy?.exploreRate ?? 0.2);
   const experiment = context.experimentAssignment || null;
   const dryRun = Boolean(context.dryRun);
