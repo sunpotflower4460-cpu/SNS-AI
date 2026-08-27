@@ -823,3 +823,20 @@ test('every "Authorize command actor" step reads github.triggering_actor, not th
 
   assert.deepEqual(wrong, [], `workflow(s) gate on the re-run-stale github.actor instead of github.triggering_actor:\n${JSON.stringify(wrong, null, 2)}`);
 });
+
+// PR #86-88 added a confirm_live two-factor live gate to engagement.yml (matching publish.yml and
+// engagement-resolve.yml), but docs/CHATOPS.md's SNS Engagement Autopilot entry still only listed
+// `account` and `dry_run`, omitting the now-required `confirm_live` input entirely - an operator
+// reading only that doc would not know a live send needs both dry_run:false and confirm_live:true.
+test('docs/CHATOPS.md documents engagement.yml\'s confirm_live two-factor live gate', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
+  const chatopsDoc = await readFile(`${DOCS_DIR}CHATOPS.md`, 'utf8');
+  const engagementWorkflow = await readFile(`${WORKFLOWS_DIR}engagement.yml`, 'utf8');
+
+  assert.match(engagementWorkflow, /confirm_live/, 'sanity: engagement.yml must actually have this input for the test to mean anything');
+
+  const section = chatopsDoc.slice(chatopsDoc.indexOf('SNS Engagement Autopilot'), chatopsDoc.indexOf('SNS Engagement Resolve'));
+  assert.match(section, /confirm_live/, 'must document the confirm_live input');
+  assert.match(section, /dry_run:\s*false.*confirm_live:\s*true|confirm_live:\s*true.*dry_run:\s*false/is, 'must document that both dry_run:false and confirm_live:true are required together');
+});
