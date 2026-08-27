@@ -654,6 +654,18 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
     return { status: dryRun ? 'dry-run-ignore' : 'ignored', eventKey: key };
   }
 
+  // The actor may have opted out AFTER this event was escalated to a human but BEFORE the operator
+  // resolves it - processEvent() checks this for every automated path, but resolution had no
+  // equivalent check, so a human approving a drafted reply could unknowingly send to someone who has
+  // since asked to stop. Fail closed: refuse the live send and let the operator close the Issue
+  // instead, rather than silently overriding an opt-out nothing told them about.
+  const actorOptedOutSinceEscalation = (await actorStatus(accountId, actorKey(accountId, event)))?.optedOut === true;
+  if (actorOptedOutSinceEscalation && !dryRun) {
+    const error = new Error('This actor opted out of automated responses after this event was escalated. Close the Issue instead of sending a reply.');
+    error.code = 'ENGAGEMENT_ACTOR_OPTED_OUT_SINCE_ESCALATION';
+    throw error;
+  }
+
   const responseText = validateDraftText(account, String(text || '').trim());
   // Match classifyAndDraft: dry-run must not hit live moderation / OpenAI budget.
   if (!dryRun) await moderateText(responseText, account, accountId);
