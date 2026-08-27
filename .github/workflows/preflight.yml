@@ -59,6 +59,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
       - name: Secret shape check
         shell: bash
         run: |

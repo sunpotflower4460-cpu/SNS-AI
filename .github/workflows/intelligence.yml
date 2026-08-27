@@ -58,6 +58,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
       - name: Refresh trend briefs
         id: intelligence_run
         shell: bash

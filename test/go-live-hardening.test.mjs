@@ -8,6 +8,7 @@ import { trustedApprovalPayload, __test as githubTest } from '../src/lib/github.
 import { validateStrictConfig } from '../src/validate-strict-config.mjs';
 import { __test as openaiTest } from '../src/lib/openai.mjs';
 import { validateDraftText, xWeightedLength } from '../src/lib/safety.mjs';
+import { OPERATIONAL_WORKFLOWS } from '../src/ops/manual-only-audit.mjs';
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 
@@ -595,6 +596,21 @@ test('autopilot live path requires SNS_MANUAL_INVOCATION, confirm_live, and manu
   assert.match(yaml, /confirm_live:/);
   assert.match(yaml, /npm run manual-only-audit/);
   assert.match(yaml, /dry_run=false and confirm_live=true/);
+});
+
+// Every write-capable operational workflow runs `npm run validate`/`check`/`secret-scan` as a static
+// safety gate before doing anything live, but health.yml, hub-reconcile.yml, intelligence.yml,
+// learning.yml, maintenance.yml, metrics.yml, policy.yml, preflight.yml, and publish-reconcile.yml
+// used to run that trio without also running `npm run manual-only-audit` - the one static check that
+// verifies the Manual-Only posture itself (config/runtime-policy.json, account modes, engagement
+// policy, and every workflow's trigger shape) hasn't drifted. A workflow that runs the generic guards
+// but skips this one loses defense-in-depth silently, with nothing in CI to say so.
+test('every operational workflow that runs the static safety guards also runs manual-only-audit', async () => {
+  for (const name of OPERATIONAL_WORKFLOWS) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    if (!/npm run check\b/.test(yaml)) continue;
+    assert.match(yaml, /npm run manual-only-audit/, `${name} runs the static safety guards (npm run check) but not npm run manual-only-audit`);
+  }
 });
 
 // Every "[engagement-human] <account> <event-key>" escalation Issue told the operator to resolve it

@@ -44,6 +44,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
       - name: Generate readiness report
         id: health_run
         # --strict is what makes this job actually able to fail. Without it, doctor always exits 0, so

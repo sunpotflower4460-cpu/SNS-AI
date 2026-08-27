@@ -46,6 +46,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
       - name: Update account strategies from measured outcomes
         id: learning_run
         shell: bash

@@ -45,7 +45,9 @@ jobs:
       - name: Static safety guards
         run: |
           npm run validate
+          npm run check
           npm run secret-scan
+          npm run manual-only-audit
 
       - name: Confirm ambiguous provider publishes by read-back only
         run: node src/ops/publish-readback-reconcile.mjs --min-age-minutes 10 --out /tmp/provider-confirmed.json
