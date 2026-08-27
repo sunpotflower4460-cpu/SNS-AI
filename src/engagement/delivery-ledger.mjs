@@ -195,6 +195,31 @@ export async function beginDelivery({ key, accountId, platform, kind, publicInte
   });
 }
 
+function applyDeliveryStatus(previous = {}, normalizedStatus, detail = {}, now = new Date().toISOString()) {
+  // Terminal successes must never be demoted by a concurrent/stale markDelivery('unknown'|'failed').
+  // Cross-runner races can observe a remote `sent` after another process already completed the provider
+  // send; blindly overwriting that guard reopens duplicate-send / false-ambiguity paths that mergeLedgers
+  // alone cannot stop, because update() used to force the caller's requested status after the merge.
+  const previousRank = STATUS_RANK[String(previous.status || '')] ?? -1;
+  const nextRank = STATUS_RANK[String(normalizedStatus || '')] ?? -1;
+  if (previousRank > nextRank && ['sent', 'handled'].includes(String(previous.status || ''))) {
+    return {
+      ...previous,
+      updatedAt: previous.updatedAt || now,
+      issueNumber: detail.issueNumber ?? previous.issueNumber ?? null,
+      failureCode: previous.failureCode || null
+    };
+  }
+  return {
+    ...previous,
+    status: normalizedStatus,
+    updatedAt: now,
+    completedAt: normalizedStatus === 'sent' || normalizedStatus === 'handled' ? (previous.completedAt || now) : previous.completedAt || null,
+    issueNumber: detail.issueNumber ?? previous.issueNumber ?? null,
+    failureCode: detail.failureCode ? String(detail.failureCode).slice(0, 80) : (previous.failureCode || null)
+  };
+}
+
 export async function markDelivery(key, status, detail = {}, { durable = true } = {}) {
   const normalizedKey = validKey(key);
   const normalizedStatus = String(status || '').trim();
@@ -203,35 +228,33 @@ export async function markDelivery(key, status, detail = {}, { durable = true } 
 
   const update = (ledger) => {
     const previous = ledger.records[normalizedKey] || {};
-    ledger.records[normalizedKey] = {
-      ...previous,
-      status: normalizedStatus,
-      updatedAt: now,
-      completedAt: normalizedStatus === 'sent' || normalizedStatus === 'handled' ? (previous.completedAt || now) : previous.completedAt || null,
-      issueNumber: detail.issueNumber ?? previous.issueNumber ?? null,
-      failureCode: detail.failureCode ? String(detail.failureCode).slice(0, 80) : (previous.failureCode || null)
-    };
+    ledger.records[normalizedKey] = applyDeliveryStatus(previous, normalizedStatus, detail, now);
     return ledger;
   };
 
   return serializeMutation(async () => {
+    // Merge remote first when durable so a local stale `sending`/`unknown` cannot demote a remote
+    // `sent` that another runner already persisted.
+    if (durable && hasGithubRuntime()) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const { ledger, sha } = await readRemote();
+        const local = await loadLocal();
+        const merged = update(mergeLedgers(ledger, local));
+        try {
+          await writeRemote(merged, sha);
+          await saveLocal(merged);
+          return merged.records[normalizedKey];
+        } catch (error) {
+          if (conflict(error) && attempt < 4) continue;
+          throw error;
+        }
+      }
+      throw new Error('Could not persist engagement delivery status.');
+    }
+
     const local = update(await loadLocal());
     await saveLocal(local);
-    if (!durable || !hasGithubRuntime()) return local.records[normalizedKey];
-
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const { ledger, sha } = await readRemote();
-      const merged = update(mergeLedgers(ledger, local));
-      try {
-        await writeRemote(merged, sha);
-        await saveLocal(merged);
-        return merged.records[normalizedKey];
-      } catch (error) {
-        if (conflict(error) && attempt < 4) continue;
-        throw error;
-      }
-    }
-    throw new Error('Could not persist engagement delivery status.');
+    return local.records[normalizedKey];
   });
 }
 
@@ -246,6 +269,7 @@ export const __test = {
   normalizedLedger,
   mergeLedgers,
   preferRecord,
+  applyDeliveryStatus,
   definitiveDeliveryFailure,
   deliveryBlocksSend,
   deliveryNeedsHuman,

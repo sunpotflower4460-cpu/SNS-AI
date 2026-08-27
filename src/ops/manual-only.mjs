@@ -17,10 +17,33 @@ export function manualOnlyError(operation) {
 
 export function assertLifecycleTransitionAllowed(policy, target) {
   if (policy?.manualOnly === true && ['approval', 'auto'].includes(String(target))) throw manualOnlyError(`account transition to ${target}`);
+  // After Manual-Only is lifted, allowAutomaticAccountActivation remains a separate reviewed switch.
+  // Without runtime enforcement it was audit-only, so a single config edit flipping manualOnly:false
+  // while leaving allowAutomaticAccountActivation:false would still permit ChatOps promotion to
+  // approval/auto - the opposite of the flag's documented meaning.
+  if (['approval', 'auto'].includes(String(target)) && policy?.allowAutomaticAccountActivation !== true && policy?.manualOnly !== true) {
+    throw manualOnlyError(`account transition to ${target} while allowAutomaticAccountActivation is not true`);
+  }
 }
 
 export function assertEngagementActivationAllowed(policy, active) {
   if (policy?.manualOnly === true && active === true) throw manualOnlyError('engagement activation');
+  // Mirror allowScheduledProviderPolling: this flag must gate runtime activation, not only CI audit.
+  if (active === true && policy?.allowAutomaticEngagement !== true && policy?.manualOnly !== true) {
+    throw manualOnlyError('engagement activation while allowAutomaticEngagement is not true');
+  }
+}
+
+export function assertAutomaticEngagementAllowed(policy, { dryRun = false } = {}) {
+  if (dryRun) return true;
+  // Under Manual-Only, live engagement still requires SNS_MANUAL_INVOCATION + liveAccounts and is
+  // blocked from ChatOps activation. This flag is the post-Manual-Only reviewed switch that must
+  // keep unattended/automatic engagement inert even if liveAccounts were left populated.
+  if (policy?.manualOnly === true) return true;
+  if (policy?.allowAutomaticEngagement !== true) {
+    throw manualOnlyError('automatic engagement while allowAutomaticEngagement is not true');
+  }
+  return true;
 }
 
 export function isExplicitManualInvocation() {

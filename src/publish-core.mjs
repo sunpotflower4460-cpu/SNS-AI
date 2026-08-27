@@ -80,8 +80,10 @@ function publishedHistoryEvidence(payload, account, history) {
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const row = history[index];
     if (row?.status !== 'published' || row?.slotId !== payload.slotId) continue;
-    if (row.account && String(row.account) !== String(payload.account)) continue;
-    if (row.platform && String(row.platform) !== String(account.platform)) continue;
+    // Missing account/platform on a history row must fail closed. Treating absence as a wildcard
+    // lets a corrupt/legacy row authorize cross-account claim repair.
+    if (!row.account || String(row.account) !== String(payload.account)) continue;
+    if (!row.platform || String(row.platform) !== String(account.platform)) continue;
     return row;
   }
   return null;
@@ -94,8 +96,8 @@ async function reconcilePublishedReplay(payload, account, claim) {
   const postId = claim?.providerPostId || null;
   const alreadyRecorded = history.some((row) => row.status === 'published'
     && ((payload.slotId && row.slotId === payload.slotId) || (postId && String(row.providerPostId) === String(postId)))
-    && (!row.account || String(row.account) === String(payload.account))
-    && (!row.platform || String(row.platform) === String(account.platform)));
+    && row.account && String(row.account) === String(payload.account)
+    && row.platform && String(row.platform) === String(account.platform));
   let recovered = false;
   let recoveryIncomplete = false;
 

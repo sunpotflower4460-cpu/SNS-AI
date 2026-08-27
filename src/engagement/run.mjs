@@ -49,7 +49,7 @@ import {
   markEngagementSent,
   reserveInboundFetch
 } from './store.mjs';
-import { assertProviderMutationAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
+import { assertProviderMutationAllowed, assertAutomaticEngagementAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 
 function parseArgs(argv) {
   const out = {};
@@ -667,6 +667,9 @@ export async function runEngagement({ accountFilter = null, dryRun = false, manu
   if (manualInvocation === true) process.env.SNS_MANUAL_INVOCATION = 'true';
   const runtimePolicy = await loadRuntimePolicy();
   assertProviderMutationAllowed(runtimePolicy, { dryRun, source: 'manual' });
+  // Live engagement sends require the reviewed allowAutomaticEngagement switch once Manual-Only is
+  // lifted. Dry runs stay available for operator previews without that flag.
+  assertAutomaticEngagementAllowed(runtimePolicy, { dryRun });
   const globalPolicy = await loadEngagementPolicy();
   if (globalPolicy.enabled !== true) return { state: 'disabled', accounts: [] };
   const accounts = await loadAccounts();

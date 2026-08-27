@@ -589,6 +589,14 @@ test('every workflow that sets SNS_MANUAL_INVOCATION or writes state back to mai
   }
 });
 
+test('autopilot live path requires SNS_MANUAL_INVOCATION, confirm_live, and manual-only-audit', async () => {
+  const yaml = await readFile(`${WORKFLOWS_DIR}autopilot.yml`, 'utf8');
+  assert.match(yaml, /SNS_MANUAL_INVOCATION:\s*'true'/);
+  assert.match(yaml, /confirm_live:/);
+  assert.match(yaml, /npm run manual-only-audit/);
+  assert.match(yaml, /dry_run=false and confirm_live=true/);
+});
+
 // Every "[engagement-human] <account> <event-key>" escalation Issue told the operator to resolve it
 // through "[engagement-resolve]" - a bracket-command Issue-title syntax that, exactly like the old
 // "approved" label, nothing in .github/workflows/ ever listened for. src/engagement/run.mjs already

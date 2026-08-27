@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { auditManualOnly, INFRASTRUCTURE_WORKFLOWS, OPERATIONAL_WORKFLOWS } from '../src/ops/manual-only-audit.mjs';
-import { assertEngagementActivationAllowed, assertLifecycleTransitionAllowed, assertProviderMutationAllowed } from '../src/ops/manual-only.mjs';
+import {
+  assertAutomaticEngagementAllowed,
+  assertEngagementActivationAllowed,
+  assertLifecycleTransitionAllowed,
+  assertProviderMutationAllowed
+} from '../src/ops/manual-only.mjs';
 
 const policy = { manualOnly: true, requireExplicitManualInvocation: true };
 const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -124,6 +129,21 @@ test('Manual-Only blocks activation and unsafe account modes', () => {
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'auto'), { code: 'MANUAL_ONLY_BLOCKED' });
   assert.throws(() => assertLifecycleTransitionAllowed(policy, 'approval'), { code: 'MANUAL_ONLY_BLOCKED' });
   assert.throws(() => assertEngagementActivationAllowed(policy, true), { code: 'MANUAL_ONLY_BLOCKED' });
+});
+
+test('allowAutomatic* flags are enforced at runtime after Manual-Only is lifted', () => {
+  const unlocked = { manualOnly: false, allowAutomaticAccountActivation: false, allowAutomaticEngagement: false };
+  assert.throws(() => assertLifecycleTransitionAllowed(unlocked, 'auto'), { code: 'MANUAL_ONLY_BLOCKED' });
+  assert.throws(() => assertLifecycleTransitionAllowed(unlocked, 'approval'), { code: 'MANUAL_ONLY_BLOCKED' });
+  assert.throws(() => assertEngagementActivationAllowed(unlocked, true), { code: 'MANUAL_ONLY_BLOCKED' });
+  assert.throws(() => assertAutomaticEngagementAllowed(unlocked, { dryRun: false }), { code: 'MANUAL_ONLY_BLOCKED' });
+  assert.equal(assertAutomaticEngagementAllowed(unlocked, { dryRun: true }), true);
+  assert.equal(assertEngagementActivationAllowed(unlocked, false), undefined);
+
+  const allowed = { manualOnly: false, allowAutomaticAccountActivation: true, allowAutomaticEngagement: true };
+  assert.equal(assertLifecycleTransitionAllowed(allowed, 'auto'), undefined);
+  assert.equal(assertEngagementActivationAllowed(allowed, true), undefined);
+  assert.equal(assertAutomaticEngagementAllowed(allowed, { dryRun: false }), true);
 });
 
 test('dry-run never requires credentials or provider mutation authorization', () => {

@@ -14,6 +14,7 @@ import {
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const allowScheduledRuntime = async () => ({ schemaVersion: 1, manualOnly: false, allowScheduledProviderPolling: true });
 const blockScheduledRuntime = async () => ({ schemaVersion: 1, manualOnly: true, allowScheduledProviderPolling: false });
+const allowEngagementRuntime = { schemaVersion: 1, manualOnly: false, allowAutomaticEngagement: true };
 
 function fixture() {
   return {
@@ -39,7 +40,9 @@ function fixture() {
 
 test('activation is account-scoped and makes routine replies automatic only for the activated account', () => {
   const { accountsConfig, policy } = fixture();
-  const active = patchEngagementActivation({ accountsConfig, policy, accountId: 'alpha', active: true });
+  const active = patchEngagementActivation({
+    accountsConfig, policy, runtimePolicy: allowEngagementRuntime, accountId: 'alpha', active: true
+  });
   assert.deepEqual(active.policy.liveAccounts, ['alpha']);
   assert.equal(active.accountsConfig.accounts.alpha.engagement.approvalRequired, false);
   assert.equal(accountsConfig.accounts.alpha.engagement.approvalRequired, undefined, 'input must not be mutated');
@@ -47,6 +50,7 @@ test('activation is account-scoped and makes routine replies automatic only for 
   const inactive = patchEngagementActivation({
     accountsConfig: active.accountsConfig,
     policy: active.policy,
+    runtimePolicy: allowEngagementRuntime,
     accountId: 'alpha',
     active: false
   });
@@ -57,15 +61,15 @@ test('activation is account-scoped and makes routine replies automatic only for 
 test('activation validates identifiers, known accounts, and the engagement allowlist', () => {
   const { accountsConfig, policy } = fixture();
   assert.throws(
-    () => patchEngagementActivation({ accountsConfig, policy, accountId: 'bad account', active: true }),
+    () => patchEngagementActivation({ accountsConfig, policy, runtimePolicy: allowEngagementRuntime, accountId: 'bad account', active: true }),
     /valid account id/
   );
   assert.throws(
-    () => patchEngagementActivation({ accountsConfig, policy, accountId: 'missing', active: false }),
+    () => patchEngagementActivation({ accountsConfig, policy, runtimePolicy: allowEngagementRuntime, accountId: 'missing', active: false }),
     /Unknown account/
   );
   assert.throws(
-    () => patchEngagementActivation({ accountsConfig, policy, accountId: 'beta', active: true }),
+    () => patchEngagementActivation({ accountsConfig, policy, runtimePolicy: allowEngagementRuntime, accountId: 'beta', active: true }),
     /not in engagement allowedAccounts/
   );
 });
@@ -84,7 +88,7 @@ test('activation orchestrator checks resolved live state and writes both configs
     write,
     accountsFile: 'accounts.json',
     policyFile: 'policy.json',
-    loadPolicy: async () => ({ manualOnly: false })
+    loadPolicy: async () => allowEngagementRuntime
   });
   assert.equal(result.account, 'alpha');
   assert.equal(result.active, true);
@@ -98,7 +102,8 @@ test('activation orchestrator checks resolved live state and writes both configs
     setEngagementActivation({
       accountId: 'missing', active: true,
       loadResolvedAccounts: async () => ({}), read, write,
-      accountsFile: 'accounts.json', policyFile: 'policy.json'
+      accountsFile: 'accounts.json', policyFile: 'policy.json',
+      loadPolicy: async () => allowEngagementRuntime
     }),
     /Unknown account/
   );
@@ -106,7 +111,8 @@ test('activation orchestrator checks resolved live state and writes both configs
     setEngagementActivation({
       accountId: 'alpha', active: true,
       loadResolvedAccounts: async () => ({ alpha: { enabled: false, mode: 'approval' } }), read, write,
-      accountsFile: 'accounts.json', policyFile: 'policy.json'
+      accountsFile: 'accounts.json', policyFile: 'policy.json',
+      loadPolicy: async () => allowEngagementRuntime
     }),
     /must be enabled/
   );
@@ -280,7 +286,9 @@ test('Manual-Only keeps scheduled engagement inert and exposes bounded manual co
   // engagement-policy.json (enabled:false / liveAccounts:[]).
   assert.match(scheduled, /node src\/engagement\/scheduled\.mjs/);
   assert.match(scheduled, /npm run manual-only-audit/);
-  assert.match(scheduled, /SNS_MANUAL_INVOCATION:\s*'true'/);
+  // SNS_MANUAL_INVOCATION must be granted only on workflow_dispatch. A future schedule: trigger must
+  // not inherit the explicit-manual-invocation credential or unattended cron bypasses the gate.
+  assert.match(scheduled, /SNS_MANUAL_INVOCATION:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   assert.match(control, /workflow_dispatch:/);

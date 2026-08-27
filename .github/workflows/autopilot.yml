@@ -18,6 +18,11 @@ on:
         required: false
         default: true
         type: boolean
+      confirm_live:
+        description: Must be true together with dry_run=false before real provider publishing is allowed
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -40,9 +45,11 @@ jobs:
       GITHUB_REPOSITORY: ${{ github.repository }}
       SNS_DURABLE_BUDGETS: 'true'
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      SNS_MANUAL_INVOCATION: 'true'
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_FORCE: ${{ inputs.force }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_CONFIRM_LIVE: ${{ inputs.confirm_live }}
 
     steps:
       - name: Authorize command actor
@@ -71,6 +78,7 @@ jobs:
           npm run validate
           npm run check
           npm run secret-scan
+          npm run manual-only-audit
 
       - name: Run autopilot
         id: autopilot_run
@@ -81,12 +89,20 @@ jobs:
           CONVENIENCE_HUB_PUBLIC_URL: ${{ vars.CONVENIENCE_HUB_PUBLIC_URL }}
           CONVENIENCE_HUB_BRANCH: ${{ vars.CONVENIENCE_HUB_BRANCH }}
         run: |
+          dry_run="${INPUT_DRY_RUN:-true}"
+          confirm_live="${INPUT_CONFIRM_LIVE:-false}"
+          if [[ "$dry_run" != "true" && "$confirm_live" != "true" ]]; then
+            echo "::error::Live autopilot requires both dry_run=false and confirm_live=true."
+            exit 1
+          fi
+
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
           if [[ "${INPUT_FORCE:-false}" == "true" ]]; then args+=(--force); fi
 
-          # Manual workflow runs default to dry-run=true. A live run requires an explicit dry_run=false choice.
-          if [[ "${INPUT_DRY_RUN:-true}" == "true" ]]; then
+          # Manual workflow runs default to dry-run=true. A live run requires an explicit dry_run=false
+          # choice together with confirm_live=true (checked above).
+          if [[ "$dry_run" == "true" ]]; then
             args+=(--dry-run)
           fi
 
