@@ -26,7 +26,12 @@ async function ensurePublishedHubClaim({slotId,claim,requirement,postId,publishe
 }
 async function markHubBacklinkSynced({slotId,claim,requirement,hubSync},{writeClaim=writeDurableClaim,now=()=>new Date()}={}){
   const syncedAt=now().toISOString();
-  return writeClaim(slotId,'published',{hub:requirement,providerPostId:claim?.providerPostId||null,publishedAt:claim?.publishedAt||null,hubBacklinkSyncedAt:syncedAt,hubBacklinkUrl:hubSync?.url||null});
+  // Match hub/reconcile.mjs: never pass providerPostId/publishedAt as null. nextClaim spreads detail
+  // over the previous claim, so an explicit null would wipe provenance that a fresher remote still has.
+  const detail={hub:requirement,hubBacklinkSyncedAt:syncedAt,hubBacklinkUrl:hubSync?.url||null};
+  if(claim?.providerPostId)detail.providerPostId=claim.providerPostId;
+  if(claim?.publishedAt)detail.publishedAt=claim.publishedAt;
+  return writeClaim(slotId,'published',detail);
 }
 
 export async function publish(payload,{
