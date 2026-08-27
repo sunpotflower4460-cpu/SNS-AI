@@ -175,7 +175,7 @@ test('local confirmation is idempotent and refuses a candidate with no provider 
 
   let writes = 0;
   const result = await __test.persistLocalConfirmation(claim, { id: 'provider-1' }, {
-    readHistory: async () => [{ slotId: claim.slotId, status: 'published' }],
+    readHistory: async () => [{ slotId: claim.slotId, status: 'published', account: claim.account, platform: claim.platform }],
     appendHistory: async () => { writes += 1; },
     getSlot: async () => ({ status: 'published' }),
     markSlot: async () => { writes += 1; },
@@ -184,6 +184,22 @@ test('local confirmation is idempotent and refuses a candidate with no provider 
   });
   assert.equal(result.providerPostId, 'provider-1');
   assert.equal(writes, 0);
+});
+
+test('local confirmation ignores published history rows that lack matching account/platform provenance', async () => {
+  let historyWrites = 0;
+  await __test.persistLocalConfirmation(claim, { id: 'provider-2', createdAt: '2026-08-20T01:02:00.000Z' }, {
+    readHistory: async () => [
+      { slotId: claim.slotId, status: 'published', account: 'other', platform: 'x' },
+      { slotId: claim.slotId, status: 'published' }
+    ],
+    appendHistory: async () => { historyWrites += 1; },
+    getSlot: async () => ({ status: 'published' }),
+    markSlot: async () => {},
+    readAudit: async () => [{ event: 'publish_provider_readback_confirmed', slotId: claim.slotId }],
+    appendAudit: async () => {}
+  });
+  assert.equal(historyWrites, 1);
 });
 
 test('prepare reconciliation mutates local records only for one strong provider match', async () => {

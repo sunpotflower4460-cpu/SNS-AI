@@ -147,7 +147,10 @@ async function persistLocalConfirmation(claim, candidate, deps = {}) {
   const appendAuditFn = deps.appendAudit || appendAudit;
 
   const history = await readHistoryFn();
-  const existingHistory = history.find((row) => row.slotId === claim.slotId && row.status === 'published');
+  const existingHistory = history.find((row) => row.slotId === claim.slotId
+    && row.status === 'published'
+    && row.account && String(row.account) === String(claim.account)
+    && row.platform && String(row.platform) === String(claim.platform));
   if (!existingHistory) {
     await appendHistoryFn({
       at: candidate.createdAt || new Date().toISOString(),

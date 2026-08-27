@@ -10,28 +10,31 @@ function apiKey() { const key = process.env.OPENAI_API_KEY; if (!key) throw new 
 
 export async function openaiRequest(path, body, meta = {}) {
   const retries = Number(meta.retries ?? 2);
-  for (let attempt = 0; ; attempt += 1) {
-    if (meta.accountId && meta.account) {
-      // Deliberate design decision (see docs/GO_LIVE_CHECKLIST.md and PR history): dry-run previews
-      // still call the real Responses API so an operator can actually see what would be posted before
-      // enabling live mode - a preview that never shows real generated text has limited value, and
-      // "exercises the full decision path" is an explicit test expectation (see
-      // test/top-level-branches.test.mjs). Every OTHER side effect a real publish has is eliminated for
-      // dry-run: no moderation call, no media generation, no approval issue, no state/history/circuit
-      // mutation (see orchestrate.mjs and moderateText() below) - and the one unavoidable cost (the
-      // preview generation call itself) is billed against a separate per-day counter so repeated
-      // previews can never exhaust or interact with the account's live posting budget.
-      // Defense in depth on top of validate-config.mjs's reserved-suffix check: account IDs are
-      // free-form config keys used directly as budget-state object keys, so a real account literally
-      // named "<x>::dry-run-preview" would otherwise collide with account <x>'s preview counter and
-      // defeat the isolation this is meant to provide.
-      if (String(meta.accountId).includes('::dry-run-preview')) {
-        throw new Error(`Account id "${meta.accountId}" uses the reserved "::dry-run-preview" suffix; rename it in config/accounts.json.`);
-      }
-      const budgetAccountId = meta.dryRun ? `${meta.accountId}::dry-run-preview` : meta.accountId;
-      await consumeUsage(budgetAccountId, meta.account, 'openai', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
-      if (meta.webSearch) await consumeUsage(budgetAccountId, meta.account, 'webSearch', { operation: meta.operation || path, attempt: attempt + 1, dryRun: Boolean(meta.dryRun) });
+  if (meta.accountId && meta.account) {
+    // Deliberate design decision (see docs/GO_LIVE_CHECKLIST.md and PR history): dry-run previews
+    // still call the real Responses API so an operator can actually see what would be posted before
+    // enabling live mode - a preview that never shows real generated text has limited value, and
+    // "exercises the full decision path" is an explicit test expectation (see
+    // test/top-level-branches.test.mjs). Every OTHER side effect a real publish has is eliminated for
+    // dry-run: no moderation call, no media generation, no approval issue, no state/history/circuit
+    // mutation (see orchestrate.mjs and moderateText() below) - and the one unavoidable cost (the
+    // preview generation call itself) is billed against a separate per-day counter so repeated
+    // previews can never exhaust or interact with the account's live posting budget.
+    // Defense in depth on top of validate-config.mjs's reserved-suffix check: account IDs are
+    // free-form config keys used directly as budget-state object keys, so a real account literally
+    // named "<x>::dry-run-preview" would otherwise collide with account <x>'s preview counter and
+    // defeat the isolation this is meant to provide.
+    if (String(meta.accountId).includes('::dry-run-preview')) {
+      throw new Error(`Account id "${meta.accountId}" uses the reserved "::dry-run-preview" suffix; rename it in config/accounts.json.`);
     }
+    const budgetAccountId = meta.dryRun ? `${meta.accountId}::dry-run-preview` : meta.accountId;
+    // Charge once per logical call, matching image/video generation. Retrying a 429/5xx/network
+    // failure inside the loop used to re-consumeUsage and either block the one safe retry when a
+    // single unit remained, or burn 2–3× budget for one generation under rate limit.
+    await consumeUsage(budgetAccountId, meta.account, 'openai', { operation: meta.operation || path, dryRun: Boolean(meta.dryRun) });
+    if (meta.webSearch) await consumeUsage(budgetAccountId, meta.account, 'webSearch', { operation: meta.operation || path, dryRun: Boolean(meta.dryRun) });
+  }
+  for (let attempt = 0; ; attempt += 1) {
     let response;
     try {
       response = await fetch(`${OPENAI_BASE}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

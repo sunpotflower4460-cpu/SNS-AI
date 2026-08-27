@@ -263,14 +263,41 @@ export async function publish(payload) {
     const failureWarnings = [];
     if (!dryRun && payload.slotId) {
       const claimStatus = definitiveProviderFailure(error) ? 'failed' : 'publish_unknown';
-      await bestEffort('durable-claim-failure-state', () => finishPublishClaim(payload.slotId, claimStatus, {
-        account: payload.account,
-        platform: account.platform,
-        source: payload.source || 'manual',
-        errorStatus: Number.isFinite(Number(error.status)) ? Number(error.status) : null,
-        publishStage: error.publishStage || null,
-        lastError: String(error.message || error).slice(0, 500)
-      }), failureWarnings);
+      // Definitive failures must reach a durable `failed` claim. bestEffort here left `publishing`
+      // forever and blocked every retry with SLOT_ALREADY_CLAIMED.
+      if (claimStatus === 'failed') {
+        try {
+          await finishPublishClaim(payload.slotId, claimStatus, {
+            account: payload.account,
+            platform: account.platform,
+            source: payload.source || 'manual',
+            errorStatus: Number.isFinite(Number(error.status)) ? Number(error.status) : null,
+            publishStage: error.publishStage || null,
+            lastError: String(error.message || error).slice(0, 500)
+          });
+        } catch (claimError) {
+          failureWarnings.push({ label: 'durable-claim-failure-state', error: String(claimError?.message || claimError).slice(0, 500) });
+          if (!dryRun && error.code !== 'CIRCUIT_OPEN') {
+            await bestEffort('publish-circuit-failure', () => recordCircuitFailure(payload.account, 'publish', error, account.resilience), failureWarnings);
+          }
+          await bestEffort('publish-error-audit', () => appendAudit({ account: payload.account, stage: 'publish-error', slotId: payload.slotId || null, platform: account.platform, code: error.code || null, publishStage: error.publishStage || null, error: String(error.message || error).slice(0, 500), commercialKind: commercial.kind }), failureWarnings);
+          const wrapped = new Error(`Publish failed definitively, but the durable claim could not be marked failed: ${String(claimError?.message || claimError).slice(0, 300)}`);
+          wrapped.code = 'PUBLISH_CLAIM_FAILURE_PERSIST';
+          wrapped.cause = claimError;
+          wrapped.providerError = error;
+          wrapped.bookkeepingWarnings = failureWarnings;
+          throw wrapped;
+        }
+      } else {
+        await bestEffort('durable-claim-failure-state', () => finishPublishClaim(payload.slotId, claimStatus, {
+          account: payload.account,
+          platform: account.platform,
+          source: payload.source || 'manual',
+          errorStatus: Number.isFinite(Number(error.status)) ? Number(error.status) : null,
+          publishStage: error.publishStage || null,
+          lastError: String(error.message || error).slice(0, 500)
+        }), failureWarnings);
+      }
     }
     if (!dryRun && error.code !== 'CIRCUIT_OPEN') {
       await bestEffort('publish-circuit-failure', () => recordCircuitFailure(payload.account, 'publish', error, account.resilience), failureWarnings);

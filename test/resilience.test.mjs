@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchJson, downloadMedia } from '../src/lib/http.mjs';
 import { appendJsonl, readJson, readJsonl, writeJsonAtomic } from '../src/lib/json-store.mjs';
 import { openaiRequest } from '../src/lib/openai.mjs';
+import { usageToday } from '../src/ops/budget.mjs';
 import { getXOAuth2Session, xOAuth2FetchJson } from '../src/providers/x-oauth2.mjs';
 import { publishX } from '../src/providers/x.mjs';
 import { publishInstagram } from '../src/providers/instagram.mjs';
@@ -116,6 +117,40 @@ test('OpenAI request retries a throttled request and preserves API authenticatio
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
+  }
+});
+
+test('OpenAI request charges the daily budget once per logical call even when it retries', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY');
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  const account = {
+    schedule: { timezone: 'UTC' },
+    budgets: { enabled: true, openaiCallsPerDay: 2, webSearchCallsPerDay: 2, mediaCallsPerDay: 0, imageGenerationsPerDay: 0, videoGenerationsPerDay: 0 }
+  };
+  const usageFile = fileURLToPath(new URL('../data/usage-state.json', import.meta.url));
+  const before = await readFile(usageFile, 'utf8').catch(() => null);
+  try {
+    await writeFile(usageFile, JSON.stringify({ schemaVersion: 1, days: {} }, null, 2));
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) return jsonResponse({ error: { message: 'slow down' } }, 429, { 'retry-after': '0.001' });
+      return jsonResponse({ id: 'response-1' });
+    };
+    await openaiRequest('/responses', { input: 'ping' }, {
+      retries: 1,
+      accountId: 'budget-once',
+      account,
+      operation: 'retry-budget'
+    });
+    assert.equal(calls, 2);
+    assert.equal(await usageToday('budget-once', account, 'openai'), 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    if (before == null) await rm(usageFile, { force: true });
+    else await writeFile(usageFile, before);
   }
 });
 

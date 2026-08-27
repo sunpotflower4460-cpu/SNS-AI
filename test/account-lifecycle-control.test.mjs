@@ -64,6 +64,7 @@ test('account control workflow is an explicit manual form and Manual-Only keeps 
   assert.match(workflow,/options: \[approval, auto, pause, disabled\]/);
   assert.match(workflow,/SNS_COMMAND_ADMINS/);
   assert.match(workflow,/npm run manual-only-audit/);
+  assert.match(workflow,/SNS_REQUIRE_DURABLE_STATE:\s*'true'/);
   assert.match(workflow,/git add config\/accounts\.json/);
   assert.doesNotMatch(workflow,/github\.event\.issue/);
   assert.doesNotMatch(workflow,/cancel-in-progress:\s*true/);

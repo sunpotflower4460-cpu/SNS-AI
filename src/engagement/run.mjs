@@ -396,7 +396,17 @@ async function sendResponseWithDeliveryGuard({ accountId, account, event, key, t
     result = await sendResponse(account, event, text, false);
   } catch (error) {
     if (definitiveDeliveryFailure(error)) {
-      await markDelivery(key, 'failed', { failureCode: error?.code || `HTTP_${Number(error?.status) || '4XX'}` }, { durable: true }).catch(() => {});
+      // Must not leave a durable `sending` claim after a definitive 4xx. Swallowing markDelivery
+      // failure turned retryable provider rejects into false needs-human ambiguity forever.
+      try {
+        await markDelivery(key, 'failed', { failureCode: error?.code || `HTTP_${Number(error?.status) || '4XX'}` }, { durable: true });
+      } catch (markError) {
+        const wrapped = new Error(`Provider rejected the engagement send (${String(error?.message || error).slice(0, 200)}), and the delivery ledger could not be marked failed: ${String(markError?.message || markError).slice(0, 200)}`);
+        wrapped.code = 'ENGAGEMENT_DELIVERY_FAILED_LEDGER';
+        wrapped.cause = markError;
+        wrapped.providerError = error;
+        throw wrapped;
+      }
       throw error;
     }
 
@@ -645,7 +655,8 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
   }
 
   const responseText = validateDraftText(account, String(text || '').trim());
-  await moderateText(responseText, account, accountId);
+  // Match classifyAndDraft: dry-run must not hit live moderation / OpenAI budget.
+  if (!dryRun) await moderateText(responseText, account, accountId);
   const delivery = await sendResponseWithDeliveryGuard({ accountId, account, event, key, text: responseText, dryRun });
   if (dryRun) return { status: 'dry-run-reply', eventKey: key, result: delivery.result };
 
