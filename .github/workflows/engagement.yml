@@ -12,6 +12,11 @@ on:
         required: false
         default: true
         type: boolean
+      confirm_live:
+        description: Must be true together with dry_run=false before real engagement sends are allowed
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -35,6 +40,7 @@ jobs:
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_CONFIRM_LIVE: ${{ inputs.confirm_live }}
 
     steps:
       - name: Authorize command actor
@@ -80,9 +86,16 @@ jobs:
         id: engagement_run
         shell: bash
         run: |
+          dry_run="${INPUT_DRY_RUN:-true}"
+          confirm_live="${INPUT_CONFIRM_LIVE:-false}"
+          if [[ "$dry_run" != "true" && "$confirm_live" != "true" ]]; then
+            echo "::error::Live engagement requires both dry_run=false and confirm_live=true."
+            exit 1
+          fi
+
           args=()
           if [[ -n "${INPUT_ACCOUNT:-}" ]]; then args+=(--account "$INPUT_ACCOUNT"); fi
-          if [[ "${INPUT_DRY_RUN:-true}" == "true" ]]; then args+=(--dry-run); fi
+          if [[ "$dry_run" == "true" ]]; then args+=(--dry-run); fi
           node src/engagement/run.mjs --manual-invocation "${args[@]}"
 
       - name: Persist privacy-safe engagement state to durable branch

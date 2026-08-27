@@ -162,13 +162,16 @@ function remoteWriteConflict(error) {
   return [409, 422].includes(Number(error?.status));
 }
 
-async function reconcileBeginConflict(slotId, originalError) {
+async function reconcileBeginConflict(slotId, originalError, detail = {}) {
   if (!remoteWriteConflict(originalError)) throw originalError;
   const raced = await readRemote(slotId);
   if (!raced) throw originalError;
   const check = assertClaimCanBegin(slotId, raced);
   if (check.replay) return { claimed: false, replay: true, claim: raced };
-  throw originalError;
+  // Remote still begin-able (e.g. prior `failed`, or SHA drifted from a metadata write). Retry the
+  // begin with the fresh SHA instead of surfacing a opaque 409/422 to the publisher.
+  const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', raced, detail), { refreshShaIfMissing: false });
+  return { claimed: true, replay: false, claim };
 }
 
 async function readLocal(slotId) {
@@ -260,15 +263,32 @@ export async function writeDurableClaim(slotId, status, detail = {}) {
 export async function beginPublishClaim(slotId, detail = {}) {
   if (!slotId) return { claimed: false, untracked: true, claim: null };
   if (hasGithubRuntime()) {
-    const existing = await getDurableClaim(slotId, { fresh: true });
-    const check = assertClaimCanBegin(slotId, existing);
-    if (check.replay) return { claimed: false, replay: true, claim: existing };
-    try {
-      const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail), { refreshShaIfMissing: false });
-      return { claimed: true, replay: false, claim };
-    } catch (error) {
-      return reconcileBeginConflict(slotId, error);
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const existing = await getDurableClaim(slotId, { fresh: true });
+      const check = assertClaimCanBegin(slotId, existing);
+      if (check.replay) return { claimed: false, replay: true, claim: existing };
+      try {
+        const claim = await writeRemote(slotId, nextClaim(slotId, 'publishing', existing, detail), { refreshShaIfMissing: false });
+        return { claimed: true, replay: false, claim };
+      } catch (error) {
+        lastError = error;
+        if (remoteWriteConflict(error) && attempt < 4) {
+          try {
+            return await reconcileBeginConflict(slotId, error, detail);
+          } catch (reconcileError) {
+            if (reconcileError?.code === 'SLOT_ALREADY_CLAIMED') throw reconcileError;
+            if (remoteWriteConflict(reconcileError)) {
+              shaMemory.delete(slotId);
+              continue;
+            }
+            throw reconcileError;
+          }
+        }
+        throw error;
+      }
     }
+    throw lastError || new Error(`Could not begin durable claim for ${slotId}.`);
   }
   return withLocalLock(slotId, async () => {
     const existing = await readLocal(slotId);

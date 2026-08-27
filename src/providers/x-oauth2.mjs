@@ -88,12 +88,13 @@ function refreshHeaders(credential) {
   return headers;
 }
 
-export async function refreshXOAuth2(credential, { force = false, staleAccessToken = null, allowReuse = true } = {}) {
+export async function refreshXOAuth2(credential, { force = false, staleAccessToken = null, allowReuse = true, requirePersist = false } = {}) {
   return withRefreshLock(credential, async () => {
     // Re-read under the lock so a concurrent refresh that already rotated the token is reused
     // instead of burning the previous refresh token a second time.
     memory.delete(credentialId(credential));
-    const current = (await readPersisted(credential)) || initialSession(credential);
+    const persisted = await readPersisted(credential);
+    const current = persisted || initialSession(credential);
     const refreshToken = String(current.refreshToken || credential?.oauth2RefreshToken || '');
     const clientId = String(credential?.oauth2ClientId || '');
     if (!refreshToken) throw new Error('X OAuth2 refresh requires credential.oauth2RefreshToken from offline.access authorization.');
@@ -103,7 +104,11 @@ export async function refreshXOAuth2(credential, { force = false, staleAccessTok
     const stillFresh = Boolean(current.accessToken)
       && Number.isFinite(expires)
       && expires > Date.now() + REFRESH_SKEW_MS;
-    if (allowReuse && stillFresh) {
+    // requirePersist only forces the FIRST bootstrap write. Once another waiter already persisted a
+    // fresh session under this lock, reuse it - otherwise two concurrent first-run bootstraps both
+    // pass allowReuse:false from outside the lock and the second call burns the rotated refresh token.
+    const mayReuse = allowReuse || (requirePersist && Boolean(persisted));
+    if (mayReuse && stillFresh) {
       if (!force) return current;
       // 401-forced refresh: reuse only when another waiter already rotated past the stale token.
       if (staleAccessToken && current.accessToken !== staleAccessToken) return current;
@@ -141,8 +146,10 @@ export async function getXOAuth2Session(credential, { forceRefresh = false } = {
       force: forceRefresh,
       staleAccessToken: forceRefresh ? session.accessToken : null,
       // First-run bootstrap must hit the token endpoint so the encrypted state file is created,
-      // even when the credential payload already carries a not-yet-expired access token.
-      allowReuse: !needsBootstrap
+      // even when the credential payload already carries a not-yet-expired access token. Re-check
+      // under the refresh lock (requirePersist) so a concurrent bootstrap does not refresh twice.
+      allowReuse: !needsBootstrap,
+      requirePersist: needsBootstrap
     });
   }
   return session;

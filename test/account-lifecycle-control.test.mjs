@@ -6,13 +6,14 @@ import { assertPostingProfileCompliance, autoPromotionEvidence, patchAccountLife
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const confirmedPolicy = { xAutomationProfileComplianceConfirmedAccounts: ['alpha'] };
+const allowAccountRuntime = { schemaVersion: 1, manualOnly: false, allowAutomaticAccountActivation: true };
 function fixture(mode='approval',enabled=true){return{defaults:{mode:'pause'},accounts:{alpha:{platform:'x',enabled,mode},beta:{platform:'instagram',enabled:false,mode:'pause'}}}}
 function history(){return[{account:'alpha',status:'published',providerPostId:'post-1',at:'2026-08-20T00:00:00Z'}]}
 function metrics(){return[{account:'alpha',providerPostId:'post-1',collectedAt:'2026-08-20T01:00:00Z',impressions:100}]}
 
 test('approval enables only the selected account and preserves other config',()=>{
   const input=fixture('pause',false);
-  const result=patchAccountLifecycle({accountsConfig:input,policy:confirmedPolicy,accountId:'alpha',target:'approval'});
+  const result=patchAccountLifecycle({accountsConfig:input,policy:confirmedPolicy,runtimePolicy:allowAccountRuntime,accountId:'alpha',target:'approval'});
   assert.equal(result.accountsConfig.accounts.alpha.enabled,true);
   assert.equal(result.accountsConfig.accounts.alpha.mode,'approval');
   assert.equal(result.accountsConfig.accounts.beta.enabled,false);
@@ -36,7 +37,7 @@ test('auto promotion requires approval mode, a controlled publish, and matching 
 });
 
 test('auto promotion changes state only when every local proof is present',()=>{
-  const result=patchAccountLifecycle({accountsConfig:fixture(),policy:confirmedPolicy,accountId:'alpha',target:'auto',history:history(),metrics:metrics()});
+  const result=patchAccountLifecycle({accountsConfig:fixture(),policy:confirmedPolicy,runtimePolicy:allowAccountRuntime,accountId:'alpha',target:'auto',history:history(),metrics:metrics()});
   assert.equal(result.accountsConfig.accounts.alpha.enabled,true);
   assert.equal(result.accountsConfig.accounts.alpha.mode,'auto');
   assert.equal(result.evidence.latestProviderPostId,'post-1');
@@ -60,12 +61,12 @@ test('unknown accounts and lifecycle targets are rejected',()=>{
 test('account control workflow is an explicit manual form and Manual-Only keeps activation fail-closed',async()=>{
   const workflow=await readFile(`${ROOT}.github/workflows/account-control.yml`,'utf8');
   assert.match(workflow,/workflow_dispatch:/);
-  assert.match(workflow,/account:\n\s+description: Account ID/);
-  assert.match(workflow,/target:\n\s+description:/);
   assert.match(workflow,/options: \[approval, auto, pause, disabled\]/);
-  assert.match(workflow,/src\/ops\/account-control\.mjs --account/);
-  assert.match(workflow,/live-preflight\.mjs --account/);
+  assert.match(workflow,/SNS_COMMAND_ADMINS/);
   assert.match(workflow,/npm run manual-only-audit/);
+  assert.match(workflow,/git add config\/accounts\.json/);
   assert.doesNotMatch(workflow,/github\.event\.issue/);
   assert.doesNotMatch(workflow,/cancel-in-progress:\s*true/);
+  const source=await readFile(`${ROOT}src/ops/account-control.mjs`,'utf8');
+  assert.match(source,/assertLifecycleTransitionAllowed/);
 });

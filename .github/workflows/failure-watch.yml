@@ -10,6 +10,7 @@ on:
       - SNS Engagement Control
       - SNS Account Control
       - SNS Compliance Attestation
+      - SNS ChatOps
       - SNS Metrics Collector
       - SNS Trend Intelligence
       - SNS Daily Learning

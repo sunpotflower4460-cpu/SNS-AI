@@ -123,5 +123,6 @@ test('Failure Watch subscribes to scheduled engagement failures', async () => {
   assert.match(workflow, /- SNS Engagement Autopilot/);
   assert.match(workflow, /- SNS Engagement Scheduled/);
   assert.match(workflow, /- SNS Engagement Resolve/);
+  assert.match(workflow, /- SNS ChatOps/);
   assert.match(workflow, /failure|timed_out|cancelled/);
 });

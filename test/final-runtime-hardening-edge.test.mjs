@@ -46,10 +46,18 @@ test('durable published replay refuses claims that lack account/platform provena
 test('published history evidence and already-recorded checks stay account/platform scoped', () => {
   const history = [
     { status: 'published', slotId: 'shared-slot', account: 'other', platform: 'x', providerPostId: 'p1' },
-    { status: 'published', slotId: 'shared-slot', account: 'account-a', platform: 'instagram', providerPostId: 'p2' }
+    { status: 'published', slotId: 'shared-slot', account: 'account-a', platform: 'instagram', providerPostId: 'p2' },
+    // Missing identity must fail closed, not act as a wildcard match.
+    { status: 'published', slotId: 'shared-slot', providerPostId: 'orphan' }
   ];
   assert.equal(
     publishTest.publishedHistoryEvidence({ account: 'account-a', slotId: 'shared-slot' }, { platform: 'x' }, history),
+    null
+  );
+  assert.equal(
+    publishTest.publishedHistoryEvidence({ account: 'account-a', slotId: 'shared-slot' }, { platform: 'x' }, [
+      { status: 'published', slotId: 'shared-slot', providerPostId: 'orphan' }
+    ]),
     null
   );
   const matched = publishTest.publishedHistoryEvidence(

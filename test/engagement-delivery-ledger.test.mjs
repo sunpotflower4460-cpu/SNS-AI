@@ -225,6 +225,98 @@ test('successful sent marks are durable and later remote sync never demotes loca
       { status: 'sent', updatedAt: '2026-08-20T01:00:00Z' },
       { status: 'sending', updatedAt: '2026-08-20T00:00:00Z' }
     ).status, 'sent');
+    assert.equal(deliveryTest.preferRecord(
+      { status: 'failed', updatedAt: '2026-08-20T01:00:00Z' },
+      { status: 'sending', updatedAt: '2026-08-20T00:00:00Z' }
+    ).status, 'failed', 'definitive failed must beat stale sending so retries are not permanently blocked');
+    assert.equal(deliveryTest.preferRecord(
+      { status: 'failed', updatedAt: '2026-08-20T01:00:00Z' },
+      { status: 'unknown', updatedAt: '2026-08-20T00:00:00Z' }
+    ).status, 'unknown', 'ambiguity must still beat failed');
+  });
+});
+
+test('stale remote sending cannot block retry after a local definitive failure', async () => {
+  await withLedgerSandbox(async () => {
+    process.env.GITHUB_TOKEN = 'test-token';
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.SNS_DURABLE_STATE_BRANCH = 'sns-ai-state';
+
+    const key = 'a1'.padEnd(32, '0');
+    let remote = { schemaVersion: 1, records: {} };
+    let sha = null;
+    globalThis.fetch = async (_url, options = {}) => {
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET') {
+        if (!sha) return jsonResponse({ message: 'Not Found' }, 404);
+        return jsonResponse({ content: Buffer.from(`${JSON.stringify(remote)}\n`).toString('base64'), sha });
+      }
+      const request = JSON.parse(options.body);
+      remote = JSON.parse(Buffer.from(request.content, 'base64').toString('utf8'));
+      sha = `sha-${Date.now()}`;
+      return jsonResponse({ content: { sha } });
+    };
+
+    const first = await beginDelivery({ key, accountId: 'music-tools-x', platform: 'x', kind: 'reply', publicInteraction: true });
+    assert.equal(first.claimed, true);
+    assert.equal(first.record.attempts, 1);
+
+    // Simulate: definitive failure marked locally, but the durable remote write never landed.
+    await markDelivery(key, 'failed', { failureCode: 'HTTP_400' }, { durable: false });
+    remote.records[key] = { ...remote.records[key], status: 'sending' };
+    assert.equal((await getDeliveryRecord(key)).status, 'failed');
+    assert.equal(remote.records[key].status, 'sending');
+
+    const retry = await beginDelivery({ key, accountId: 'music-tools-x', platform: 'x', kind: 'reply', publicInteraction: true });
+    assert.equal(retry.claimed, true, 'local failed must beat stale remote sending so a retry claim can proceed');
+    assert.equal(retry.record.status, 'sending');
+    assert.equal(retry.record.attempts, 2);
+  });
+});
+
+test('markDelivery refuses to demote a durable sent/handled guard to unknown or failed', async () => {
+  await withLedgerSandbox(async () => {
+    process.env.GITHUB_TOKEN = 'test-token';
+    process.env.GITHUB_REPOSITORY = 'owner/repo';
+    process.env.SNS_DURABLE_STATE_BRANCH = 'sns-ai-state';
+
+    const key = 'f'.repeat(32);
+    let remote = {
+      schemaVersion: 1,
+      records: {
+        [key]: {
+          account: 'music-tools-x',
+          platform: 'x',
+          kind: 'reply',
+          publicInteraction: true,
+          status: 'sent',
+          attempts: 1,
+          createdAt: '2026-08-20T00:00:00Z',
+          startedAt: '2026-08-20T00:00:00Z',
+          updatedAt: '2026-08-20T01:00:00Z',
+          completedAt: '2026-08-20T01:00:00Z',
+          issueNumber: null
+        }
+      }
+    };
+    let sha = 'sha-sent';
+    globalThis.fetch = async (_url, options = {}) => {
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET') {
+        return jsonResponse({ content: Buffer.from(`${JSON.stringify(remote)}\n`).toString('base64'), sha });
+      }
+      const request = JSON.parse(options.body);
+      remote = JSON.parse(Buffer.from(request.content, 'base64').toString('utf8'));
+      sha = 'sha-after';
+      return jsonResponse({ content: { sha } });
+    };
+
+    const result = await markDelivery(key, 'unknown', { issueNumber: 9 }, { durable: true });
+    assert.equal(result.status, 'sent');
+    assert.equal(remote.records[key].status, 'sent');
+    assert.equal((await getDeliveryRecord(key)).status, 'sent');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'sent', updatedAt: '2026-08-20T01:00:00Z' }, 'failed').status, 'sent');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'handled', updatedAt: '2026-08-20T01:00:00Z' }, 'unknown').status, 'handled');
   });
 });
 
