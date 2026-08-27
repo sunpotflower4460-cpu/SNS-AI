@@ -32,9 +32,10 @@ export function assertXAiReplyApproval(policy = {}, accountId) {
 }
 
 export function liveEngagementAccount(policy = {}, accountId) {
+  // Missing/malformed liveAccounts must fail closed. Falling back to allowedAccounts would treat
+  // every allowlisted account as live when a partial policy merge drops the live list.
   const live = Array.isArray(policy.liveAccounts)
-    ? new Set(policy.liveAccounts.map(String)).has(String(accountId))
-    : allowedEngagementAccount(policy, accountId);
+    && new Set(policy.liveAccounts.map(String)).has(String(accountId));
   // A misordered rollout must fail loudly instead of silently starting an X AI reply bot or creating
   // one human Issue per inbound interaction. Dry-run callers short-circuit before this predicate.
   if (live) assertXAiReplyApproval(policy, accountId);

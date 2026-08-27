@@ -705,7 +705,8 @@ test('engagement/schedule docs do not overstate what liveAccounts, Manual-Only, 
     assert.match(doc, /approvalRequired/, 'engagement auto-send description must mention approvalRequired, not just liveAccounts/confidence');
   }
 
-  assert.match(goLive, /workflowファイルへ`schedule:`を追加/, 'must say the workflow YAML itself needs a schedule: edit, not just the runtime policy');
+  assert.match(goLive, /workflowファイルへ`schedule:`を追加|YAML自体に書く/, 'must say the workflow YAML itself needs a schedule: edit, not just the runtime policy');
+  assert.match(goLive, /engagement-scheduled\.yml/, 'scheduled polling schedule belongs on engagement-scheduled.yml, not engagement.yml');
 
   assert.match(readme, /operator workflow/, 'must scope the Manual-Only claim to operator workflows, excluding the documented CI/Failure-Watch exceptions');
   // Both places that claim "all workflows are workflow_dispatch-only" must mention the ci.yml/
@@ -724,7 +725,8 @@ test('engagement/schedule docs do not overstate what liveAccounts, Manual-Only, 
 // in the original audit's file list. docs/OPERATIONS.md and docs/AUTONOMY.md independently drifted
 // the OTHER way: they describe the pre-Manual-Only scheduled/autonomous architecture as the system's
 // current live behavior (confirmed against .github/workflows/engagement-scheduled.yml, which is now
-// a workflow_dispatch-only no-op stub, not the "runs every 30 minutes" polling both docs described).
+// a workflow_dispatch-only scheduled runner wired to scheduled.mjs, inert under Manual-Only, not the
+// "runs every 30 minutes" polling both docs originally described as current behavior).
 test('docs beyond the first audit pass do not describe dead bracket commands or claim schedules that do not exist', async () => {
   const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
   const setupQueue = await readFile(`${DOCS_DIR}MANUAL_EXTERNAL_SETUP_QUEUE.md`, 'utf8');
@@ -738,7 +740,8 @@ test('docs beyond the first audit pass do not describe dead bracket commands or 
   }
   assert.match(setupQueue, /compliance-attestation\.yml|SNS Compliance Attestation/i);
   assert.match(engagementAutomation, /engagement-control\.yml|SNS Engagement Control/i);
-  assert.match(engagementAutomation, /no-op/i, 'must say SNS Engagement Scheduled is currently a no-op, not real 30-minute polling');
+  assert.match(engagementAutomation, /inert|fail-closed|allowScheduledProviderPolling/i, 'must say SNS Engagement Scheduled is inert under Manual-Only, not live 30-minute polling');
+  assert.doesNotMatch(engagementAutomation, /prints an explanation|is not called by any workflow/i, 'must not claim the pre-#85 print-only stub behavior');
 
   for (const doc of [operations, autonomy]) {
     assert.match(doc, /[Mm]anual-Only/, 'must mention the current Manual-Only posture instead of presenting the scheduled/autonomous design as current behavior');
@@ -762,9 +765,8 @@ test('every write-capable or secret-bearing operational workflow gates on the au
 
   // ci.yml and failure-watch.yml are the two reviewed GitHub-internal automatic exceptions (see
   // manual-only-audit.mjs's INFRASTRUCTURE_WORKFLOWS) - they must never receive SNS/provider secrets
-  // and are intentionally not actor-gated. engagement-scheduled.yml is a workflow_dispatch-only no-op
-  // stub (contents: read, no secrets, prints an explanation) with nothing to gate.
-  const exempt = new Set(['ci.yml', 'failure-watch.yml', 'engagement-scheduled.yml']);
+  // and are intentionally not actor-gated.
+  const exempt = new Set(['ci.yml', 'failure-watch.yml']);
 
   const missing = [];
   for (const name of files) {

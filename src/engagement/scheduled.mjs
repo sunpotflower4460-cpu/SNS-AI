@@ -1,5 +1,6 @@
 import { loadAccounts } from '../lib/config.mjs';
 import { readHistory } from '../lib/history.mjs';
+import { loadRuntimePolicy } from '../ops/manual-only.mjs';
 import { effectiveEngagementPolicy, loadEngagementPolicy } from './policy.mjs';
 import { liveEngagementAccount } from './readiness.mjs';
 import { runEngagement } from './run.mjs';
@@ -70,8 +71,22 @@ export async function runScheduledEngagement({
   loadPolicy = loadEngagementPolicy,
   loadAccountConfig = loadAccounts,
   loadPublishedHistory = readHistory,
+  loadRuntime = loadRuntimePolicy,
   run = runEngagement
 } = {}) {
+  const runtimePolicy = await loadRuntime();
+  // Runtime enforcement must mirror docs/README: allowScheduledProviderPolling is not audit-only.
+  // Manual-Only (or an explicit false flag after Manual-Only is lifted) keeps scheduled polling inert
+  // even if engagement-policy.json is misconfigured to enabled/live.
+  if (runtimePolicy?.manualOnly === true || runtimePolicy?.allowScheduledProviderPolling !== true) {
+    return {
+      state: 'disabled',
+      accounts: [],
+      skipped: [],
+      reason: runtimePolicy?.manualOnly === true ? 'manual-only' : 'scheduled-polling-disallowed'
+    };
+  }
+
   const [globalPolicy, accounts, history] = await Promise.all([
     loadPolicy(),
     loadAccountConfig(),

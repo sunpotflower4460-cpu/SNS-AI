@@ -8,6 +8,13 @@ const MAX_EVENTS_PER_ACCOUNT = 600;
 const MAX_ACTIVE_ACTORS_PER_ACCOUNT = 5000;
 const MAX_SENT_LOG_PER_ACCOUNT = 5000;
 const SENT_LOG_RETENTION_MS = 8 * 24 * 60 * 60_000;
+let mutationQueue = Promise.resolve();
+
+function serializeMutation(task) {
+  const run = mutationQueue.then(task, task);
+  mutationQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 function hash(parts) {
   return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
@@ -82,13 +89,15 @@ export async function countFetchesSince(accountId, since) {
 }
 
 export async function recordInboundFetch(accountId, detail = {}) {
-  const state = await loadEngagementState();
-  const account = ensureAccount(state, accountId);
-  const now = detail.at || new Date().toISOString();
-  account.fetchLog.push({ at: now, channel: detail.channel || null });
-  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
-  await writeJsonAtomic(STATE_FILE, state);
-  return account.fetchLog.length;
+  return serializeMutation(async () => {
+    const state = await loadEngagementState();
+    const account = ensureAccount(state, accountId);
+    const now = detail.at || new Date().toISOString();
+    account.fetchLog.push({ at: now, channel: detail.channel || null });
+    account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+    await writeJsonAtomic(STATE_FILE, state);
+    return account.fetchLog.length;
+  });
 }
 
 // A single X or Instagram collection can make several distinct provider reads (mentions AND dm_events;
@@ -98,23 +107,25 @@ export async function recordInboundFetch(accountId, detail = {}) {
 // different states, and it is called immediately before each individual provider-read request rather
 // than once before the whole collection.
 export async function reserveInboundFetch(accountId, limit, detail = {}) {
-  const state = await loadEngagementState();
-  const account = ensureAccount(state, accountId);
-  const now = detail.at || new Date().toISOString();
-  const since = new Date(now).getTime() - 24 * 60 * 60_000;
-  const used = account.fetchLog.filter((row) => {
-    const at = new Date(row?.at || 0).getTime();
-    return Number.isFinite(at) && at >= since;
-  }).length;
-  if (used >= limit) {
-    const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
-    error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
-    throw error;
-  }
-  account.fetchLog.push({ at: now, channel: detail.channel || null });
-  account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
-  await writeJsonAtomic(STATE_FILE, state);
-  return { allowed: true, used: used + 1, limit };
+  return serializeMutation(async () => {
+    const state = await loadEngagementState();
+    const account = ensureAccount(state, accountId);
+    const now = detail.at || new Date().toISOString();
+    const since = new Date(now).getTime() - 24 * 60 * 60_000;
+    const used = account.fetchLog.filter((row) => {
+      const at = new Date(row?.at || 0).getTime();
+      return Number.isFinite(at) && at >= since;
+    }).length;
+    if (used >= limit) {
+      const error = new Error(`Inbound engagement fetch budget exhausted for ${accountId}: ${used}/${limit} in the last 24h.`);
+      error.code = 'ENGAGEMENT_FETCH_BUDGET_EXHAUSTED';
+      throw error;
+    }
+    account.fetchLog.push({ at: now, channel: detail.channel || null });
+    account.fetchLog = compactSentLog(account.fetchLog, new Date(now).getTime());
+    await writeJsonAtomic(STATE_FILE, state);
+    return { allowed: true, used: used + 1, limit };
+  });
 }
 
 export async function eventStatus(accountId, key) {
@@ -149,64 +160,70 @@ export async function countSentSince(accountId, kind, since) {
 }
 
 export async function markEngagementEvent(accountId, key, detail = {}) {
-  const state = await loadEngagementState();
-  const account = ensureAccount(state, accountId);
-  const now = new Date().toISOString();
-  account.events[key] = {
-    ...(account.events[key] || {}),
-    ...detail,
-    updatedAt: now,
-    firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
-  };
-  account.events = compactEvents(account.events);
-  account.actors = compactActors(account.actors);
-  account.sentLog = compactSentLog(account.sentLog);
-  await writeJsonAtomic(STATE_FILE, state);
-  return account.events[key];
+  return serializeMutation(async () => {
+    const state = await loadEngagementState();
+    const account = ensureAccount(state, accountId);
+    const now = new Date().toISOString();
+    account.events[key] = {
+      ...(account.events[key] || {}),
+      ...detail,
+      updatedAt: now,
+      firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
+    };
+    account.events = compactEvents(account.events);
+    account.actors = compactActors(account.actors);
+    account.sentLog = compactSentLog(account.sentLog);
+    await writeJsonAtomic(STATE_FILE, state);
+    return account.events[key];
+  });
 }
 
 export async function markActorOptOut(accountId, key) {
   if (!key) return null;
-  const state = await loadEngagementState();
-  const account = ensureAccount(state, accountId);
-  const now = new Date().toISOString();
-  account.actors[key] = {
-    ...(account.actors[key] || {}),
-    optedOut: true,
-    optedOutAt: account.actors[key]?.optedOutAt || now,
-    updatedAt: now
-  };
-  account.actors = compactActors(account.actors);
-  await writeJsonAtomic(STATE_FILE, state);
-  return account.actors[key];
+  return serializeMutation(async () => {
+    const state = await loadEngagementState();
+    const account = ensureAccount(state, accountId);
+    const now = new Date().toISOString();
+    account.actors[key] = {
+      ...(account.actors[key] || {}),
+      optedOut: true,
+      optedOutAt: account.actors[key]?.optedOutAt || now,
+      updatedAt: now
+    };
+    account.actors = compactActors(account.actors);
+    await writeJsonAtomic(STATE_FILE, state);
+    return account.actors[key];
+  });
 }
 
 export async function markEngagementSent(accountId, key, actor, detail = {}) {
-  const state = await loadEngagementState();
-  const account = ensureAccount(state, accountId);
-  const now = detail.sentAt || new Date().toISOString();
-  account.events[key] = {
-    ...(account.events[key] || {}),
-    ...detail,
-    status: 'sent',
-    sentAt: now,
-    updatedAt: now,
-    firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
-  };
-  if (actor) {
-    const priorActor = account.actors[actor] || {};
-    account.actors[actor] = {
-      ...priorActor,
-      lastSentAt: { ...(priorActor.lastSentAt || {}), [detail.kind]: now },
-      updatedAt: now
+  return serializeMutation(async () => {
+    const state = await loadEngagementState();
+    const account = ensureAccount(state, accountId);
+    const now = detail.sentAt || new Date().toISOString();
+    account.events[key] = {
+      ...(account.events[key] || {}),
+      ...detail,
+      status: 'sent',
+      sentAt: now,
+      updatedAt: now,
+      firstSeenAt: account.events[key]?.firstSeenAt || detail.firstSeenAt || now
     };
-  }
-  account.sentLog.push({ at: now, kind: detail.kind, eventKey: key, actorKey: actor || null });
-  account.events = compactEvents(account.events);
-  account.actors = compactActors(account.actors);
-  account.sentLog = compactSentLog(account.sentLog, new Date(now).getTime());
-  await writeJsonAtomic(STATE_FILE, state);
-  return account.events[key];
+    if (actor) {
+      const priorActor = account.actors[actor] || {};
+      account.actors[actor] = {
+        ...priorActor,
+        lastSentAt: { ...(priorActor.lastSentAt || {}), [detail.kind]: now },
+        updatedAt: now
+      };
+    }
+    account.sentLog.push({ at: now, kind: detail.kind, eventKey: key, actorKey: actor || null });
+    account.events = compactEvents(account.events);
+    account.actors = compactActors(account.actors);
+    account.sentLog = compactSentLog(account.sentLog, new Date(now).getTime());
+    await writeJsonAtomic(STATE_FILE, state);
+    return account.events[key];
+  });
 }
 
 export async function appendEngagementAudit(entry) {

@@ -198,6 +198,18 @@ function nextClaim(slotId, status, previous, detail = {}) {
   };
 }
 
+function assertClaimStatusTransition(previous, nextStatus) {
+  if (!previous?.status || previous.status === nextStatus) return;
+  // `published` is terminal for provider side-effects. Hub backlink markers may rewrite the same
+  // published claim with extra fields, but never regress it to publishing/unknown/failed.
+  if (previous.status === 'published') {
+    const error = new Error(`Durable claim refuses regressing published status to ${nextStatus}.`);
+    error.code = 'CLAIM_STATUS_REGRESSION';
+    error.claim = previous;
+    throw error;
+  }
+}
+
 function assertClaimCanBegin(slotId, existing) {
   if (existing?.status === 'published') return { replay: true, claim: existing };
   if (['publishing', 'publish_unknown'].includes(existing?.status)) {
@@ -221,11 +233,26 @@ export async function getDurableClaim(slotId, { fresh = false } = {}) {
 export async function writeDurableClaim(slotId, status, detail = {}) {
   if (!slotId) return null;
   if (hasGithubRuntime()) {
-    const previous = await getDurableClaim(slotId, { fresh: true });
-    return writeRemote(slotId, nextClaim(slotId, status, previous, detail));
+    let lastError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const previous = await getDurableClaim(slotId, { fresh: true });
+      assertClaimStatusTransition(previous, status);
+      try {
+        return await writeRemote(slotId, nextClaim(slotId, status, previous, detail));
+      } catch (error) {
+        lastError = error;
+        if (remoteWriteConflict(error) && attempt < 4) {
+          shaMemory.delete(slotId);
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError || new Error(`Could not persist durable claim for ${slotId}.`);
   }
   return withLocalLock(slotId, async () => {
     const previous = await readLocal(slotId);
+    assertClaimStatusTransition(previous, status);
     return writeLocal(slotId, nextClaim(slotId, status, previous, detail));
   });
 }
@@ -278,5 +305,6 @@ export const __test = {
   processAlive,
   readLockOwner,
   reclaimStaleLocalLock,
-  remoteWriteConflict
+  remoteWriteConflict,
+  assertClaimStatusTransition
 };

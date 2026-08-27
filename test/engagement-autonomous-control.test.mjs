@@ -12,6 +12,8 @@ import {
 } from '../src/engagement/scheduled.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const allowScheduledRuntime = async () => ({ schemaVersion: 1, manualOnly: false, allowScheduledProviderPolling: true });
+const blockScheduledRuntime = async () => ({ schemaVersion: 1, manualOnly: true, allowScheduledProviderPolling: false });
 
 function fixture() {
   return {
@@ -182,7 +184,28 @@ test('scheduled polling fails closed on malformed windows and permits explicit D
 });
 
 test('scheduled runner returns disabled and nothing-due without provider work', async () => {
+  const policyBlocked = await runScheduledEngagement({
+    loadRuntime: blockScheduledRuntime,
+    loadPolicy: async () => ({ enabled: true, liveAccounts: ['alpha'], autoReply: true }),
+    loadAccountConfig: async () => ({ alpha: { enabled: true, mode: 'auto', engagement: { autoReply: true } } }),
+    loadPublishedHistory: async () => [{ account: 'alpha', status: 'published', at: '2026-08-20T11:00:00Z' }],
+    run: async () => { throw new Error('must not run'); }
+  });
+  assert.equal(policyBlocked.state, 'disabled');
+  assert.equal(policyBlocked.reason, 'manual-only');
+
+  const flagBlocked = await runScheduledEngagement({
+    loadRuntime: async () => ({ schemaVersion: 1, manualOnly: false, allowScheduledProviderPolling: false }),
+    loadPolicy: async () => ({ enabled: true, liveAccounts: ['alpha'], autoReply: true }),
+    loadAccountConfig: async () => ({ alpha: { enabled: true, mode: 'auto', engagement: { autoReply: true } } }),
+    loadPublishedHistory: async () => [{ account: 'alpha', status: 'published', at: '2026-08-20T11:00:00Z' }],
+    run: async () => { throw new Error('must not run'); }
+  });
+  assert.equal(flagBlocked.state, 'disabled');
+  assert.equal(flagBlocked.reason, 'scheduled-polling-disallowed');
+
   const disabled = await runScheduledEngagement({
+    loadRuntime: allowScheduledRuntime,
     loadPolicy: async () => ({ enabled: false }),
     loadAccountConfig: async () => ({ alpha: { enabled: true, mode: 'auto' } }),
     loadPublishedHistory: async () => [],
@@ -192,6 +215,7 @@ test('scheduled runner returns disabled and nothing-due without provider work', 
 
   const nothingDue = await runScheduledEngagement({
     now: new Date('2026-08-20T12:00:00Z'),
+    loadRuntime: allowScheduledRuntime,
     loadPolicy: async () => ({ enabled: true, liveAccounts: ['alpha'], autoReply: true, autoDmReply: false }),
     loadAccountConfig: async () => ({ alpha: { enabled: true, mode: 'auto', engagement: { autoReply: true } } }),
     loadPublishedHistory: async () => [],
@@ -201,6 +225,7 @@ test('scheduled runner returns disabled and nothing-due without provider work', 
   assert.equal(nothingDue.skipped[0].reason, 'no-own-publish');
 
   const nothingEnabled = await runScheduledEngagement({
+    loadRuntime: allowScheduledRuntime,
     loadPolicy: async () => ({ enabled: true, liveAccounts: [], autoReply: true }),
     loadAccountConfig: async () => ({ alpha: { enabled: true, mode: 'auto' } }),
     loadPublishedHistory: async () => [],
@@ -223,6 +248,7 @@ test('scheduled runner executes due accounts sequentially and reports healthy/de
   const calls = [];
   const healthy = await runScheduledEngagement({
     now,
+    loadRuntime: allowScheduledRuntime,
     loadPolicy: async () => policy,
     loadAccountConfig: async () => accounts,
     loadPublishedHistory: async () => history,
@@ -234,6 +260,7 @@ test('scheduled runner executes due accounts sequentially and reports healthy/de
 
   const degraded = await runScheduledEngagement({
     now,
+    loadRuntime: allowScheduledRuntime,
     loadPolicy: async () => ({ ...policy, liveAccounts: ['alpha'] }),
     loadAccountConfig: async () => ({ alpha: accounts.alpha }),
     loadPublishedHistory: async () => history,
@@ -249,11 +276,11 @@ test('Manual-Only keeps scheduled engagement inert and exposes bounded manual co
   assert.doesNotMatch(activeScheduled, /^\s*schedule:/m);
   assert.doesNotMatch(activeScheduled, /^\s*-\s*cron:/m);
   // The workflow calls the real scheduled engagement module; inertness under Manual-Only is
-  // guaranteed by manual-only-audit (which fails if allowScheduledProviderPolling is true) and by
-  // engagement-policy.json (enabled:false / liveAccounts:[]) which causes runScheduledEngagement()
-  // to return state:'disabled' without performing any provider reads.
+  // enforced at runtime by allowScheduledProviderPolling/manualOnly (not audit-only), plus
+  // engagement-policy.json (enabled:false / liveAccounts:[]).
   assert.match(scheduled, /node src\/engagement\/scheduled\.mjs/);
   assert.match(scheduled, /npm run manual-only-audit/);
+  assert.match(scheduled, /SNS_MANUAL_INVOCATION:\s*'true'/);
 
   const control = await readFile(`${ROOT}.github/workflows/engagement-control.yml`, 'utf8');
   assert.match(control, /workflow_dispatch:/);

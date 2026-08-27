@@ -11,6 +11,14 @@ const REMOTE_PATH = 'data/engagement-delivery-ledger.json';
 const RESOLVED_RETENTION_MS = 35 * 24 * 60 * 60_000;
 const BLOCKING_STATUSES = new Set(['sending', 'sent', 'unknown', 'handled']);
 const UNRESOLVED_STATUSES = new Set(['sending', 'unknown']);
+const STATUS_RANK = { failed: 0, sending: 1, unknown: 2, sent: 3, handled: 3 };
+let mutationQueue = Promise.resolve();
+
+function serializeMutation(task) {
+  const run = mutationQueue.then(task, task);
+  mutationQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 function hasGithubRuntime() {
   return Boolean((process.env.GITHUB_TOKEN || process.env.GH_TOKEN) && process.env.GITHUB_REPOSITORY);
@@ -25,6 +33,32 @@ function normalizedLedger(value) {
   ledger.schemaVersion = 1;
   ledger.records = ledger.records && typeof ledger.records === 'object' && !Array.isArray(ledger.records) ? ledger.records : {};
   return ledger;
+}
+
+function preferRecord(local, remote) {
+  if (!local) return remote || null;
+  if (!remote) return local;
+  const localRank = STATUS_RANK[String(local.status || '')] ?? -1;
+  const remoteRank = STATUS_RANK[String(remote.status || '')] ?? -1;
+  if (localRank > remoteRank) return local;
+  if (remoteRank > localRank) return remote;
+  return String(local.updatedAt || '') >= String(remote.updatedAt || '') ? local : remote;
+}
+
+// Remote reads can lag local terminal outcomes (especially a just-marked `sent` that has not yet
+// completed its Contents API write). Blindly saveLocal(remote) would demote those guards back to
+// `sending` and reopen duplicate-send / false-ambiguity paths on later events in the same run.
+function mergeLedgers(remote, local) {
+  const merged = emptyLedger();
+  const keys = new Set([
+    ...Object.keys(remote?.records || {}),
+    ...Object.keys(local?.records || {})
+  ]);
+  for (const key of keys) {
+    const preferred = preferRecord(local?.records?.[key], remote?.records?.[key]);
+    if (preferred) merged.records[key] = preferred;
+  }
+  return merged;
 }
 
 function validKey(key) {
@@ -128,36 +162,40 @@ export async function beginDelivery({ key, accountId, platform, kind, publicInte
   const normalizedKey = validKey(key);
   const detail = { accountId, platform, kind, publicInteraction };
 
-  if (!hasGithubRuntime()) {
-    const ledger = await loadLocal();
-    const previous = ledger.records[normalizedKey] || null;
-    if (deliveryBlocksSend(previous)) return { claimed: false, record: previous };
-    ledger.records[normalizedKey] = nextSendingRecord(previous, detail);
-    await saveLocal(ledger);
-    return { claimed: true, record: ledger.records[normalizedKey] };
-  }
-
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const { ledger, sha } = await readRemote();
-    const previous = ledger.records[normalizedKey] || null;
-    if (deliveryBlocksSend(previous)) {
-      await saveLocal(ledger);
-      return { claimed: false, record: previous };
-    }
-    ledger.records[normalizedKey] = nextSendingRecord(previous, detail);
-    try {
-      await writeRemote(ledger, sha);
+  return serializeMutation(async () => {
+    if (!hasGithubRuntime()) {
+      const ledger = await loadLocal();
+      const previous = ledger.records[normalizedKey] || null;
+      if (deliveryBlocksSend(previous)) return { claimed: false, record: previous };
+      ledger.records[normalizedKey] = nextSendingRecord(previous, detail);
       await saveLocal(ledger);
       return { claimed: true, record: ledger.records[normalizedKey] };
-    } catch (error) {
-      if (conflict(error) && attempt < 4) continue;
-      throw error;
     }
-  }
-  throw new Error('Could not acquire durable engagement delivery claim.');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { ledger, sha } = await readRemote();
+      const local = await loadLocal();
+      const merged = mergeLedgers(ledger, local);
+      const previous = merged.records[normalizedKey] || null;
+      if (deliveryBlocksSend(previous)) {
+        await saveLocal(merged);
+        return { claimed: false, record: previous };
+      }
+      merged.records[normalizedKey] = nextSendingRecord(previous, detail);
+      try {
+        await writeRemote(merged, sha);
+        await saveLocal(merged);
+        return { claimed: true, record: merged.records[normalizedKey] };
+      } catch (error) {
+        if (conflict(error) && attempt < 4) continue;
+        throw error;
+      }
+    }
+    throw new Error('Could not acquire durable engagement delivery claim.');
+  });
 }
 
-export async function markDelivery(key, status, detail = {}, { durable = false } = {}) {
+export async function markDelivery(key, status, detail = {}, { durable = true } = {}) {
   const normalizedKey = validKey(key);
   const normalizedStatus = String(status || '').trim();
   if (!['sent', 'unknown', 'failed', 'handled'].includes(normalizedStatus)) throw new Error(`Unsupported engagement delivery status "${normalizedStatus}".`);
@@ -176,23 +214,25 @@ export async function markDelivery(key, status, detail = {}, { durable = false }
     return ledger;
   };
 
-  const local = update(await loadLocal());
-  await saveLocal(local);
-  if (!durable || !hasGithubRuntime()) return local.records[normalizedKey];
+  return serializeMutation(async () => {
+    const local = update(await loadLocal());
+    await saveLocal(local);
+    if (!durable || !hasGithubRuntime()) return local.records[normalizedKey];
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const { ledger, sha } = await readRemote();
-    update(ledger);
-    try {
-      await writeRemote(ledger, sha);
-      await saveLocal(ledger);
-      return ledger.records[normalizedKey];
-    } catch (error) {
-      if (conflict(error) && attempt < 4) continue;
-      throw error;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { ledger, sha } = await readRemote();
+      const merged = update(mergeLedgers(ledger, local));
+      try {
+        await writeRemote(merged, sha);
+        await saveLocal(merged);
+        return merged.records[normalizedKey];
+      } catch (error) {
+        if (conflict(error) && attempt < 4) continue;
+        throw error;
+      }
     }
-  }
-  throw new Error('Could not persist engagement delivery status.');
+    throw new Error('Could not persist engagement delivery status.');
+  });
 }
 
 export function definitiveDeliveryFailure(error) {
@@ -204,9 +244,12 @@ export function definitiveDeliveryFailure(error) {
 export const __test = {
   compactRecords,
   normalizedLedger,
+  mergeLedgers,
+  preferRecord,
   definitiveDeliveryFailure,
   deliveryBlocksSend,
   deliveryNeedsHuman,
   hasGithubRuntime,
-  RESOLVED_RETENTION_MS
+  RESOLVED_RETENTION_MS,
+  STATUS_RANK
 };

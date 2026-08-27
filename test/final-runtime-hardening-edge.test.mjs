@@ -31,3 +31,31 @@ test('durable published replay refuses an account or platform identity mismatch 
     /Durable claim platform mismatch/
   );
 });
+
+test('durable published replay refuses claims that lack account/platform provenance', async () => {
+  await assert.rejects(
+    publishTest.reconcilePublishedReplay(
+      { account: 'account-a', slotId: 'slot-missing-prov', text: 'x' },
+      { platform: 'x' },
+      { status: 'published', providerPostId: 'post-1' }
+    ),
+    /missing account\/platform provenance/
+  );
+});
+
+test('published history evidence and already-recorded checks stay account/platform scoped', () => {
+  const history = [
+    { status: 'published', slotId: 'shared-slot', account: 'other', platform: 'x', providerPostId: 'p1' },
+    { status: 'published', slotId: 'shared-slot', account: 'account-a', platform: 'instagram', providerPostId: 'p2' }
+  ];
+  assert.equal(
+    publishTest.publishedHistoryEvidence({ account: 'account-a', slotId: 'shared-slot' }, { platform: 'x' }, history),
+    null
+  );
+  const matched = publishTest.publishedHistoryEvidence(
+    { account: 'account-a', slotId: 'shared-slot' },
+    { platform: 'instagram' },
+    history
+  );
+  assert.equal(matched.providerPostId, 'p2');
+});

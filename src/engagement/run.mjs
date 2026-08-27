@@ -408,10 +408,10 @@ async function sendResponseWithDeliveryGuard({ accountId, account, event, key, t
     throw deliveryUnknownError(issue?.number || null);
   }
 
-  // Mark the local ledger before any later bookkeeping. The workflow persists this file to sns-ai-state
-  // together with engagement-state. If the runner dies after the provider accepted the send but before
-  // this line, the already-durable `sending` claim becomes an ambiguity that blocks automatic retry.
-  await markDelivery(key, 'sent');
+  // Persist `sent` through the Contents API immediately. A local-only mark is not enough: the next
+  // beginDelivery for another event reads remote and used to saveLocal(remote), demoting this row
+  // back to `sending` and turning a successful reply into a false ambiguity / duplicate risk.
+  await markDelivery(key, 'sent', {}, { durable: true });
   return { state: 'sent', result };
 }
 
@@ -664,6 +664,7 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
 }
 
 export async function runEngagement({ accountFilter = null, dryRun = false, manualInvocation = false } = {}) {
+  if (manualInvocation === true) process.env.SNS_MANUAL_INVOCATION = 'true';
   const runtimePolicy = await loadRuntimePolicy();
   assertProviderMutationAllowed(runtimePolicy, { dryRun, source: 'manual' });
   const globalPolicy = await loadEngagementPolicy();

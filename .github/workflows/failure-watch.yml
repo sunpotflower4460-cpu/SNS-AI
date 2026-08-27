@@ -5,11 +5,17 @@ on:
     workflows:
       - SNS Autopilot
       - SNS Engagement Autopilot
+      - SNS Engagement Scheduled
+      - SNS Engagement Resolve
+      - SNS Engagement Control
+      - SNS Account Control
+      - SNS Compliance Attestation
       - SNS Metrics Collector
       - SNS Trend Intelligence
       - SNS Daily Learning
       - SNS Policy Watch
       - Publish social post
+      - SNS Publish Readback Reconcile
       - SNS Hub Reconcile
       - SNS Health Report
       - SNS Human Feedback

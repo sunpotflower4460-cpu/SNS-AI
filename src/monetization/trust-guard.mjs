@@ -19,7 +19,9 @@ function kindOf(row) {
 }
 
 function publishedForAccount(history, accountId) {
-  return (Array.isArray(history) ? history : []).filter((row) => row?.status === 'published' && row?.account === accountId);
+  return (Array.isArray(history) ? history : [])
+    .filter((row) => row?.status === 'published' && row?.account === accountId)
+    .sort((a, b) => String(a?.at || '').localeCompare(String(b?.at || '')));
 }
 
 function configNumber(value, fallback, label, { min = 0, max = Number.POSITIVE_INFINITY, integer = false } = {}) {
