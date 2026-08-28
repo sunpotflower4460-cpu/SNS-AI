@@ -45,7 +45,10 @@ jobs:
       GITHUB_REPOSITORY: ${{ github.repository }}
       SNS_DURABLE_BUDGETS: 'true'
       SNS_DURABLE_STATE_BRANCH: sns-ai-state
-      SNS_MANUAL_INVOCATION: 'true'
+      # Only workflow_dispatch may receive the explicit-manual-invocation credential. A future
+      # schedule: trigger must NOT inherit SNS_MANUAL_INVOCATION, or unattended cron would bypass
+      # assertProviderMutationAllowed the same way a human dispatch does.
+      SNS_MANUAL_INVOCATION: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
       INPUT_ACCOUNT: ${{ inputs.account }}
       INPUT_FORCE: ${{ inputs.force }}
       INPUT_DRY_RUN: ${{ inputs.dry_run }}

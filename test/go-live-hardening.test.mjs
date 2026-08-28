@@ -114,6 +114,31 @@ test('strict config validation rejects non-numeric rate-limit knobs that would s
   );
 });
 
+test('strict config validation merges nested sub-objects (naturalization, anomalyBrake, qa, affiliate) the same way the runtime does', () => {
+  // validate-config.mjs/validate-strict-config.mjs used to shallow-merge defaults[key] with
+  // account[key] ({...defaults, ...override}), but the actual runtime merge (mergeSection in
+  // src/lib/config.mjs) additionally deep-merges four specific nested sub-objects so a partial
+  // per-account override doesn't drop its untouched sibling defaults. A validator using a different
+  // merge than the runtime can validate a shape the runtime will never actually see. Prove it with an
+  // out-of-range default (minNaturalness: 999) that only a deep merge preserves through a partial
+  // override of a sibling field (enabled) - the shallow merge replaces the whole naturalization object
+  // and silently loses the invalid default, so no error would ever surface.
+  const config = {
+    defaults: { generation: { naturalization: { minNaturalness: 999 } } },
+    accounts: {
+      acct: {
+        enabled: true, platform: 'x', credentialKey: 'acct',
+        generation: { naturalization: { enabled: true } }
+      }
+    }
+  };
+  const errors = validateStrictConfig(config);
+  assert.ok(
+    errors.some((error) => error.includes('generation.naturalization.minNaturalness')),
+    'a partial per-account naturalization override must not hide an invalid default from validation'
+  );
+});
+
 test('the generation prompt states X weighted length, so a Japanese account is not asked for 280 real characters', () => {
   const account = {
     platform: 'x',
@@ -303,6 +328,21 @@ test('the preflight workflow can verify the approval channel it depends on', asy
 
   const names = (await readdir(WORKFLOWS_DIR)).filter((name) => name.endsWith('.yml'));
   assert.ok(names.includes('publish.yml'), 'sanity: the workflow directory resolved correctly');
+});
+
+// account-control.yml (when target is approval/auto) and engagement-control.yml (when action is
+// activate) both call live-preflight.mjs the same way preflight.yml does, but neither was given the
+// issues: read permission preflight.yml needed for the identical approvalChannelCheck call. Without it,
+// GitHub silently denies the GET (an explicit permissions: block sets every unlisted scope to none),
+// approvalChannel.ok becomes false, and the workflow that exists to enable an account/activate
+// engagement fails closed on its own dependency - not unsafe, but a real functional break.
+test('account-control.yml and engagement-control.yml carry the same issues: read grant preflight.yml needed for its approval-channel check', async () => {
+  for (const name of ['account-control.yml', 'engagement-control.yml']) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    const permissionsBlock = /permissions:\n((?:[ \t]+[^\n]*\n)*)/.exec(yaml);
+    assert.ok(permissionsBlock, `${name} must have a permissions: block`);
+    assert.match(permissionsBlock[1], /^[ \t]+issues:[ \t]*read\s*$/m, `${name} calls live-preflight.mjs, which reads the approval label/Issues state - it needs issues: read`);
+  }
 });
 
 test('a fractional resilience.failureThreshold cannot open the circuit on the first failure', async () => {
@@ -592,24 +632,51 @@ test('every workflow that sets SNS_MANUAL_INVOCATION or writes state back to mai
 
 test('autopilot live path requires SNS_MANUAL_INVOCATION, confirm_live, and manual-only-audit', async () => {
   const yaml = await readFile(`${WORKFLOWS_DIR}autopilot.yml`, 'utf8');
-  assert.match(yaml, /SNS_MANUAL_INVOCATION:\s*'true'/);
+  assert.match(yaml, /SNS_MANUAL_INVOCATION:.*workflow_dispatch/);
   assert.match(yaml, /confirm_live:/);
   assert.match(yaml, /npm run manual-only-audit/);
   assert.match(yaml, /dry_run=false and confirm_live=true/);
 });
 
-// Every write-capable operational workflow runs `npm run validate`/`check`/`secret-scan` as a static
-// safety gate before doing anything live, but health.yml, hub-reconcile.yml, intelligence.yml,
-// learning.yml, maintenance.yml, metrics.yml, policy.yml, preflight.yml, and publish-reconcile.yml
-// used to run that trio without also running `npm run manual-only-audit` - the one static check that
-// verifies the Manual-Only posture itself (config/runtime-policy.json, account modes, engagement
-// policy, and every workflow's trigger shape) hasn't drifted. A workflow that runs the generic guards
-// but skips this one loses defense-in-depth silently, with nothing in CI to say so.
-test('every operational workflow that runs the static safety guards also runs manual-only-audit', async () => {
+// engagement-scheduled.yml was hardened to gate SNS_MANUAL_INVOCATION behind
+// `github.event_name == 'workflow_dispatch'`, so a future schedule: trigger could never inherit the
+// explicit-manual-invocation credential. autopilot.yml, engagement.yml, engagement-resolve.yml, and
+// publish.yml grant the exact same credential but originally hardcoded 'true' unconditionally - safe
+// today only because every operational workflow is currently workflow_dispatch-only (a fact enforced
+// by manual-only-audit.mjs as a backstop, not by these workflows' own code). The hardening applied to
+// one workflow must be applied to every workflow granting this credential, not left to a separate audit
+// script to catch after the fact.
+test('every workflow granting SNS_MANUAL_INVOCATION gates it on workflow_dispatch, not a bare true', async () => {
+  for (const name of ['autopilot.yml', 'engagement.yml', 'engagement-resolve.yml', 'engagement-scheduled.yml', 'publish.yml']) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
+    const line = /^\s*SNS_MANUAL_INVOCATION:.*$/m.exec(yaml)?.[0];
+    assert.ok(line, `${name} must set SNS_MANUAL_INVOCATION`);
+    assert.doesNotMatch(line, /SNS_MANUAL_INVOCATION:\s*'true'\s*$/, `${name} must not hardcode SNS_MANUAL_INVOCATION to 'true' unconditionally`);
+    assert.match(line, /github\.event_name == 'workflow_dispatch'/, `${name} must gate SNS_MANUAL_INVOCATION on workflow_dispatch`);
+  }
+});
+
+// Every write-capable operational workflow is expected to run all four static safety guards together:
+// `npm run validate`, `npm run check`, `npm run secret-scan`, and `npm run manual-only-audit` (the one
+// check that verifies the Manual-Only posture itself - config/runtime-policy.json, account modes,
+// engagement policy, and every workflow's trigger shape - hasn't drifted). Two historical gaps: several
+// workflows ran validate/check/secret-scan but not manual-only-audit, and feedback.yml ran only
+// validate + manual-only-audit while silently skipping check and secret-scan entirely. A workflow that
+// runs SOME of these guards but not all loses defense-in-depth silently, with nothing in CI to say so -
+// so this asserts all-or-nothing per workflow, not just a pairwise check.
+test('every operational workflow that runs any static safety guard runs all four of them', async () => {
+  const GUARDS = [
+    ['npm run validate', /npm run validate\b/],
+    ['npm run check', /npm run check\b/],
+    ['npm run secret-scan', /npm run secret-scan\b/],
+    ['npm run manual-only-audit', /npm run manual-only-audit\b/]
+  ];
   for (const name of OPERATIONAL_WORKFLOWS) {
     const yaml = await readFile(`${WORKFLOWS_DIR}${name}`, 'utf8');
-    if (!/npm run check\b/.test(yaml)) continue;
-    assert.match(yaml, /npm run manual-only-audit/, `${name} runs the static safety guards (npm run check) but not npm run manual-only-audit`);
+    const present = GUARDS.filter(([, pattern]) => pattern.test(yaml)).map(([label]) => label);
+    if (!present.length) continue;
+    const missing = GUARDS.filter(([, pattern]) => !pattern.test(yaml)).map(([label]) => label);
+    assert.deepEqual(missing, [], `${name} runs ${present.join(', ')} but is missing: ${missing.join(', ')}`);
   }
 });
 
@@ -708,6 +775,59 @@ test('ChatOps does not advertise a dry-run command it structurally cannot run', 
 
   assert.doesNotMatch(chatopsDoc, /`preflight` or `dry-run`/i);
   assert.match(chatopsDoc, /SNS Autopilot/, 'must point operators at the workflow that can actually preview a generation');
+
+  // MANUAL_SETUP_CHECKLIST.md separately described ChatOps as having "explicit preflight/dry-run/
+  // manual engagement commands" - stale from an earlier ChatOps design, and contradicting both
+  // chatops.yml's single `preflight` choice and CHATOPS.md's own accurate description above.
+  const setupChecklist = await readFile(`${DOCS_DIR}MANUAL_SETUP_CHECKLIST.md`, 'utf8');
+  assert.doesNotMatch(setupChecklist, /preflight\/dry-run\/manual engagement commands/i);
+});
+
+// failure-watch.yml's `on: workflow_run: workflows:` list matches by each workflow's exact `name:`
+// field, not its filename - GitHub silently drops any entry that doesn't match a real workflow name,
+// with no error. publish.yml used to be named "Publish social post" (missing the "SNS " prefix every
+// other workflow uses) while failure-watch.yml's list already said "Publish social post" - so renaming
+// either side alone, or letting them drift, would silently stop failure-watch from ever firing on that
+// workflow's failures. Assert every workflow's name is actually present in the watch list, so a rename
+// on one side without the other fails a test instead of failing silently in production.
+test('every workflow\'s name is present in failure-watch.yml\'s workflow_run watch list', async () => {
+  const names = new Map();
+  const files = (await readdir(WORKFLOWS_DIR)).filter((name) => name.endsWith('.yml'));
+  for (const file of files) {
+    const yaml = await readFile(`${WORKFLOWS_DIR}${file}`, 'utf8');
+    const match = /^name:\s*(.+)\s*$/m.exec(yaml);
+    assert.ok(match, `${file} must declare a name:`);
+    names.set(file, match[1].trim());
+  }
+  const failureWatch = await readFile(`${WORKFLOWS_DIR}failure-watch.yml`, 'utf8');
+  const listBlock = /workflows:\n((?:[ \t]+-[^\n]*\n)*)/.exec(failureWatch)?.[1] || '';
+  const watched = new Set([...listBlock.matchAll(/^[ \t]+-\s*(.+?)\s*$/gm)].map((m) => m[1]));
+  for (const [file, name] of names) {
+    if (file === 'failure-watch.yml') continue;
+    assert.ok(watched.has(name), `${file}'s name "${name}" is not in failure-watch.yml's workflow_run watch list`);
+  }
+});
+
+// publish.yml used to be the only operational workflow without the "SNS " prefix every sibling
+// workflow carries - it was named plain "Publish social post" while README.md, GO_LIVE_CHECKLIST.md,
+// ACCOUNT_MUSIC_TOOLS_X.md, and CHATOPS.md all referred to it as "SNS Publish social post", so an
+// operator searching the Actions tab for the name every doc used would not find an exact match.
+test('publish.yml carries the "SNS " prefix every other operational workflow uses, matching how every doc refers to it', async () => {
+  const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
+  const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+  const yaml = await readFile(`${WORKFLOWS_DIR}publish.yml`, 'utf8');
+  assert.match(yaml, /^name:\s*SNS Publish social post\s*$/m);
+
+  for (const path of [
+    `${REPO_ROOT}README.md`,
+    `${DOCS_DIR}GO_LIVE_CHECKLIST.md`,
+    `${DOCS_DIR}ACCOUNT_MUSIC_TOOLS_X.md`,
+    `${DOCS_DIR}CHATOPS.md`,
+    `${DOCS_DIR}MANUAL_SETUP_CHECKLIST.md`
+  ]) {
+    const doc = await readFile(path, 'utf8');
+    assert.match(doc, /SNS Publish social post/, `${path} must refer to the workflow by its actual name`);
+  }
 });
 
 // A second CodeRabbit pass on this same PR caught three more accuracy gaps in the just-rewritten

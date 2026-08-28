@@ -1,4 +1,4 @@
-import { loadConfig } from './lib/config.mjs';
+import { loadConfig, mergeSection } from './lib/config.mjs';
 import { assertPublicHttpsUrl } from './lib/http.mjs';
 import { validateConfig } from './validate-config.mjs';
 import { X_MAX_IMAGE_BYTES } from './providers/x.mjs';
@@ -9,8 +9,12 @@ const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint
 // "Unsupported media strategy: auto" (see src/lib/media.mjs).
 const INSTAGRAM_DECISIONS = new Set(['none', 'library', 'search', 'generate']);
 
+// Delegates to the same mergeSection the runtime actually uses (src/lib/config.mjs), instead of a
+// separate shallow merge, so a partial per-account override of a nested sub-object (safety.anomalyBrake,
+// generation.naturalization, media.qa, monetization.affiliate) is validated against what the runtime
+// will actually see, not a copy that dropped the untouched sibling defaults.
 function merged(config, account, key) {
-  return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) };
+  return mergeSection(config.defaults, account, key);
 }
 
 function strictPositiveInteger(errors, id, label, value) {

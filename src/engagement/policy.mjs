@@ -191,8 +191,17 @@ export function assertAutomatedEngagementAllowed({ account, event, globalPolicy 
   };
 }
 
-export function prohibitedGrowthAutomation(action) {
-  return new Set(['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post']).has(String(action || '').trim().toLowerCase());
+// The known-safe set this enforces even if config/engagement-policy.json's own
+// prohibitedGrowthAutomation array is missing or malformed - fail closed to "still prohibited",
+// never to "config broke, so nothing is prohibited anymore".
+const DEFAULT_PROHIBITED_GROWTH_AUTOMATION = ['auto_follow', 'auto_unfollow', 'cold_keyword_reply', 'unsolicited_bulk_dm', 'duplicate_cross_account_post'];
+
+export function prohibitedGrowthAutomation(policy, action) {
+  const configured = Array.isArray(policy?.prohibitedGrowthAutomation)
+    ? policy.prohibitedGrowthAutomation.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+  const list = configured.length ? configured : DEFAULT_PROHIBITED_GROWTH_AUTOMATION;
+  return list.includes(String(action || '').trim().toLowerCase());
 }
 
 export const __test = { SUPPORTED_KINDS, plainObject, strictAccountList, xAiPublicReplyNeedsApproval, ACCOUNT_ID_RE };

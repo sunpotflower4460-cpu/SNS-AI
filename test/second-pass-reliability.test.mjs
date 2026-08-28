@@ -234,11 +234,23 @@ test('circuit failure increments are not lost under concurrent mutations', async
 test('provider failure classification retries only outcomes known not to have published', () => {
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'preflight' }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'media' }), true);
+  assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'media-container' }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'media-processing' }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status: 400 }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status: 429 }), true);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status: 500 }), false);
   assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post' }), false);
+});
+
+test('provider failure classification treats a timeout/conflict/too-early status as ambiguous, not definitive', () => {
+  // 408 (request timeout), 409 (conflict), and 425 (too early) are the whole reason this function
+  // exists instead of a plain 400<=status<500 check: the provider may have actually published before
+  // the response was lost, so retrying could create a duplicate live post. This is the one behavior
+  // that distinguishes definitiveProviderFailure from a naive range check, and it had no test coverage
+  // at all - a regression that dropped the exclusion would still pass every other assertion here.
+  for (const status of [408, 409, 425]) {
+    assert.equal(publishTest.definitiveProviderFailure({ publishStage: 'create-post', status }), false, `status ${status} must be treated as ambiguous (publish_unknown), not a definitive failure safe to retry`);
+  }
 });
 
 test('provider payload validation rejects known pre-request errors before claims are acquired', () => {

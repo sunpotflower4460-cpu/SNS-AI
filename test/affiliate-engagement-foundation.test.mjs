@@ -148,13 +148,25 @@ test('engagement guard allows only opted-in inbound interaction when explicitly 
   assert.throws(() => assertAutomatedEngagementAllowed({ account: { engagement: { enabled: false } }, event: { kind: 'reply', inbound: true } }), { code: 'ENGAGEMENT_DISABLED' });
 });
 
-test('growth policy explicitly prohibits spam-prone automation', () => {
-  assert.equal(prohibitedGrowthAutomation('auto_follow'), true);
-  assert.equal(prohibitedGrowthAutomation('auto_unfollow'), true);
-  assert.equal(prohibitedGrowthAutomation('cold_keyword_reply'), true);
-  assert.equal(prohibitedGrowthAutomation('unsolicited_bulk_dm'), true);
-  assert.equal(prohibitedGrowthAutomation('duplicate_cross_account_post'), true);
-  assert.equal(prohibitedGrowthAutomation('inbound_reply'), false);
+test('growth policy explicitly prohibits spam-prone automation, falling back to the known-safe defaults when config is missing/malformed', () => {
+  for (const policy of [undefined, null, {}, { prohibitedGrowthAutomation: null }, { prohibitedGrowthAutomation: 'not-an-array' }]) {
+    assert.equal(prohibitedGrowthAutomation(policy, 'auto_follow'), true);
+    assert.equal(prohibitedGrowthAutomation(policy, 'auto_unfollow'), true);
+    assert.equal(prohibitedGrowthAutomation(policy, 'cold_keyword_reply'), true);
+    assert.equal(prohibitedGrowthAutomation(policy, 'unsolicited_bulk_dm'), true);
+    assert.equal(prohibitedGrowthAutomation(policy, 'duplicate_cross_account_post'), true);
+    assert.equal(prohibitedGrowthAutomation(policy, 'inbound_reply'), false);
+  }
+});
+
+test('growth policy actually reads config/engagement-policy.json\'s prohibitedGrowthAutomation array, not just a hardcoded copy of it', () => {
+  // Previously this function ignored the config array entirely and only ever consulted a hardcoded
+  // Set literal - editing config/engagement-policy.json's prohibitedGrowthAutomation list (the obvious
+  // place an operator would look) had zero effect on enforcement. Prove the function actually reads
+  // the policy argument by configuring a list that DIFFERS from the hardcoded defaults.
+  const policy = { prohibitedGrowthAutomation: ['only_this_one'] };
+  assert.equal(prohibitedGrowthAutomation(policy, 'only_this_one'), true);
+  assert.equal(prohibitedGrowthAutomation(policy, 'auto_follow'), false, 'a configured list must replace the defaults, not just add to them');
 });
 
 test('X engagement adapters build inbound lookup and dry-run send requests without network mutation', async () => {
