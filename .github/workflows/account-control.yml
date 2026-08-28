@@ -16,6 +16,11 @@ on:
 
 permissions:
   contents: write
+  # live-preflight.mjs's approvalChannelCheck() reads the "approved" label whenever a selected account
+  # is in approval mode (this workflow can put one into that mode) - the actual create happens later in
+  # autopilot.yml, which already has issues: write. Matches preflight.yml's identical grant for the same
+  # check.
+  issues: read
 
 concurrency:
   group: sns-ai-write
