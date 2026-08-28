@@ -304,6 +304,11 @@ test('approval mode creates an approval issue and X media preflight validates OA
       assert.equal(preflight.approvalChannel.ok, true);
       assert.equal(preflight.approvalChannel.issuesEnabled, true);
       assert.equal(preflight.approvalChannel.labelExists, false);
+      // The "approved" label is cosmetic under Manual-Only - nothing listens for it. Preflight's own
+      // note must not claim otherwise, or an operator reading it could believe labeling an issue
+      // publishes the draft.
+      assert.doesNotMatch(preflight.approvalChannel.note || '', /is what publishes it/i);
+      assert.match(preflight.approvalChannel.note || '', /cosmetic/i);
       assert.equal(preflight.accounts[0].identity.id, 'user-1');
       assert.equal(preflight.accounts[0].xOAuth2Identity.id, 'user-1');
       assert.match(preflight.accounts[0].xOAuth2Identity.session.scope, /media\.write/);

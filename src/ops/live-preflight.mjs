@@ -147,9 +147,12 @@ async function approvalChannelCheck(required) {
       ok: true,
       issuesEnabled: true,
       labelExists,
+      // The "approved" label is purely cosmetic under Manual-Only (see lib/github.mjs) - nothing
+      // listens for it, and publishing a draft always requires a separate, explicit
+      // dry_run:false + confirm_live:true workflow_dispatch run. This note must not claim otherwise.
       note: labelExists
-        ? 'Adding the "approved" label to a generated approval issue is what publishes it.'
-        : 'The "approved" label does not exist yet; the first approval run creates it (this needs `issues: write`).',
+        ? 'The "approved" label exists but is cosmetic - it triggers nothing. Publish a draft by running the "SNS Publish social post" workflow with dry_run:false and confirm_live:true.'
+        : 'The "approved" label does not exist yet; the first approval run creates it (this needs `issues: write`). It is cosmetic and triggers nothing either way.',
       error: null
     };
   } catch (error) {
