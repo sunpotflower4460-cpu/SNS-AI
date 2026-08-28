@@ -1,4 +1,4 @@
-name: Publish social post
+name: SNS Publish social post
 
 on:
   workflow_dispatch:
@@ -108,7 +108,10 @@ jobs:
       - name: Publish
         id: publish_run
         env:
-          SNS_MANUAL_INVOCATION: 'true'
+          # Only workflow_dispatch may receive the explicit-manual-invocation credential. A future
+          # schedule: trigger must NOT inherit SNS_MANUAL_INVOCATION, or unattended cron would bypass
+          # assertProviderMutationAllowed the same way a human dispatch does.
+          SNS_MANUAL_INVOCATION: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
           SOCIAL_CREDENTIALS_JSON: ${{ secrets.SOCIAL_CREDENTIALS_JSON }}
           X_OAUTH2_STATE_KEY: ${{ secrets.X_OAUTH2_STATE_KEY }}
           CONVENIENCE_HUB_GITHUB_TOKEN: ${{ secrets.CONVENIENCE_HUB_GITHUB_TOKEN }}

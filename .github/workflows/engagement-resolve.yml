@@ -120,7 +120,10 @@ jobs:
       - name: Resolve engagement escalation
         id: resolve_run
         env:
-          SNS_MANUAL_INVOCATION: 'true'
+          # Only workflow_dispatch may receive the explicit-manual-invocation credential. A future
+          # schedule: trigger must NOT inherit SNS_MANUAL_INVOCATION, or unattended cron would bypass
+          # assertProviderMutationAllowed the same way a human dispatch does.
+          SNS_MANUAL_INVOCATION: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
         run: node src/engagement/run.mjs --resolve-file resolve-payload.json
 
       - name: Persist privacy-safe engagement state to durable branch
