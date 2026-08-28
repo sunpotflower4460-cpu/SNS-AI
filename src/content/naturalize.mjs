@@ -1,4 +1,4 @@
-import { findNearDuplicate } from '../lib/duplicate.mjs';
+import { findNearDuplicate, safeDuplicateThreshold } from '../lib/duplicate.mjs';
 import { moderateText, openaiRequest } from '../lib/openai.mjs';
 import { validateDraftText } from '../lib/safety.mjs';
 
@@ -185,7 +185,10 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
     try {
       const edited = validateDraftText(account, review.editedText);
       if (!preservesProtectedTokens(original, edited)) throw new Error('edit changed or removed a protected URL/hashtag');
-      const duplicate = findNearDuplicate(edited, context.history || [], Number(account.generation?.duplicateThreshold ?? 0.72));
+      // A malformed threshold must fail closed to the strictest value (0), not to NaN - see
+      // safeDuplicateThreshold in lib/duplicate.mjs. This mirrors the same call in lib/openai.mjs;
+      // both sites merge the same per-account config, so both need the same guard.
+      const duplicate = findNearDuplicate(edited, context.history || [], safeDuplicateThreshold(account.generation?.duplicateThreshold, 0.72));
       if (duplicate) throw new Error('edit became too similar to recent history');
       finalText = edited; applied = finalText !== original;
     } catch (error) { rejectedEditReason = String(error?.message || error).slice(0, 300); finalText = original; }

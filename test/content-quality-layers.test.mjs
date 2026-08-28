@@ -48,6 +48,48 @@ test('AI-like local text is flagged for ChatGPT review without making a second A
   }
 });
 
+test('a malformed duplicateThreshold must not let a naturalization edit through an exact repost undetected', async () => {
+  // Same fail-open shape as lib/openai.mjs's generatePost duplicate check: Number('not-a-number') is
+  // NaN, and every duplicate comparison is `score >= threshold`, so `anything >= NaN` is always false.
+  // naturalizeDraft's own near-duplicate rejection (distinct from generatePost's) has to route through
+  // safeDuplicateThreshold too, or a malformed per-account config value would silently let the edited
+  // text through even when it is a near-exact repost of recent history.
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  const repost = 'Check out this new plugin, it is amazing for mixing vocals.';
+  globalThis.fetch = async (url) => {
+    if (String(url) === 'https://api.openai.com/v1/responses') {
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: 'light_edit', naturalnessScore: 40, aiPatternRisk: 80, voiceFitScore: 40,
+          issues: ['formulaic'], editedText: repost, reason: 'smoother phrasing'
+        })
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const result = await naturalizeDraft('example-x', {
+      platform: 'x',
+      generation: {
+        maxChars: 280, duplicateThreshold: 'not-a-number',
+        naturalization: { enabled: true, deepReview: true, maxAiPatternRisk: 1 }
+      },
+      safety: { maxLinks: 4, maxHashtags: 4 },
+      budgets: { openaiCallsPerDay: 100 }
+    }, {
+      text: '結論から言うと、重要なのはAIを活用することです。ぜひ試してみてください。',
+      features: {}
+    }, { history: [{ text: repost }] });
+    assert.equal(result.naturalization.applied, false, 'the near-exact repost must be rejected, not silently applied');
+    assert.match(result.naturalization.rejectedEditReason || '', /too similar to recent history/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
 test('visual QA score threshold is retained as a soft target with bounded config', () => {
   assert.equal(qaTest.qaSettings({ media: { qa: { minScore: 82 } } }).minScore, 82);
   assert.equal(qaTest.qaSettings({ media: { qa: { minScore: 200 } } }).minScore, 75);
