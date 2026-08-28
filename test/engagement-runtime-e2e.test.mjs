@@ -477,3 +477,73 @@ test('resolving a human-escalated reply refuses to send if the same actor opted 
     assert.equal(sentPosts.length, 0);
   });
 });
+
+test('resolving a human-escalated reply is still allowed when the opt-out was already disclosed at escalation time', async () => {
+  // processEvent()'s hardCategory branch deliberately escalates high-risk interactions (legal, refund
+  // disputes, etc.) to a human EVEN WHEN the actor is already opted out - the Issue's own humanSummary
+  // tells the operator this up front, specifically so they can choose to respond anyway. That is an
+  // informed override the operator already made when they resolve it, not new information the opt-out-
+  // since-escalation guard should be blocking.
+  await withFixture('x', async () => {
+    const old = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+    const issueBodies = [];
+    const sentPosts = [];
+    let issueNumber = 300;
+    const ledger = deliveryLedgerTransport();
+    let mentions = [
+      { id: '60', author_id: '9', text: '今後、自動返信は不要です', created_at: old, conversation_id: '888' }
+    ];
+
+    await writeFile(`${ROOT}data/history.jsonl`, `${JSON.stringify({ account: 'music-tools-x', status: 'published', providerPostId: '888', at: old, text: 'post' })}\n`, 'utf8');
+
+    globalThis.fetch = async (url, options = {}) => {
+      const href = String(url);
+      const method = String(options.method || 'GET').toUpperCase();
+      const ledgerResponse = ledger(href, method, options);
+      if (ledgerResponse) return ledgerResponse;
+      if (href === 'https://api.x.com/2/oauth2/token' && method === 'POST') return json(refreshedXSession());
+      if (href.startsWith('https://api.x.com/2/users/me')) return json({ data: { id: '1', username: 'owner' } });
+      if (href.startsWith('https://api.x.com/2/users/1/mentions')) {
+        return json({ data: mentions, includes: { users: [{ id: '9', username: 'optout-then-dispute' }] } });
+      }
+      if (href.startsWith('https://api.x.com/2/dm_events')) return json({ data: [] });
+      if (href === 'https://api.openai.com/v1/moderations') return json({ results: [{ flagged: false, categories: {} }] });
+      if (href === 'https://api.x.com/2/tweets' && method === 'POST') {
+        sentPosts.push(JSON.parse(options.body));
+        return json({ data: { id: `reply-${sentPosts.length}` } });
+      }
+      if (/api\.github\.com/.test(href)) {
+        if (/\/labels\/needs-human$/.test(href) && method === 'GET') return json({ name: 'needs-human' });
+        if (/\/issues\?state=open/.test(href) && method === 'GET') return json([]);
+        if (/\/issues$/.test(href) && method === 'POST') {
+          const request = JSON.parse(options.body);
+          issueBodies.push(JSON.parse(request.body));
+          return json({ number: issueNumber++, title: request.title });
+        }
+        if (/\/issues\/\d+\/comments$/.test(href) && method === 'POST') return json({ id: 1 });
+        if (/\/issues\/\d+$/.test(href) && method === 'PATCH') return json({ state: 'closed' });
+      }
+      throw new Error(`Unexpected request: ${method} ${href}`);
+    };
+
+    const first = await runEngagement({ accountFilter: 'music-tools-x' });
+    assert.equal(first.accounts[0].events.find((row) => row.eventKey === eventKey('music-tools-x', { platform: 'x', kind: 'reply', id: '60' }))?.status, 'opted_out');
+
+    // The same already-opted-out actor now sends a hard-category message (a payment/refund dispute).
+    // hardHumanCategory forces escalation to a human despite the opt-out, with actorOptedOut:true
+    // recorded on the event so the Issue discloses it to the operator up front.
+    mentions = [
+      ...mentions,
+      { id: '61', author_id: '9', text: '返金トラブルについて正式に対応してください', created_at: old, conversation_id: '888' }
+    ];
+    const second = await runEngagement({ accountFilter: 'music-tools-x' });
+    const escalatedKey = eventKey('music-tools-x', { platform: 'x', kind: 'reply', id: '61' });
+    const escalatedRow = second.accounts[0].events.find((row) => row.eventKey === escalatedKey);
+    assert.equal(escalatedRow?.status, 'human');
+    assert.equal(issueBodies.length, 1, 'sanity: the hard-category escalation must have opened exactly one Issue despite the opt-out');
+
+    const resolved = await resolveHumanEngagement({ accountId: 'music-tools-x', key: escalatedKey, action: 'reply', text: '個別に対応いたします。' });
+    assert.equal(resolved.status, 'sent');
+    assert.equal(sentPosts.length, 1, 'the operator\'s informed decision to respond despite the disclosed opt-out must be allowed to send');
+  });
+});

@@ -44,7 +44,12 @@ export function patchComplianceAttestation({ accountsConfig, policy, accountId, 
   if (account.platform !== 'x') throw complianceError('COMPLIANCE_X_ONLY', `Compliance attestation "${kind}" only applies to X accounts.`);
   if (confirmed) {
     const marker = CONFIRMATION_MARKERS[kind];
-    if (String(confirmation || '') !== marker) {
+    // compliance-attestation.yml's own "Validate explicit attestation" step trims the raw
+    // workflow_dispatch input before comparing it, but passes the UNTRIMMED value on to this
+    // function's CLI entrypoint. Trimming here too keeps the two checks in agreement - otherwise a
+    // value with incidental leading/trailing whitespace (e.g. a trailing newline from copy-pasting the
+    // marker) could pass the workflow's own validation and then be rejected here.
+    if (String(confirmation || '').trim() !== marker) {
       throw complianceError('COMPLIANCE_CONFIRMATION_REQUIRED', `Explicit external-compliance attestation is required. Pass confirmation exactly: ${marker}`);
     }
   }
