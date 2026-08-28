@@ -89,6 +89,8 @@ jobs:
       - name: Validate and record
         run: |
           npm run validate
+          npm run check
+          npm run secret-scan
           npm run manual-only-audit
           node src/feedback/record.mjs --file feedback.json
 
