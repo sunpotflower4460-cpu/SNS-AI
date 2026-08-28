@@ -1,7 +1,11 @@
-import { loadConfig } from './lib/config.mjs';
+import { loadConfig, mergeSection } from './lib/config.mjs';
 import { validateTimeString } from './lib/schedule.mjs';
 
-function merged(config, account, key) { return { ...(config.defaults?.[key] || {}), ...(account?.[key] || {}) }; }
+// Delegates to the same mergeSection the runtime actually uses (src/lib/config.mjs), instead of a
+// separate shallow merge, so a partial per-account override of a nested sub-object (safety.anomalyBrake,
+// generation.naturalization, media.qa, monetization.affiliate) is validated against what the runtime
+// will actually see, not a copy that dropped the untouched sibling defaults.
+function merged(config, account, key) { return mergeSection(config.defaults, account, key); }
 function positive(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) <= 0)) errors.push(`${id}: ${label} must be a positive number`); }
 function nonNegative(errors, id, label, value) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < 0)) errors.push(`${id}: ${label} must be a non-negative number`); }
 function range(errors, id, label, value, min, max) { if (value != null && (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max)) errors.push(`${id}: ${label} must be ${min}..${max}`); }

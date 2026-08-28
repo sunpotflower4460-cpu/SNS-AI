@@ -21,7 +21,7 @@ function plainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function mergeSection(defaults, account, key) {
+export function mergeSection(defaults, account, key) {
   const base = defaults?.[key] || {};
   const override = account?.[key] || {};
   const result = { ...base, ...override };

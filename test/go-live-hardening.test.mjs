@@ -114,6 +114,31 @@ test('strict config validation rejects non-numeric rate-limit knobs that would s
   );
 });
 
+test('strict config validation merges nested sub-objects (naturalization, anomalyBrake, qa, affiliate) the same way the runtime does', () => {
+  // validate-config.mjs/validate-strict-config.mjs used to shallow-merge defaults[key] with
+  // account[key] ({...defaults, ...override}), but the actual runtime merge (mergeSection in
+  // src/lib/config.mjs) additionally deep-merges four specific nested sub-objects so a partial
+  // per-account override doesn't drop its untouched sibling defaults. A validator using a different
+  // merge than the runtime can validate a shape the runtime will never actually see. Prove it with an
+  // out-of-range default (minNaturalness: 999) that only a deep merge preserves through a partial
+  // override of a sibling field (enabled) - the shallow merge replaces the whole naturalization object
+  // and silently loses the invalid default, so no error would ever surface.
+  const config = {
+    defaults: { generation: { naturalization: { minNaturalness: 999 } } },
+    accounts: {
+      acct: {
+        enabled: true, platform: 'x', credentialKey: 'acct',
+        generation: { naturalization: { enabled: true } }
+      }
+    }
+  };
+  const errors = validateStrictConfig(config);
+  assert.ok(
+    errors.some((error) => error.includes('generation.naturalization.minNaturalness')),
+    'a partial per-account naturalization override must not hide an invalid default from validation'
+  );
+});
+
 test('the generation prompt states X weighted length, so a Japanese account is not asked for 280 real characters', () => {
   const account = {
     platform: 'x',
