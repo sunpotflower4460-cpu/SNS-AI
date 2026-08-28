@@ -30,6 +30,21 @@ test('music-tools-x stays research-enabled but cannot publish before explicit ac
   assert.match(account.instructions || '', /使用感.*捏造|使用した.*捏造/);
 });
 
+test('music-tools-x runs the low-cost direct-fetch research path with a budgeted, purpose-restricted link policy, and affiliate stays disabled', async () => {
+  const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+  const account = config.accounts['music-tools-x'];
+
+  assert.equal(account.research?.directFetch, true);
+  assert.ok(Number(account.research?.minDirectCandidates) > 0);
+
+  assert.equal(account.linkPolicy?.preferNoLink, true);
+  assert.equal(account.linkPolicy?.maxUrlPostsPerDay, 1);
+  assert.equal(account.linkPolicy?.maxUrlPostsPerWeek, 3);
+  assert.ok(Array.isArray(account.linkPolicy?.purposes) && account.linkPolicy.purposes.length > 0);
+
+  assert.equal(account.monetization?.affiliate?.enabled, false, 'no live affiliate rollout in this change');
+});
+
 test('music-tools-x owns its discovery positioning and persona without changing other accounts', async () => {
   const config = JSON.parse(await readFile(CONFIG, 'utf8'));
   const account = config.accounts['music-tools-x'];

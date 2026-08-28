@@ -65,7 +65,9 @@ The account should add **discovery + selection + comparison + decision value** i
 
 ## Research policy
 
-`webSearch` and `trendIntelligence` are enabled for this account. Discovery may use overseas specialist communities and forums, but time-sensitive factual claims should return to current primary sources in this order:
+`webSearch` and `trendIntelligence` are enabled for this account, and `research.directFetch` is also enabled: before ever calling OpenAI Web Search, the account pulls directly from configured free/near-free sources (`config/research-sources.json` — RSS/Atom vendor feeds, GitHub Releases) and scores fresh candidates with a low-cost AI provider (Groq by default). OpenAI Web Search only runs as a fallback when direct fetch does not produce enough fresh candidates (`research.minDirectCandidates`). See [`docs/LOW_COST_RESEARCH.md`](LOW_COST_RESEARCH.md) for the full pipeline; this is a cost-optimization of *how* research is gathered, not a change to what gets posted or the account's editorial standards below.
+
+Discovery may use overseas specialist communities and forums, but time-sensitive factual claims should return to current primary sources in this order:
 
 1. official product/manufacturer page
 2. official news/release notes/documentation
@@ -73,6 +75,10 @@ The account should add **discovery + selection + comparison + decision value** i
 4. credible specialist publication when primary information is unavailable
 
 If only secondary evidence is available, wording should remain appropriately qualified. Price, discount, availability and deadline claims should be omitted when they cannot be verified at generation time.
+
+## URL post budget
+
+This account also sets `linkPolicy`: `preferNoLink: true`, at most 1 URL post/day and 3/week, and URLs are only used for `affiliate`, `sale`, `roundup`, or `highValueDiscovery` purposes. A generated draft that would exceed this budget is still published — only its URL is removed before posting (`src/content/link-gate.mjs`). This keeps the account from attaching a URL (X's more expensive post type) to every single post by default, while still allowing an explicit, budgeted number of link-driven posts (official page, sale page, or — once separately enabled — an affiliate link).
 
 ## Initial publishing policy
 
@@ -131,6 +137,7 @@ Prepare an OpenAI API key with API billing/credits available. This account uses 
 Add these directly in Repository Settings → Secrets and variables → Actions:
 
 - `OPENAI_API_KEY`
+- `GROQ_API_KEY` (optional — only lowers the cost of research triage; its absence falls back to OpenAI automatically, see [`docs/LOW_COST_RESEARCH.md`](LOW_COST_RESEARCH.md))
 - `SOCIAL_CREDENTIALS_JSON`
 - `X_OAUTH2_STATE_KEY` when autonomous X engagement is enabled
 

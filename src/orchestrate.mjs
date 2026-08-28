@@ -5,6 +5,7 @@ import { slotHandled, markSlot, markSlotIfUnhandled } from './lib/state.mjs';
 import { checkRateLimits } from './lib/safety.mjs';
 import { generatePost } from './lib/openai.mjs';
 import { naturalizeDraft } from './content/naturalize.mjs';
+import { applyLinkPolicy } from './content/link-gate.mjs';
 import { resolveMediaDetailed, ensureMediaForPlatform } from './lib/media.mjs';
 import { createApprovalIssue, findApprovalIssue } from './lib/github.mjs';
 import { appendAudit } from './lib/audit.mjs';
@@ -125,7 +126,8 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         // intentionally scoped here rather than inside the generic media resolver so low-level media
         // operations never acquire an extra AI dependency. When disabled or unavailable it returns the
         // original draft unchanged; when enabled it also sees recent posts and human feedback.
-        const draft = await naturalizeDraft(accountId, account, generatedDraft, { history, humanFeedback, dryRun });
+        const naturalized = await naturalizeDraft(accountId, account, generatedDraft, { history, humanFeedback, dryRun });
+        const { draft, decision: linkDecision } = applyLinkPolicy({ accountId, account, draft: naturalized, history, now });
         const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now });
         ensureMediaForPlatform(account, media.url);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
@@ -153,7 +155,8 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
             aiPatternRisk: draft.naturalization.aiPatternRisk ?? null, voiceFitScore: draft.naturalization.voiceFitScore ?? null,
             issues: draft.naturalization.issues?.slice(0, 5) || [], fallback: Boolean(draft.naturalization.fallback)
           } : null,
-          experiment, sourceCount: sources.length, dryRun
+          experiment, sourceCount: sources.length, dryRun,
+          linkPolicy: linkDecision.allowed ? null : { reason: linkDecision.reason, usage: linkDecision.usage || null }
         });
 
         // A dry run never calls the publisher and (as of the dry-run budget-isolation fix) never even

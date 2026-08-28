@@ -209,11 +209,16 @@ AIは`adaptiveCandidateTimes`の外へ勝手に投稿時刻を移動しません
 "research": {
   "webSearch": true,
   "trendIntelligence": true,
-  "trendRefreshHours": 6
+  "trendRefreshHours": 6,
+  "directFetch": true,
+  "minDirectCandidates": 3,
+  "maxTriageCandidates": 20
 }
 ```
 
 検索を使った投稿・Trend Briefには取得できたURL citationを保存し、後から「何を根拠にしたか」を追跡できます。
+
+`research.directFetch: true`のアカウントは、OpenAI Web Searchを毎回呼ぶ前にRSS/Atom/GitHub Releasesなど無料の一次情報（`config/research-sources.json`）を直接取得し、`data/research-cache/<account>.json`で既読判定してから低コストAI（既定Groq、`src/ai/provider.mjs`）で価値判定します。直接取得した候補が`minDirectCandidates`未満のときだけWeb Searchへフォールバックします。詳細は[`docs/LOW_COST_RESEARCH.md`](docs/LOW_COST_RESEARCH.md)を参照してください。`directFetch`を設定しないアカウントは従来どおりWeb Searchのみで動作します（既定値は`false`）。
 
 ## 安全・規約設定
 
@@ -258,7 +263,22 @@ Autopilot / Publish / Analytics / Researchを別々のCircuitとして監視し�
 }
 ```
 
-金額ではなくAPI呼び出し回数で上限を掛けます。X API / OpenAI API側のcredits・billing・provider側rate limitは別途有効である必要があります。
+金額ではなくAPI呼び出し回数で上限を掛けます。X API / OpenAI API側のcredits・billing・provider側rate limitは別途有効である必要があります。`budgets.groqCallsPerDay`はGroq research triage呼び出し専用の上限です。
+
+`npm run cost-report`（`src/reports/cost-report.mjs`）は、direct-fetch件数・重複除外件数・Groq/OpenAI/Web Search呼び出し件数・X APIのURL付き/なし投稿数と概算月額コスト（`config/x-api-pricing.json`をoperatorが実料金で埋めた場合のみ意味を持つ見積もり）を`data/reports/cost.{json,md}`にまとめます。
+
+## URL付き投稿の予算管理
+
+```json
+"linkPolicy": {
+  "preferNoLink": true,
+  "maxUrlPostsPerWeek": 3,
+  "maxUrlPostsPerDay": 1,
+  "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
+}
+```
+
+X APIはURL付き投稿の単価がURLなし投稿よりかなり高いため、AIが毎回勝手にURLを付けないよう、日次/週次のURL投稿数に明示的な上限を掛けられます。生成された下書きがこの上限（または`purposes`に無い用途）を超える場合、投稿自体は破棄せずURL部分だけを取り除いて投稿します（`src/content/link-gate.mjs`）。`linkPolicy`を設定しないアカウントは従来どおり無制限（挙動変更なし）です。
 
 ## 実接続に必要なSecrets
 
@@ -297,6 +317,10 @@ InstagramはProfessional（Business / Creator）アカウントを使い、Insta
 ### `OPENAI_API_KEY`
 
 投稿生成、Web Search、Trend Intelligence、Moderation、media QA、内蔵画像/動画生成で使用します。ChatGPT契約とは別のOpenAI API billing/creditsが必要です。
+
+### `GROQ_API_KEY`（任意）
+
+`research.directFetch: true`のアカウントで、記事要約・新規性判定・価値判定などの軽いresearch triageを低コストに実行するために使います（[`docs/LOW_COST_RESEARCH.md`](docs/LOW_COST_RESEARCH.md)）。**未設定でもSNS-AI全体は落ちません** — このkeyが無い、または失敗した場合は自動的にOpenAI（`OPENAI_API_KEY`）へfallbackし、OpenAIのみの構成が引き続き動作します。
 
 ### `MEDIA_SERVICE_TOKEN`（任意）
 

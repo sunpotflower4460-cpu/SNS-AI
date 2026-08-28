@@ -277,11 +277,14 @@ API障害用。既定は連続3失敗 → 60分open → cooldown後に再試行�
 
 - OpenAI calls
 - Web Search calls
+- Groq calls（`research.directFetch: true`のアカウントのみ）
 - external media calls
 - image generations
 - video generations
 
-provider側のbilling/credits/rate limitは別です。X API creditsとOpenAI API billing/creditsが有効である必要があります。
+provider側のbilling/credits/rate limitは別です。X API creditsとOpenAI API billing/creditsが有効である必要があります。Groqは任意（`GROQ_API_KEY`未設定時は自動的にOpenAIへfallback）です。
+
+`research.directFetch: true`のアカウントは、Web Searchより先にRSS/GitHub Releasesなど無料の一次情報を直接取得し、既読済み情報を`data/research-cache/`でスキップしてから低コストAI（既定Groq）で評価します。Web Searchは直接取得だけでは情報が不足したときのfallbackとしてのみ呼ばれます。詳細: [`docs/LOW_COST_RESEARCH.md`](LOW_COST_RESEARCH.md)。`npm run cost-report`で「何にコストが発生しているか」（research fetch件数、AI呼び出し件数、X APIのURL付き/なし投稿数）を確認できます。
 
 ## 14. 主要state
 

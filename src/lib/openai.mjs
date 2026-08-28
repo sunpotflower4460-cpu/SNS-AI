@@ -54,7 +54,7 @@ export async function openaiRequest(path, body, meta = {}) {
   }
 }
 
-function outputText(response) {
+export function outputText(response) {
   if (typeof response.output_text === 'string') return response.output_text;
   for (const item of response.output || []) if (item.type === 'message') for (const content of item.content || []) if (content.type === 'output_text' && typeof content.text === 'string') return content.text;
   return '';
@@ -75,7 +75,7 @@ function extractUrlCitations(response) {
   return [...found.values()].slice(0, 30);
 }
 
-function parseJsonText(text) {
+export function parseJsonText(text) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try { return JSON.parse(cleaned); } catch { const s = cleaned.indexOf('{'); const e = cleaned.lastIndexOf('}'); if (s >= 0 && e > s) return JSON.parse(cleaned.slice(s, e + 1)); throw new Error('AI response was not valid JSON.'); }
 }

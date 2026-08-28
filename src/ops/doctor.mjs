@@ -195,6 +195,10 @@ export async function buildReadinessReport({ accountFilter, now = Date.now() } =
     configErrors,
     environment: {
       openaiApiKeyPresent: openaiPresent,
+      // Informational only - GROQ_API_KEY is never required. It only accelerates/cheapens research
+      // triage for accounts with research.directFetch:true; its absence falls back to OpenAI (see
+      // src/ai/provider.mjs and docs/LOW_COST_RESEARCH.md) and must never block readiness.
+      groqApiKeyPresent: Boolean(process.env.GROQ_API_KEY),
       xOAuth2StateKeyPresent: xStateKeyPresent,
       socialCredentialsPresent: Boolean(rawCredentials),
       socialCredentialsJsonValid: rawCredentials ? !credentials.error : null,

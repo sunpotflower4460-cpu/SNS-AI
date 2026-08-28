@@ -55,6 +55,8 @@ export async function loadAccounts() {
       objectives: mergeSection(config.defaults, account, 'objectives'),
       media: mergeSection(config.defaults, account, 'media'),
       monetization: mergeSection(config.defaults, account, 'monetization'),
+      ai: mergeSection(config.defaults, account, 'ai'),
+      linkPolicy: mergeSection(config.defaults, account, 'linkPolicy'),
       schedule: account.schedule
         ? { timezone: account.schedule.timezone || config.defaults.timezone || 'Asia/Tokyo', ...account.schedule }
         : account.schedule

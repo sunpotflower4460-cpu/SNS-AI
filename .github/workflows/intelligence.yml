@@ -27,6 +27,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       SNS_DURABLE_BUDGETS: 'true'
@@ -63,8 +64,12 @@ jobs:
         id: intelligence_run
         shell: bash
         run: |
-          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-            echo "OPENAI_API_KEY is not configured; skipping trend intelligence."
+          # Accounts with research.directFetch:true can run the low-cost path (direct fetch + Groq
+          # triage) without OPENAI_API_KEY - see docs/LOW_COST_RESEARCH.md. Only skip outright when
+          # NEITHER provider key is available, since at least one AI provider is always required
+          # somewhere in the pipeline (Web Search fallback needs OpenAI; triage needs Groq or OpenAI).
+          if [[ -z "${OPENAI_API_KEY:-}" && -z "${GROQ_API_KEY:-}" ]]; then
+            echo "Neither OPENAI_API_KEY nor GROQ_API_KEY is configured; skipping trend intelligence."
             exit 0
           fi
           args=()
