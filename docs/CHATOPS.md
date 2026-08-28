@@ -25,7 +25,7 @@ Approval-issue drafts (created by `autopilot.yml`) carry the exact inputs to use
 
 ## SNS Engagement Autopilot (`engagement.yml`)
 
-Discovers replies to the account's own posts, classifies them, and either sends automatically (only if `config/engagement-policy.json`'s `approvalRequired` is `false`, the account is in `liveAccounts`, and confidence clears the configured threshold) or opens a `[engagement-human] <account> <event-key>` escalation Issue. Today `approvalRequired: true` is required by `manual-only-audit`, so every reply currently goes through the escalation Issue regardless of `liveAccounts`/confidence. Inputs: `account` (optional, defaults to all allowlisted accounts) and `dry_run` (default `true`).
+Discovers replies to the account's own posts, classifies them, and either sends automatically (only if `config/engagement-policy.json`'s `approvalRequired` is `false`, the account is in `liveAccounts`, and confidence clears the configured threshold) or opens a `[engagement-human] <account> <event-key>` escalation Issue. Today `approvalRequired: true` is required by `manual-only-audit`, so every reply currently goes through the escalation Issue regardless of `liveAccounts`/confidence. Inputs: `account` (optional, defaults to all allowlisted accounts), `dry_run` (default `true`), and `confirm_live` (default `false`). A live send requires **both** `dry_run: false` **and** `confirm_live: true` — the same two-factor gate as `publish.yml` and `engagement-resolve.yml`.
 
 ## SNS Engagement Resolve (`engagement-resolve.yml`)
 

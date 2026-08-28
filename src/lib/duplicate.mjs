@@ -30,6 +30,16 @@ export function similarity(a, b) {
   return union ? intersection / union : 0;
 }
 
+// A malformed threshold must not silently disable duplicate detection. threshold is a MINIMUM
+// similarity score to flag a duplicate, so a higher value is more permissive (lets more near-repeats
+// through) - failing closed here means the strictest value (0), which flags virtually everything as a
+// duplicate and blocks generation until the config is fixed, mirroring safeMaxPostsPerDay in
+// src/lib/safety.mjs (fail closed to "nothing allowed", never to "everything allowed").
+export function safeDuplicateThreshold(value, fallback) {
+  if (value == null) return fallback;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0;
+}
+
 export function findNearDuplicate(text, history, threshold = 0.72) {
   let best = null;
   for (const entry of history || []) {

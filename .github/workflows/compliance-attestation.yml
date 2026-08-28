@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           args=(--account "$INPUT_ACCOUNT" --kind "$INPUT_KIND")
-          if [[ "$INPUT_ACTION" == "confirm" ]]; then args+=(--confirm); else args+=(--revoke); fi
+          if [[ "$INPUT_ACTION" == "confirm" ]]; then args+=(--confirm --confirmation "$INPUT_CONFIRMATION"); else args+=(--revoke); fi
           node src/ops/compliance-attestation.mjs "${args[@]}"
 
       - name: Validate fail-closed repository state

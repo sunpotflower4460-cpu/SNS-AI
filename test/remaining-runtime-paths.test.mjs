@@ -325,3 +325,63 @@ test('approval mode creates an approval issue and X media preflight validates OA
     restoreEnv(env);
   }
 });
+
+test('X media preflight fails closed when the provider omits the OAuth2 scope field, instead of skipping the check', async () => {
+  // RFC 6749 5.1 makes the token endpoint's `scope` field OPTIONAL when it matches what was granted, so a
+  // fully-correct token can legitimately come back with no scope string at all. The pre-fix code treated
+  // that as "nothing to check" and reported the account ready anyway - indistinguishable, from preflight's
+  // point of view, from a token that is actually missing media.write. It must fail closed the same way
+  // assertXEngagementCredential (src/engagement/readiness.mjs) already does for the engagement scope check.
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv(
+    'OPENAI_API_KEY', 'OPENAI_MODEL', 'SOCIAL_CREDENTIALS_JSON',
+    'GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY', 'X_OAUTH2_STATE_KEY'
+  );
+  try {
+    await withRepositoryState(async () => {
+      const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
+      config.accounts['example-instagram'].enabled = false;
+      config.accounts['example-instagram'].mode = 'pause';
+      config.accounts['example-x'] = {
+        ...config.accounts['example-x'],
+        enabled: true,
+        mode: 'pause',
+        media: { strategy: 'fixed', type: 'image', url: 'https://media.example/image.png' }
+      };
+      await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+      process.env.GITHUB_TOKEN = 'test-gh-token';
+      delete process.env.GH_TOKEN;
+      process.env.GITHUB_REPOSITORY = 'owner/repo';
+      process.env.X_OAUTH2_STATE_KEY = 's'.repeat(48);
+
+      const credential = {
+        consumerKey: 'consumer-key', consumerSecret: 'consumer-secret',
+        accessToken: 'access-token', accessTokenSecret: 'access-token-secret',
+        oauth2StateId: 'preflight-omitted-scope', oauth2ClientId: 'client-id',
+        oauth2RefreshToken: 'refresh-token'
+      };
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'example-x': credential });
+
+      globalThis.fetch = async (url) => {
+        const target = String(url);
+        if (target === 'https://api.x.com/2/oauth2/token') {
+          // No `scope` field at all - the legitimate RFC 6749 5.1 omission case.
+          return jsonResponse({ access_token: 'oauth-access-1', refresh_token: 'rotated-refresh', expires_in: 7200, token_type: 'bearer' });
+        }
+        if (target === 'https://api.x.com/2/users/me?user.fields=id,name,username') {
+          return jsonResponse({ data: { id: 'user-1', username: 'example', name: 'Example' } });
+        }
+        throw new Error(`Unexpected mocked URL: ${target}`);
+      };
+
+      const preflight = await runLivePreflight({ accountFilter: 'example-x' });
+      assert.equal(preflight.ok, false);
+      assert.equal(preflight.state, 'blocked');
+      assert.match(preflight.accounts[0].error || '', /missing required scope.*media\.write/i, 'an omitted scope field must fail closed (unverified), not be silently treated as fine');
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});

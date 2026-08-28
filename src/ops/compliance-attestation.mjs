@@ -6,6 +6,18 @@ const POLICY_FILE = fileURLToPath(new URL('../../config/engagement-policy.json',
 const ACCOUNT_ID_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 const KINDS = new Set(['x-profile', 'x-ai-reply']);
 
+// The exact-string markers below are the whole point of this feature: they force whoever runs a
+// "confirm" attestation to affirmatively type out what they are asserting, rather than a stray
+// boolean flip recording a compliance fact nobody actually checked. This map (and the check in
+// patchComplianceAttestation) used to exist ONLY inside the "Validate explicit attestation" step of
+// compliance-attestation.yml - a copy/refactor of that one workflow step could silently drop the
+// requirement while every test and this library still reported success. Keeping the requirement here
+// means it holds no matter how patchComplianceAttestation/setComplianceAttestation is invoked.
+const CONFIRMATION_MARKERS = {
+  'x-profile': 'I_CONFIRM_X_AUTOMATED_PROFILE_SETUP_COMPLETE=true',
+  'x-ai-reply': 'I_CONFIRM_X_AI_REPLY_WRITTEN_APPROVAL_RECEIVED=true'
+};
+
 function complianceError(code, message) {
   const error = new Error(message);
   error.code = code;
@@ -23,13 +35,24 @@ function setMembership(values, accountId, confirmed) {
   return [...set];
 }
 
-export function patchComplianceAttestation({ accountsConfig, policy, accountId, kind, confirmed }) {
+export function patchComplianceAttestation({ accountsConfig, policy, accountId, kind, confirmed, confirmation }) {
   if (!ACCOUNT_ID_RE.test(String(accountId || ''))) throw complianceError('COMPLIANCE_ACCOUNT_ID_INVALID', 'A valid account id is required.');
   if (!KINDS.has(String(kind || ''))) throw complianceError('COMPLIANCE_KIND_INVALID', `Unsupported compliance attestation "${kind}".`);
   if (typeof confirmed !== 'boolean') throw complianceError('COMPLIANCE_VALUE_INVALID', 'confirmed must be boolean.');
   const account = accountsConfig?.accounts?.[accountId];
   if (!account) throw complianceError('COMPLIANCE_ACCOUNT_UNKNOWN', `Unknown account "${accountId}".`);
   if (account.platform !== 'x') throw complianceError('COMPLIANCE_X_ONLY', `Compliance attestation "${kind}" only applies to X accounts.`);
+  if (confirmed) {
+    const marker = CONFIRMATION_MARKERS[kind];
+    // compliance-attestation.yml's own "Validate explicit attestation" step trims the raw
+    // workflow_dispatch input before comparing it, but passes the UNTRIMMED value on to this
+    // function's CLI entrypoint. Trimming here too keeps the two checks in agreement - otherwise a
+    // value with incidental leading/trailing whitespace (e.g. a trailing newline from copy-pasting the
+    // marker) could pass the workflow's own validation and then be rejected here.
+    if (String(confirmation || '').trim() !== marker) {
+      throw complianceError('COMPLIANCE_CONFIRMATION_REQUIRED', `Explicit external-compliance attestation is required. Pass confirmation exactly: ${marker}`);
+    }
+  }
 
   const nextAccounts = structuredClone(accountsConfig);
   const nextPolicy = structuredClone(policy || {});
@@ -58,12 +81,12 @@ export function patchComplianceAttestation({ accountsConfig, policy, accountId, 
   return { accountsConfig: nextAccounts, policy: nextPolicy, account: accountId, kind, confirmed };
 }
 
-export async function setComplianceAttestation({ accountId, kind, confirmed }) {
+export async function setComplianceAttestation({ accountId, kind, confirmed, confirmation }) {
   const [accountsConfig, policy] = await Promise.all([
     readJson(ACCOUNTS_FILE),
     readJson(POLICY_FILE, {})
   ]);
-  const patched = patchComplianceAttestation({ accountsConfig, policy, accountId, kind, confirmed });
+  const patched = patchComplianceAttestation({ accountsConfig, policy, accountId, kind, confirmed, confirmation });
   await Promise.all([
     writeJsonAtomic(ACCOUNTS_FILE, patched.accountsConfig),
     writeJsonAtomic(POLICY_FILE, patched.policy)
@@ -99,7 +122,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const result = await setComplianceAttestation({
       accountId: String(args.account || ''),
       kind: String(args.kind || ''),
-      confirmed: confirm
+      confirmed: confirm,
+      confirmation: String(args.confirmation || '')
     });
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
@@ -108,4 +132,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-export const __test = { unique, setMembership, parseArgs, ACCOUNT_ID_RE, KINDS };
+export const __test = { unique, setMembership, parseArgs, ACCOUNT_ID_RE, KINDS, CONFIRMATION_MARKERS };

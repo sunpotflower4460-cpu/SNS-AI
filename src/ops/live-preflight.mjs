@@ -270,12 +270,16 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
           if (String(oauth2Identity.id) !== String(identity.id)) throw new Error('X OAuth1 and OAuth2 credentials resolve to different users.');
         }
         if (xUsesMedia(resolved)) {
+          // An empty/absent scope string is NOT proof the token has every scope - RFC 6749 5.1 makes the
+          // provider's `scope` field optional on a refresh response, so this can legitimately be empty on
+          // a fully-correct token. But it is equally what an actually-insufficient token looks like, and
+          // preflight has no way to tell those apart. Treat "unknown" as "unverified", not "fine": this
+          // mirrors assertXEngagementCredential in src/engagement/readiness.mjs, which already fails
+          // closed the same way for the engagement scope check instead of skipping it.
           const scopes = String(oauth2Identity?.session?.scope || '').split(/\s+/).filter(Boolean);
           const requiredScopes = ['tweet.write', 'users.read', 'media.write', 'offline.access'];
-          if (scopes.length) {
-            const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
-            if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
-          }
+          const missing = requiredScopes.filter((scope) => !scopes.includes(scope));
+          if (missing.length) throw new Error(`X OAuth2 token is missing required scope(s): ${missing.join(', ')}`);
         }
         if (checkEngagementCredential) {
           engagementCredential = assertXEngagementCredential(oauth2Identity, accountEngagementPolicy);
