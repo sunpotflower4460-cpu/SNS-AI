@@ -94,7 +94,7 @@ Use this order and do not skip directly to live publishing:
 8. Run `npm run smoke`.
 9. Run `npm run doctor`.
 10. Run the account-specific preflight.
-11. Run **Publish social post** with `dry_run=true` and `confirm_live=false` while the account is still disabled where possible; inspect readiness/output.
+11. Run **SNS Publish social post** with `dry_run=true` and `confirm_live=false` while the account is still disabled where possible; inspect readiness/output.
 12. Through a reviewed/manual configuration change, enable **only** the chosen account in `mode:"approval"`. Manual-Only intentionally rejects automatic promotion to `approval`/`auto` through unattended lifecycle logic.
 13. Run the exact Publish dry-run again for that enabled approval account.
 14. Only after reviewing that result yourself, explicitly choose `dry_run=false` and `confirm_live=true`.
@@ -119,7 +119,7 @@ These operational workflows are explicit manual controls, not automation trigger
 
 - **SNS Account Control** — safe pause/disable operations; Manual-Only rejects approval/auto promotion.
 - **SNS Engagement Control** — deactivation is available; Manual-Only rejects activation.
-- **SNS ChatOps** — explicit preflight/dry-run/manual engagement commands.
+- **SNS ChatOps** — provider-offline; its only command is `preflight` (a read-only readiness check). Dry-run previews live in SNS Autopilot, and engagement previews live in SNS Engagement Autopilot - see docs/CHATOPS.md.
 - **SNS Compliance Attestation** — records an explicit owner/admin attestation only; it does not perform the external provider action.
 - **SNS Human Feedback** — records human feedback only when manually dispatched.
 

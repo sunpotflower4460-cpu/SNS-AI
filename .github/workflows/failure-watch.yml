@@ -15,7 +15,7 @@ on:
       - SNS Trend Intelligence
       - SNS Daily Learning
       - SNS Policy Watch
-      - Publish social post
+      - SNS Publish social post
       - SNS Publish Readback Reconcile
       - SNS Hub Reconcile
       - SNS Health Report
