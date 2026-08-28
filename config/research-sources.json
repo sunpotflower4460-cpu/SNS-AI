@@ -1,0 +1,49 @@
+{
+  "music-tools-x": [
+    {
+      "id": "kvr-news",
+      "type": "rss",
+      "url": "https://www.kvraudio.com/get/rss_news.xml",
+      "vendor": null,
+      "product": null,
+      "priority": 70,
+      "categories": ["news", "plugin"],
+      "maxItems": 20,
+      "enabled": true
+    },
+    {
+      "id": "bedroom-producers-blog",
+      "type": "rss",
+      "url": "https://bedroomproducersblog.com/feed/",
+      "vendor": null,
+      "product": null,
+      "priority": 65,
+      "categories": ["free", "plugin", "roundup"],
+      "maxItems": 20,
+      "enabled": true
+    },
+    {
+      "id": "rekkerd",
+      "type": "rss",
+      "url": "https://rekkerd.org/feed/",
+      "vendor": null,
+      "product": null,
+      "priority": 60,
+      "categories": ["news", "plugin", "sale"],
+      "maxItems": 20,
+      "enabled": true
+    },
+    {
+      "id": "surge-synth-team-releases",
+      "type": "github-releases",
+      "owner": "surge-synthesizer",
+      "repo": "surge",
+      "vendor": "Surge Synth Team",
+      "product": "Surge XT",
+      "priority": 55,
+      "categories": ["update", "free", "synth"],
+      "maxItems": 5,
+      "enabled": true
+    }
+  ]
+}

@@ -134,9 +134,31 @@ export function validateStrictConfig(config) {
     const budgets = merged(config, account, 'budgets');
     strictBoolean(errors, id, 'budgets.enabled', budgets.enabled);
     if (budgets.enabled !== false) {
-      for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay']) {
+      for (const key of ['openaiCallsPerDay', 'webSearchCallsPerDay', 'mediaCallsPerDay', 'imageGenerationsPerDay', 'videoGenerationsPerDay', 'groqCallsPerDay']) {
         strictNonNegativeInteger(errors, id, `budgets.${key}`, budgets[key]);
       }
+    }
+
+    const ai = merged(config, account, 'ai');
+    strictBoolean(errors, id, 'ai.allowFallback', ai.allowFallback);
+    if (ai.providers != null && !(Array.isArray(ai.providers) && ai.providers.every((name) => typeof name === 'string'))) {
+      errors.push(`${id}: ai.providers must be an array of strings`);
+    }
+    if (ai.groqModel != null && typeof ai.groqModel !== 'string') errors.push(`${id}: ai.groqModel must be a string`);
+    if (ai.openaiTriageModel != null && typeof ai.openaiTriageModel !== 'string') errors.push(`${id}: ai.openaiTriageModel must be a string`);
+
+    const linkPolicy = merged(config, account, 'linkPolicy');
+    strictBoolean(errors, id, 'linkPolicy.preferNoLink', linkPolicy.preferNoLink);
+    if (linkPolicy.maxUrlPostsPerWeek != null) strictNonNegativeInteger(errors, id, 'linkPolicy.maxUrlPostsPerWeek', linkPolicy.maxUrlPostsPerWeek);
+    if (linkPolicy.maxUrlPostsPerDay != null) strictNonNegativeInteger(errors, id, 'linkPolicy.maxUrlPostsPerDay', linkPolicy.maxUrlPostsPerDay);
+    if (linkPolicy.purposes != null && !(Array.isArray(linkPolicy.purposes) && linkPolicy.purposes.every((value) => typeof value === 'string'))) {
+      errors.push(`${id}: linkPolicy.purposes must be an array of strings`);
+    }
+
+    const directFetch = merged(config, account, 'research').directFetch === true;
+    if (directFetch) {
+      strictPositiveInteger(errors, id, 'research.minDirectCandidates', merged(config, account, 'research').minDirectCandidates);
+      strictPositiveInteger(errors, id, 'research.maxTriageCandidates', merged(config, account, 'research').maxTriageCandidates);
     }
 
     const experiments = merged(config, account, 'experiments');

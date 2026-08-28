@@ -56,7 +56,22 @@
     "research": {
       "webSearch": false,
       "trendIntelligence": false,
-      "trendRefreshHours": 6
+      "trendRefreshHours": 6,
+      "directFetch": false,
+      "minDirectCandidates": 3,
+      "maxTriageCandidates": 20
+    },
+    "ai": {
+      "providers": ["groq", "openai"],
+      "allowFallback": true,
+      "groqModel": "llama-3.1-8b-instant",
+      "openaiTriageModel": "gpt-5-mini"
+    },
+    "linkPolicy": {
+      "preferNoLink": false,
+      "maxUrlPostsPerWeek": null,
+      "maxUrlPostsPerDay": null,
+      "purposes": []
     },
     "resilience": {
       "enabled": true,
@@ -69,7 +84,8 @@
       "webSearchCallsPerDay": 60,
       "mediaCallsPerDay": 60,
       "imageGenerationsPerDay": 10,
-      "videoGenerationsPerDay": 4
+      "videoGenerationsPerDay": 4,
+      "groqCallsPerDay": 300
     },
     "experiments": {
       "enabled": true,
@@ -233,7 +249,10 @@
       "research": {
         "webSearch": true,
         "trendIntelligence": true,
-        "trendRefreshHours": 6
+        "trendRefreshHours": 6,
+        "directFetch": true,
+        "minDirectCandidates": 3,
+        "maxTriageCandidates": 20
       },
       "safety": {
         "maxPostsPerDay": 2,
@@ -246,6 +265,12 @@
           "誰でも必ず",
           "確実に上達"
         ]
+      },
+      "linkPolicy": {
+        "preferNoLink": true,
+        "maxUrlPostsPerWeek": 3,
+        "maxUrlPostsPerDay": 1,
+        "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
       },
       "monetization": {
         "affiliate": {

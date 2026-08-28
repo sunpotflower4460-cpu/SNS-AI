@@ -1,0 +1,64 @@
+{
+  "generatedAt": "2026-08-28T02:08:26.455Z",
+  "pricingModel": {
+    "schemaVersion": 1,
+    "note": "Operator-maintained cost ESTIMATE model, not real X billing data. Fill in your actual X API tier pricing (USD) to get a useful monthly cost estimate from `npm run cost-report`. Left at zero after a fresh clone deliberately, so the report never fabricates a plausible-looking number nobody actually entered.",
+    "monthlyBaseFeeUsd": 0,
+    "costPerUrlPostUsd": 0,
+    "costPerNonUrlPostUsd": 0,
+    "costPerReadOperationUsd": 0
+  },
+  "accounts": {
+    "music-tools-x": {
+      "platform": "x",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": {
+        "periodDays": 30,
+        "urlPosts": 0,
+        "nonUrlPosts": 0,
+        "readOperations": 0,
+        "estimatedMonthlyCostUsd": 0
+      }
+    },
+    "example-x": {
+      "platform": "x",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": {
+        "periodDays": 30,
+        "urlPosts": 0,
+        "nonUrlPosts": 0,
+        "readOperations": 0,
+        "estimatedMonthlyCostUsd": 0
+      }
+    },
+    "example-instagram": {
+      "platform": "instagram",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": null
+    }
+  }
+}

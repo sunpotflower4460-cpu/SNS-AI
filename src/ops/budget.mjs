@@ -12,7 +12,8 @@ const LIMIT_KEYS = {
   webSearch: 'webSearchCallsPerDay',
   media: 'mediaCallsPerDay',
   image: 'imageGenerationsPerDay',
-  video: 'videoGenerationsPerDay'
+  video: 'videoGenerationsPerDay',
+  groq: 'groqCallsPerDay'
 };
 let mutationQueue = Promise.resolve();
 

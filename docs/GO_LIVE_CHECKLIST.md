@@ -16,6 +16,7 @@
 - [ ] Live Preflightの`durableState.ok`がtrue
 - [ ] repositoryがpublic、またはbuilt-in media hostingを使わず外部public CDNを設定
 - [ ] `OPENAI_API_KEY` Secret登録
+- [ ] （任意）低コストresearch triageを使うアカウントは`GROQ_API_KEY` Secret登録 — 未設定でもOpenAIのみで動作し続けます（詳細: [`docs/LOW_COST_RESEARCH.md`](LOW_COST_RESEARCH.md)）
 - [ ] `SOCIAL_CREDENTIALS_JSON` Secret登録
 - [ ] X image/video利用時は`X_OAUTH2_STATE_KEY` Secret登録（32文字以上）— **media利用時のみ。text-onlyのXアカウントには不要です**
 - [ ] optional external media利用時だけ`MEDIA_SERVICE_TOKEN`

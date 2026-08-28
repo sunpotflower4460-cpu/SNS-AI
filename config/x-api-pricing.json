@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "note": "Operator-maintained cost ESTIMATE model, not real X billing data. Fill in your actual X API tier pricing (USD) to get a useful monthly cost estimate from `npm run cost-report`. Left at zero after a fresh clone deliberately, so the report never fabricates a plausible-looking number nobody actually entered.",
+  "monthlyBaseFeeUsd": 0,
+  "costPerUrlPostUsd": 0,
+  "costPerNonUrlPostUsd": 0,
+  "costPerReadOperationUsd": 0
+}

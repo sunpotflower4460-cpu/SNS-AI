@@ -71,5 +71,6 @@ jobs:
         run: |
           npm run report
           npm run weekly-report
+          npm run cost-report
           npm run maintenance
           npm run report
