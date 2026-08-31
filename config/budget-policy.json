@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "note": "Global monthly governor across every brand and platform. Values here are operator policy, not live billing API data. actual vs estimated vs unknown must never be mixed.",
+  "monthlyBudgetUsd": 20,
+  "warningThreshold": 0.7,
+  "conservativeThreshold": 0.85,
+  "hardStopThreshold": 0.95,
+  "currency": "USD",
+  "pricingSource": "operator-maintained-estimate",
+  "exploreRate": 0.2,
+  "cutOrder": [
+    "image-generation",
+    "duplicate-web-search",
+    "low-value-triage",
+    "model-downgrade",
+    "url-posts",
+    "candidate-count",
+    "post-frequency"
+  ],
+  "protectedOperations": [
+    "safety",
+    "moderation",
+    "entity-verification",
+    "duplicate-check",
+    "factual-verification",
+    "manual-controls"
+  ],
+  "expensiveOperations": [
+    "image-generation",
+    "video-generation",
+    "web-search",
+    "high-model",
+    "critical-model",
+    "url-post"
+  ],
+  "freeOperations": [
+    "direct-fetch",
+    "cache-hit",
+    "brand-card",
+    "entity-verification",
+    "duplicate-check"
+  ],
+  "operationEstimatesUsd": {
+    "note": "Leave at 0 when the real unit price is unknown. Zero means unknown-or-unpriced, never a fabricated market rate.",
+    "openaiCall": { "usd": 0, "costType": "unknown" },
+    "groqCall": { "usd": 0, "costType": "unknown" },
+    "webSearch": { "usd": 0, "costType": "unknown" },
+    "imageGeneration": { "usd": 0, "costType": "unknown" },
+    "videoGeneration": { "usd": 0, "costType": "unknown" },
+    "xUrlPost": { "usd": 0, "costType": "estimated", "source": "config/x-api-pricing.json" },
+    "xNonUrlPost": { "usd": 0, "costType": "estimated", "source": "config/x-api-pricing.json" },
+    "xRead": { "usd": 0, "costType": "estimated", "source": "config/x-api-pricing.json" }
+  },
+  "allocation": {
+    "minExplorationShare": 0.15,
+    "maxBrandShare": 0.7,
+    "smoothingWeeks": 2,
+    "performanceWindowDays": 14
+  }
+}

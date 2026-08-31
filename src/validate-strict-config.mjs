@@ -2,8 +2,11 @@ import { loadConfig, mergeSection } from './lib/config.mjs';
 import { assertPublicHttpsUrl } from './lib/http.mjs';
 import { validateConfig } from './validate-config.mjs';
 import { X_MAX_IMAGE_BYTES } from './providers/x.mjs';
+import { loadBrandsFile, validateBrands } from './brands/registry.mjs';
+import { loadBudgetPolicy } from './budget/governor.mjs';
+import { readFile } from 'node:fs/promises';
 
-const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint', 'generate', 'auto']);
+const MEDIA_STRATEGIES = new Set(['none', 'fixed', 'external', 'pool', 'endpoint', 'generate', 'auto', 'hunter']);
 // The values resolveMedia() actually branches on for `strategy: auto`. A typo here does not error where
 // it is written - it falls through every branch and resurfaces later as the misleading
 // "Unsupported media strategy: auto" (see src/lib/media.mjs).
@@ -164,6 +167,12 @@ export function validateStrictConfig(config) {
     const experiments = merged(config, account, 'experiments');
     strictBoolean(errors, id, 'experiments.enabled', experiments.enabled);
 
+    const artist = merged(config, account, 'artist');
+    if (artist.hybridMode != null) strictBoolean(errors, id, 'artist.hybridMode', artist.hybridMode);
+    if (artist.maxDirectPromotionShare != null && (typeof artist.maxDirectPromotionShare !== 'number' || artist.maxDirectPromotionShare < 0 || artist.maxDirectPromotionShare > 1)) {
+      errors.push(`${id}: artist.maxDirectPromotionShare must be 0..1`);
+    }
+
     const media = merged(config, account, 'media');
     const strategy = media.strategy || 'none';
     if (!MEDIA_STRATEGIES.has(strategy)) errors.push(`${id}: unsupported media.strategy "${strategy}"`);
@@ -189,6 +198,10 @@ export function validateStrictConfig(config) {
     }
     if (['fixed', 'external'].includes(strategy) && media.url != null && media.url !== '' && !validHttps(media.url)) {
       errors.push(`${id}: media.url must be a valid HTTPS URL to a public network destination for ${strategy}`);
+    }
+
+    if (media.internalImageGeneration === true && strategy === 'hunter') {
+      errors.push(`${id}: media.strategy hunter forbids internalImageGeneration=true (AI images must not stand in for product photos)`);
     }
 
     const configuredUrls = media.urls ?? media.libraryUrls ?? [];
@@ -221,9 +234,30 @@ export function validateStrictConfig(config) {
   return [...new Set(errors)];
 }
 
+export async function validateRepositoryPolicies(config) {
+  const errors = [];
+  const brandsFile = await loadBrandsFile();
+  errors.push(...validateBrands(brandsFile, Object.keys(config?.accounts || {})));
+  const policy = await loadBudgetPolicy();
+  if (!(Number(policy.monthlyBudgetUsd) > 0)) errors.push('budget-policy monthlyBudgetUsd must be a positive number');
+  const warn = Number(policy.warningThreshold);
+  const conservative = Number(policy.conservativeThreshold);
+  const hard = Number(policy.hardStopThreshold);
+  if (!(warn > 0 && warn < conservative && conservative < hard && hard < 1)) {
+    errors.push('budget-policy thresholds must satisfy 0 < warning < conservative < hardStop < 1');
+  }
+  if (!Array.isArray(policy.protectedOperations) || !policy.protectedOperations.includes('safety')) {
+    errors.push('budget-policy must protect safety operations');
+  }
+  const mediaPolicy = JSON.parse(await readFile(new URL('../config/media-policy.json', import.meta.url), 'utf8'));
+  if (mediaPolicy.aiImageGenerationAsProductFallback !== false) errors.push('media-policy must not use AI image generation as a product-image fallback');
+  if (mediaPolicy.failClosedOnAmbiguousEntity !== true) errors.push('media-policy must fail closed on ambiguous entity matches');
+  return [...new Set(errors)];
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = await loadConfig();
-  const errors = validateStrictConfig(config);
+  const errors = [...validateStrictConfig(config), ...await validateRepositoryPolicies(config)];
   if (errors.length) {
     console.error(errors.map((error) => `- ${error}`).join('\n'));
     process.exitCode = 1;

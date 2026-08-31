@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises';
+import { loadBrandsFile, resolveBrandForAccount } from '../brands/registry.mjs';
 
 const ACCOUNTS_FILE = new URL('../../config/accounts.json', import.meta.url);
 const NESTED_SECTION_KEYS = {
   safety: ['anomalyBrake'],
   generation: ['naturalization'],
   media: ['qa'],
-  monetization: ['affiliate']
+  monetization: ['affiliate'],
+  artist: ['manualOverlap', 'winnerResurface', 'mix']
 };
 
 export async function loadConfig() {
@@ -35,14 +37,19 @@ export function mergeSection(defaults, account, key) {
 
 export async function loadAccounts() {
   const config = await loadConfig();
+  const brandsFile = await loadBrandsFile();
   const output = {};
   for (const [id, account] of Object.entries(config.accounts)) {
+    const brand = resolveBrandForAccount(brandsFile, id, account);
     output[id] = {
       timezone: config.defaults.timezone || 'Asia/Tokyo',
       mode: config.defaults.mode || 'pause',
       ...account,
       // Treat only literal true as enabled even if a caller deliberately bypasses npm run validate.
       enabled: account.enabled === true,
+      brandId: account.brandId || brand?.brandId || null,
+      contentStrategy: account.contentStrategy || brand?.strategy || null,
+      brand,
       safety: mergeSection(config.defaults, account, 'safety'),
       generation: mergeSection(config.defaults, account, 'generation'),
       analytics: mergeSection(config.defaults, account, 'analytics'),
@@ -57,6 +64,7 @@ export async function loadAccounts() {
       monetization: mergeSection(config.defaults, account, 'monetization'),
       ai: mergeSection(config.defaults, account, 'ai'),
       linkPolicy: mergeSection(config.defaults, account, 'linkPolicy'),
+      artist: mergeSection(config.defaults, account, 'artist'),
       schedule: account.schedule
         ? { timezone: account.schedule.timezone || config.defaults.timezone || 'Asia/Tokyo', ...account.schedule }
         : account.schedule

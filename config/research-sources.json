@@ -8,6 +8,7 @@
       "product": null,
       "priority": 70,
       "categories": ["news", "plugin"],
+      "sourceRole": "discovery",
       "maxItems": 20,
       "enabled": true
     },
@@ -19,6 +20,7 @@
       "product": null,
       "priority": 65,
       "categories": ["free", "plugin", "roundup"],
+      "sourceRole": "discovery",
       "maxItems": 20,
       "enabled": true
     },
@@ -30,6 +32,7 @@
       "product": null,
       "priority": 60,
       "categories": ["news", "plugin", "sale"],
+      "sourceRole": "discovery",
       "maxItems": 20,
       "enabled": true
     },
@@ -42,6 +45,7 @@
       "product": "Surge XT",
       "priority": 55,
       "categories": ["update", "free", "synth"],
+      "sourceRole": "primary",
       "maxItems": 5,
       "enabled": true
     }

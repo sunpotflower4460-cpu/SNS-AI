@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "note": "Brand is the editorial unit. Accounts stay the publish unit. music-tools-x remains the Plugin Radar X account id for credentialKey backward compatibility.",
+  "brands": {
+    "plugin-radar": {
+      "enabled": false,
+      "displayName": "Plugin Radar",
+      "publicDisplayName": "Plugin Radar｜海外プラグイン発掘",
+      "contentBrainId": "plugin-radar-brain",
+      "sharedResearchId": "plugin-radar-research",
+      "sharedAssetLibraryId": "plugin-radar-assets",
+      "strategy": "plugin-radar",
+      "accounts": {
+        "x": "music-tools-x",
+        "instagram": "plugin-radar-instagram"
+      },
+      "handle": {
+        "x": "@pluginradar_jp",
+        "instagram": null
+      },
+      "objectives": ["follow_conversion", "profile_visits", "bookmarks_saves", "repost_share", "replies", "link_clicks", "affiliate_conversions", "raw_likes"],
+      "urlBudget": {
+        "maxUrlPostsPerWeek": 3,
+        "maxUrlPostsPerDay": 1
+      }
+    },
+    "artist": {
+      "enabled": false,
+      "displayName": "Artist",
+      "publicDisplayName": "Artist",
+      "contentBrainId": "artist-brain",
+      "sharedResearchId": "artist-research",
+      "sharedAssetLibraryId": "artist-assets",
+      "strategy": "artist-support",
+      "accounts": {
+        "x": "artist-x",
+        "instagram": "artist-instagram"
+      },
+      "handle": {
+        "x": null,
+        "instagram": null
+      },
+      "objectives": ["profile_visits", "follows", "repeat_engagement", "video_completion", "saves", "shares", "music_link_clicks", "music_discovery", "replies", "raw_likes"],
+      "urlBudget": {
+        "maxUrlPostsPerWeek": 2,
+        "maxUrlPostsPerDay": 1
+      }
+    },
+    "brand-c": {
+      "enabled": false,
+      "displayName": "Brand C",
+      "publicDisplayName": "Brand C",
+      "contentBrainId": "brand-c-brain",
+      "sharedResearchId": "brand-c-research",
+      "sharedAssetLibraryId": "brand-c-assets",
+      "strategy": "scaffold",
+      "accounts": {
+        "x": "brand-c-x",
+        "instagram": "brand-c-instagram"
+      },
+      "handle": {
+        "x": null,
+        "instagram": null
+      },
+      "objectives": [],
+      "urlBudget": {
+        "maxUrlPostsPerWeek": null,
+        "maxUrlPostsPerDay": null
+      },
+      "note": "Scaffold only. Do not invent a personality, genre, or voice until an operator fills this brand."
+    }
+  }
+}

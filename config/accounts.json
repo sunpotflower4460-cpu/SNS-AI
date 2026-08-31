@@ -105,6 +105,27 @@
     "objectives": {
       "weights": {}
     },
+    "artist": {
+      "hybridMode": false,
+      "maxDirectPromotionShare": 0.2,
+      "aiMaxPostsPerDay": 2,
+      "mix": {
+        "tasteDiscovery": 0.4,
+        "musicAndCreation": 0.25,
+        "worldview": 0.2,
+        "directArtistPromotion": 0.15
+      },
+      "manualOverlap": {
+        "enabled": true,
+        "lookbackHours": 48,
+        "similarityThreshold": 0.55
+      },
+      "winnerResurface": {
+        "minDaysSinceLastUse": 180,
+        "requireNewAngle": true,
+        "requireDifferentClip": true
+      }
+    },
     "monetization": {
       "affiliate": {
         "enabled": false,
@@ -153,7 +174,9 @@
       "enabled": false,
       "mode": "approval",
       "credentialKey": "music-tools-x",
-      "displayName": "Music Tools & Plugin Trends",
+      "brandId": "plugin-radar",
+      "contentStrategy": "plugin-radar",
+      "displayName": "Plugin Radar｜海外プラグイン発掘",
       "profile": {
         "concept": "海外のまだ知られていない良いプラグインを発掘して、買う価値まで日本語で判断する。",
         "tagline": "まだ知られていない音を、先に見つける。",
@@ -279,6 +302,236 @@
       },
       "media": {
         "strategy": "none"
+      }
+    },
+    "plugin-radar-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "credentialKey": "plugin-radar-instagram",
+      "brandId": "plugin-radar",
+      "contentStrategy": "plugin-radar",
+      "displayName": "Plugin Radar｜海外プラグイン発掘",
+      "apiVersion": "v25.0",
+      "profile": {
+        "concept": "海外のまだ知られていない良いプラグインを発掘して、買う価値まで日本語で判断する。",
+        "tagline": "まだ知られていない音を、先に見つける。",
+        "identity": "Plugin RadarのInstagram面。Xと同じ調査ブリーフから視覚向けキャプションへ分岐する。製品画像は検証済み公式素材かブランドカードのみ。架空UIや別製品画像は使わない。",
+        "goal": "保存したくなる判断材料（誰に向くか / 何が新しいか / 見送ってよい人）を短いキャプションで残す。",
+        "audience": "中心はDTM歴2〜7年程度で、定番プラグインはある程度知っているが、KVR・海外フォーラム・GitHub・小規模デベロッパーまで毎日掘る時間はない日本語圏の宅録・音楽制作ユーザー。",
+        "topics": [
+          "海外で注目されているが日本ではまだ情報が少ない音楽制作ツール",
+          "小規模デベロッパー・新興ブランドの良作",
+          "無料なのに面白いプラグイン・期間限定無料配布",
+          "買う価値・見送ってよい条件・既存所有者向け判断"
+        ],
+        "style": ["日本語", "視覚の文脈を先に置く", "保存価値", "誇張しない"],
+        "avoid": [
+          "未確認の発売日・価格・割引率・セール期限",
+          "使用していない製品を使ったことがあるように書くこと",
+          "架空のプラグインUI画像",
+          "別製品の画像流用"
+        ]
+      },
+      "instructions": "同一ブランドのResearch / Core Content Briefを再利用し、X投稿のコピペは禁止。Instagramは視覚文脈・保存価値・キャプション形式へ変換する。製品画像はMedia Hunterとentity verificationを通過したものだけ。検証できない場合はブランドカード、それも無理なら投稿しない。AI画像生成で製品外観を作らない。",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["tue", "thu", "sat"],
+        "times": ["18:00"],
+        "windowMinutes": 30
+      },
+      "generation": { "maxChars": 1800, "candidateCount": 4 },
+      "research": {
+        "webSearch": true,
+        "trendIntelligence": true,
+        "trendRefreshHours": 6,
+        "directFetch": true,
+        "minDirectCandidates": 3,
+        "maxTriageCandidates": 20
+      },
+      "linkPolicy": {
+        "preferNoLink": true,
+        "maxUrlPostsPerWeek": 3,
+        "maxUrlPostsPerDay": 1,
+        "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
+      },
+      "monetization": { "affiliate": { "enabled": false } },
+      "media": {
+        "strategy": "hunter",
+        "type": "image",
+        "internalImageGeneration": false,
+        "internalVideoGeneration": false,
+        "urls": [],
+        "endpoint": "",
+        "defaultInstagramDecision": "library"
+      }
+    },
+    "artist-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "credentialKey": "artist-x",
+      "brandId": "artist",
+      "contentStrategy": "artist-support",
+      "displayName": "Artist X (scaffold)",
+      "profile": {
+        "identity": "Artist Support Mode scaffold. Fill with the artist’s public-facing identity before enabling. Do not invent biography, credits, or taste.",
+        "goal": "本人の手動投稿を置き換えず、Taste → 世界観 → プロフィール訪問 → 関心 → 楽曲発見 の入口を作り続ける。",
+        "audience": "Define before enabling.",
+        "topics": ["taste", "craft", "worldview", "music discovery"],
+        "style": ["natural", "specific", "no fabricated personal experience"],
+        "avoid": ["fabricated personal experiences", "claiming to have used/heard/visited unverified things", "daily self-promo spam"]
+      },
+      "instructions": "artist-support mode. Personal experience language is allowed only for confirmed_personal evidence. taste_match may be curious/observational. external_discovery is objective only. Before posting, check recent manual posts and avoid repeating the same song, URL, or announcement.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+        "times": ["12:00"],
+        "windowMinutes": 30
+      },
+      "generation": { "maxChars": 280 },
+      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "linkPolicy": {
+        "preferNoLink": true,
+        "maxUrlPostsPerWeek": 2,
+        "maxUrlPostsPerDay": 1,
+        "purposes": ["musicDiscovery", "release"]
+      },
+      "artist": {
+        "hybridMode": true,
+        "mix": {
+          "tasteDiscovery": 0.4,
+          "musicAndCreation": 0.25,
+          "worldview": 0.2,
+          "directArtistPromotion": 0.15
+        },
+        "maxDirectPromotionShare": 0.2,
+        "manualOverlap": {
+          "enabled": true,
+          "lookbackHours": 48,
+          "similarityThreshold": 0.55
+        }
+      },
+      "media": { "strategy": "none" }
+    },
+    "artist-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "credentialKey": "artist-instagram",
+      "brandId": "artist",
+      "contentStrategy": "artist-support",
+      "displayName": "Artist Instagram (scaffold)",
+      "apiVersion": "v25.0",
+      "profile": {
+        "identity": "Artist Support Mode Instagram scaffold. Fill before enabling. Do not invent visuals of unowned work.",
+        "goal": "Asset Library / verified owned media / brand card を優先し、Taste から本人への関心へつなぐ。",
+        "audience": "Define before enabling.",
+        "topics": ["taste", "craft", "worldview", "music discovery"],
+        "style": ["visual", "clear", "no fabricated personal experience"],
+        "avoid": ["unsupported claims", "AI product UI", "unverified personal anecdotes"]
+      },
+      "instructions": "Reuse the brand research brief. Convert to Instagram caption form. Never generate a fake studio or fake artwork. Prefer owned assets from the Artist Asset Library.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["tue", "thu", "sat"],
+        "times": ["18:00"],
+        "windowMinutes": 30
+      },
+      "generation": { "maxChars": 1800 },
+      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "linkPolicy": {
+        "preferNoLink": true,
+        "maxUrlPostsPerWeek": 2,
+        "maxUrlPostsPerDay": 1,
+        "purposes": ["musicDiscovery", "release"]
+      },
+      "artist": {
+        "hybridMode": true,
+        "mix": {
+          "tasteDiscovery": 0.4,
+          "musicAndCreation": 0.25,
+          "worldview": 0.2,
+          "directArtistPromotion": 0.15
+        },
+        "maxDirectPromotionShare": 0.2,
+        "manualOverlap": {
+          "enabled": true,
+          "lookbackHours": 48,
+          "similarityThreshold": 0.55
+        }
+      },
+      "media": {
+        "strategy": "hunter",
+        "type": "image",
+        "internalImageGeneration": false,
+        "internalVideoGeneration": false,
+        "urls": [],
+        "endpoint": "",
+        "defaultInstagramDecision": "library"
+      }
+    },
+    "brand-c-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "credentialKey": "brand-c-x",
+      "brandId": "brand-c",
+      "contentStrategy": "scaffold",
+      "displayName": "Brand C X (scaffold)",
+      "profile": {
+        "identity": "Unused brand scaffold. Fill identity, goal, audience, topics, style, and avoid before enabling. Do not invent a personality here.",
+        "goal": "Define before enabling.",
+        "audience": "Define before enabling.",
+        "topics": ["topic A", "topic B"],
+        "style": ["natural", "specific"],
+        "avoid": ["fabricated personal experiences", "unconfirmed facts"]
+      },
+      "instructions": "Scaffold only. Do not generate live content until an operator defines this brand.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["mon", "wed", "fri"],
+        "times": ["09:00"],
+        "windowMinutes": 30
+      },
+      "generation": { "maxChars": 280 },
+      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "media": { "strategy": "none" }
+    },
+    "brand-c-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "credentialKey": "brand-c-instagram",
+      "brandId": "brand-c",
+      "contentStrategy": "scaffold",
+      "displayName": "Brand C Instagram (scaffold)",
+      "apiVersion": "v25.0",
+      "profile": {
+        "identity": "Unused brand scaffold. Fill before enabling. Do not invent a visual identity.",
+        "goal": "Define before enabling.",
+        "audience": "Define before enabling.",
+        "topics": ["topic A", "topic B"],
+        "style": ["visual", "clear"],
+        "avoid": ["unsupported claims", "AI-invented product images"]
+      },
+      "instructions": "Scaffold only. Do not generate live content until an operator defines this brand.",
+      "schedule": {
+        "timezone": "Asia/Tokyo",
+        "days": ["tue", "thu", "sat"],
+        "times": ["18:00"],
+        "windowMinutes": 30
+      },
+      "generation": { "maxChars": 1800 },
+      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "media": {
+        "strategy": "hunter",
+        "type": "image",
+        "internalImageGeneration": false,
+        "internalVideoGeneration": false,
+        "urls": [],
+        "endpoint": "",
+        "defaultInstagramDecision": "library"
       }
     },
     "example-x": {

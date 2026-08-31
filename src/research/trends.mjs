@@ -1,12 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import { loadAccounts } from '../lib/config.mjs';
-import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
+import { readJson } from '../lib/json-store.mjs';
 import { appendAudit } from '../lib/audit.mjs';
 import { generateTrendBrief } from '../lib/openai.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from '../ops/circuit.mjs';
 import { loadResearchSources } from './sources/registry.mjs';
 import { runDirectFetch } from './fetch-pipeline.mjs';
 import { triageCandidates } from './triage.mjs';
+import { loadBrandsFile, resolveBrandForAccount } from '../brands/registry.mjs';
+import { cacheAccountId, loadSharedTrendBrief, saveSharedTrendBrief, sourceLookupKeys } from './shared.mjs';
 
 function pathFor(accountId) { return fileURLToPath(new URL(`../../data/trends/${encodeURIComponent(accountId)}.json`, import.meta.url)); }
 export async function loadTrendBrief(accountId) { return readJson(pathFor(accountId), null); }
@@ -35,12 +37,12 @@ function opportunityScore(item) {
 // OpenAI Web Search. Web Search runs only when direct fetch is disabled for the account, produced too
 // few fresh candidates to be a useful brief on its own (account.research.minDirectCandidates), or the
 // direct-fetch/triage attempt itself failed - it is a fallback, never the default entry point.
-async function buildResearchResult(accountId, account) {
+async function buildResearchResult(accountId, account, { sourceKeys = [], cacheAccountId = accountId } = {}) {
   if (account.research?.directFetch !== true) {
     return { result: await generateTrendBrief(accountId, account), mode: 'web-search', direct: null };
   }
   const registry = await loadResearchSources();
-  const direct = await runDirectFetch(accountId, registry);
+  const direct = await runDirectFetch(accountId, registry, { sourceKeys, cacheAccountId });
   const minCandidates = Number(account.research?.minDirectCandidates ?? 3);
   if (direct.candidates.length < minCandidates) {
     const result = await generateTrendBrief(accountId, account);
@@ -53,14 +55,27 @@ async function buildResearchResult(accountId, account) {
 export async function refreshTrends({ accountFilter, force = false } = {}) {
   const accounts = await loadAccounts(); const report = [];
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
+  const brandsFile = await loadBrandsFile();
+  const completedKeys = new Set();
   for (const [accountId, account] of Object.entries(accounts)) {
     if (accountFilter && accountFilter !== accountId) continue;
     if (!account.enabled || account.research?.trendIntelligence !== true) continue;
-    const current = await loadTrendBrief(accountId); const refreshHours = Number(account.research?.trendRefreshHours ?? 6);
-    if (!force && fresh(current, refreshHours)) { report.push({ account: accountId, status: 'fresh' }); continue; }
+    const brand = resolveBrandForAccount(brandsFile, accountId, account) || account.brand;
+    const researchKey = cacheAccountId(brand, accountId);
+    const refreshHours = Number(account.research?.trendRefreshHours ?? 6);
+    if (!force && completedKeys.has(researchKey)) {
+      report.push({ account: accountId, status: 'shared', sharedResearchId: researchKey });
+      continue;
+    }
+    const current = await loadSharedTrendBrief(brand, accountId) || await loadTrendBrief(accountId);
+    if (!force && fresh(current, refreshHours)) {
+      completedKeys.add(researchKey);
+      report.push({ account: accountId, status: 'fresh', sharedResearchId: researchKey });
+      continue;
+    }
     try {
       await assertCircuitClosed(accountId, 'research', account.resilience);
-      const { result, mode, direct } = await buildResearchResult(accountId, account);
+      const { result, mode, direct } = await buildResearchResult(accountId, account, { sourceKeys: sourceLookupKeys(brand, accountId), cacheAccountId: researchKey });
       const ranked = (result.items || []).map((item) => ({ ...item, opportunityScore: opportunityScore(item) })).sort((a, b) => b.opportunityScore - a.opportunityScore);
       const sources = (result.citations || []).slice(0, 30);
       const research = direct ? {
@@ -70,13 +85,15 @@ export async function refreshTrends({ accountFilter, force = false } = {}) {
         duplicateCount: direct.duplicateCount,
         totalSources: direct.totalSources,
         failedSources: direct.failedSources,
-        sourceResults: direct.sourceResults
-      } : { mode };
-      const brief = { account: accountId, generatedAt: new Date().toISOString(), summary: result.summary || '', items: ranked, sources, research };
-      await writeJsonAtomic(pathFor(accountId), brief);
+        sourceResults: direct.sourceResults,
+        sharedResearchId: researchKey
+      } : { mode, sharedResearchId: researchKey };
+      const brief = { account: accountId, brandId: brand?.brandId || null, generatedAt: new Date().toISOString(), summary: result.summary || '', items: ranked, sources, research };
+      await saveSharedTrendBrief(brand, accountId, brief);
+      completedKeys.add(researchKey);
       await recordCircuitSuccess(accountId, 'research', account.resilience);
-      await appendAudit({ account: accountId, stage: 'trend-updated', mode, count: ranked.length, sourceCount: sources.length, top: ranked.slice(0, 3).map((x) => ({ topic: x.topic, opportunityScore: x.opportunityScore })) });
-      report.push({ account: accountId, status: 'updated', mode, top: ranked.slice(0, 3), sourceCount: sources.length });
+      await appendAudit({ account: accountId, stage: 'trend-updated', mode, count: ranked.length, sourceCount: sources.length, sharedResearchId: researchKey, top: ranked.slice(0, 3).map((x) => ({ topic: x.topic, opportunityScore: x.opportunityScore })) });
+      report.push({ account: accountId, status: 'updated', mode, top: ranked.slice(0, 3), sourceCount: sources.length, sharedResearchId: researchKey });
     } catch (error) {
       if (!['BUDGET_EXHAUSTED', 'CIRCUIT_OPEN'].includes(error.code)) await recordCircuitFailure(accountId, 'research', error, account.resilience);
       await appendAudit({ account: accountId, stage: 'trend-error', code: error.code || null, error: String(error.message || error).slice(0, 500) });

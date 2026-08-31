@@ -4,3 +4,6 @@ node_modules/
 !.env.example
 payload.json
 .DS_Store
+config/artist.json
+data/artist-assets/
+data/brand-cards/

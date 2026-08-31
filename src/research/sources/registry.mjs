@@ -34,6 +34,9 @@ export function validateResearchSources(registry) {
         if (!source.url || !/^https:\/\//i.test(source.url)) errors.push(`${label}.url must be an https:// URL`);
       }
       if (source.enabled != null && typeof source.enabled !== 'boolean') errors.push(`${label}.enabled must be a boolean`);
+      if (source.sourceRole != null && !['discovery', 'primary', 'verification', 'community'].includes(source.sourceRole)) {
+        errors.push(`${label}.sourceRole must be discovery, primary, verification, or community`);
+      }
       if (source.maxItems != null && (typeof source.maxItems !== 'number' || !Number.isInteger(source.maxItems) || source.maxItems <= 0)) {
         errors.push(`${label}.maxItems must be a positive integer`);
       }
@@ -46,9 +49,20 @@ export function validateResearchSources(registry) {
 // Enabled sources for one account, highest priority first. A source with no explicit priority sorts
 // after every explicitly prioritized one rather than being treated as priority 0, so an operator adding
 // a new source without setting priority yet does not accidentally jump ahead of curated sources.
-export function sourcesForAccount(registry, accountId) {
-  return (registry?.[accountId] || [])
-    .filter((source) => source && source.enabled !== false)
+export function sourcesForAccount(registry, accountId, extraKeys = []) {
+  const keys = [accountId, ...extraKeys].filter(Boolean);
+  const collected = [];
+  const seen = new Set();
+  for (const key of keys) {
+    for (const source of registry?.[key] || []) {
+      if (!source || source.enabled === false) continue;
+      const id = source.id || JSON.stringify(source);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      collected.push(source);
+    }
+  }
+  return collected
     .slice()
     .sort((a, b) => (b.priority ?? -Infinity) - (a.priority ?? -Infinity));
 }

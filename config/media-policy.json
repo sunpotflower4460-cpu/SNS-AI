@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "note": "Media Hunter and entity verification policy. AI image generation is not a product-image fallback.",
+  "internalImageGenerationDefault": false,
+  "aiImageGenerationAsProductFallback": false,
+  "failClosedOnAmbiguousEntity": true,
+  "requireVerifiedProductImage": true,
+  "unknownUsageBlocksInstagram": true,
+  "hunterPriority": [
+    "owned",
+    "asset-library",
+    "official-product-page",
+    "official-press-kit",
+    "official-github-release",
+    "licensed-official",
+    "brand-template",
+    "skip"
+  ],
+  "acceptedVerificationStatuses": ["verified"],
+  "productImageRejectedStatuses": [
+    "rejected",
+    "mismatch",
+    "unknown",
+    "ai_generated",
+    "vendor_visual_only",
+    "unverified"
+  ],
+  "instagramFallback": ["verified-product-image", "verified-brand-visual", "brand-card", "skip"],
+  "xAllowsNoMedia": true,
+  "usageBasisAllowlist": ["owned", "official_press_asset", "official_product_asset", "licensed"],
+  "brandCard": {
+    "enabled": true,
+    "format": "svg",
+    "inventProductUi": false,
+    "alterOfficialLogos": false
+  }
+}

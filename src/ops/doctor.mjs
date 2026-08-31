@@ -119,6 +119,7 @@ function mediaReadiness(account, { now = Date.now() } = {}) {
   if (['fixed', 'external'].includes(strategy) && !/^https:\/\//i.test(media.url || '')) blockers.push(`media.${strategy} requires a public HTTPS URL.`);
   if (strategy === 'endpoint' && !hasEndpoint) blockers.push('media.endpoint requires an HTTPS endpoint.');
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !hasBuiltIn) blockers.push(`${strategy} needs library media, media.endpoint, or matching built-in media generation.`);
+  if (strategy === 'hunter') warnings.push('Instagram hunter uses verified owned/official media or a brand card. AI product screenshots are forbidden.');
   if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && hasBuiltIn) {
     warnings.push(`Instagram will rely on built-in OpenAI ${mediaType === 'reel' ? 'video' : 'image'} generation and public GitHub Release hosting; Live Preflight checks the hosting prerequisite without spending a generation.`);
   }
