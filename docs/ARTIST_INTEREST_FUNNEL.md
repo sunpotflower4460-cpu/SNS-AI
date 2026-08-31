@@ -17,3 +17,5 @@ Exposure → Engagement → Profile Visit → Follow → Music Discovery → Mus
 直接宣伝を機械的に増やしません。`directArtistPromotion` の hard cap は維持します。confidence が低いときは strategy を大きく変えません。
 
 実装: `src/artist/funnel-repair.mjs`。投稿レーン prior は `tasteDiscovery` / `musicAndCreation` / `worldview` / `directArtistPromotion` のまま、Funnel / Campaign / Anchor / Asset / Performance で動かします。
+
+将来の Discover / Deepen / Support / Repair の役割定義は [`ARTIST_SUPPORT_ROADMAP.md`](ARTIST_SUPPORT_ROADMAP.md)。

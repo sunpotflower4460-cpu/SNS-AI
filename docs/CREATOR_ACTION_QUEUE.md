@@ -16,4 +16,4 @@ Taste confirmation:
 
 AI が勝手に昇格しません。
 
-実装: `src/artist/actions.mjs`。輸送契約の提案は [GROWTH_BRIDGE_CONTRACTS.md](GROWTH_BRIDGE_CONTRACTS.md)。UI は [MY_SNS_INTEGRATION.md](MY_SNS_INTEGRATION.md)。
+実装: `src/artist/actions.mjs`。輸送契約の提案は [GROWTH_BRIDGE_CONTRACTS.md](GROWTH_BRIDGE_CONTRACTS.md)。UI は [MY_SNS_INTEGRATION.md](MY_SNS_INTEGRATION.md)。Capability・Request budget・少量質問ループの将来計画は [CREATOR_CAPABILITY_AND_REQUESTS.md](CREATOR_CAPABILITY_AND_REQUESTS.md)。

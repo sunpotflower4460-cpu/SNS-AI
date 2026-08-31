@@ -16,6 +16,11 @@ AI の役割は、本人が一人では手が回らない **編集・再発見�
 
 詳細:
 
+- [将来計画 Roadmap](ARTIST_SUPPORT_ROADMAP.md)（実装ではない。別セッション用の正式計画）
+- [Content Supply Loop](ARTIST_CONTENT_SUPPLY_LOOP.md)
+- [Preview-first 承認](ARTIST_PREVIEW_APPROVAL_PIPELINE.md)
+- [Trend Scout](ARTIST_TREND_SCOUT.md)
+- [Creator Capability / Requests](CREATOR_CAPABILITY_AND_REQUESTS.md)
 - [Human Anchor / AI Orbit](HUMAN_ANCHOR_AI_ORBIT.md)
 - [Artist Interest Funnel](ARTIST_INTEREST_FUNNEL.md)
 - [Asset lifecycle](ARTIST_ASSET_LIFECYCLE.md)

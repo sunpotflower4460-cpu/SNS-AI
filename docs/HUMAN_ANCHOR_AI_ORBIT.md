@@ -24,4 +24,4 @@ Release / Live / MV は Human Anchor Event です。Day+1 / +3 / +5… は初期
 
 ## No-post
 
-「1日2投稿」は **maximum** であり minimum ではありません。本人が十分投稿している、テーマ過多、安全な素材がない、budget、Audience fatigue、Campaign 過多なら skip できます。
+「1日2投稿」は **maximum** であり minimum ではありません。本人が十分投稿している、テーマ過多、安全な素材がない、budget、Audience fatigue、Campaign 過多なら skip できます。slot は must post ではない（[`ARTIST_CONTENT_SUPPLY_LOOP.md`](ARTIST_CONTENT_SUPPLY_LOOP.md)）。
