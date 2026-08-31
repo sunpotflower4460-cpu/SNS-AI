@@ -23,3 +23,5 @@ MasterAsset → Variant → Angle → Platform Adaptation
 Winner 条件の例: 過去成績上位、最終使用から十分経過（初期 cooldown 180日、`artist.winnerResurface` で設定）、新しい angle、異なる clip、Audience が変化。
 
 実装: `src/artist/assets.mjs`, `src/artist/fatigue.mjs`。
+
+将来の Preview-first 承認と Approved Clip Pool は [`ARTIST_PREVIEW_APPROVAL_PIPELINE.md`](ARTIST_PREVIEW_APPROVAL_PIPELINE.md)。Master を完成投稿として順番消化しない方針は [`ARTIST_CONTENT_SUPPLY_LOOP.md`](ARTIST_CONTENT_SUPPLY_LOOP.md)。

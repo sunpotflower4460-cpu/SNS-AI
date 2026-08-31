@@ -21,7 +21,7 @@ Research → Select → Verify → Create → Media Match → Publish → Measur
 | Research | 同一ブランドの調査を X/Instagram で二重実行しない | `src/research/shared.mjs`, `src/research/trends.mjs` |
 | Brief | Core brief → X版 / Instagram版へ分岐 | `src/brands/brief.mjs`, `src/content/platform-adapt.mjs` |
 | Media | Hunter + entity verification + brand card | `src/media/hunter.mjs`, `src/media/entity-verify.mjs`, `src/media/brand-card.mjs` |
-| Artist | Human Anchor, Orbit, Funnel Repair, assets, Creator Action | `src/artist/` |
+| Artist | Human Anchor, Orbit, Funnel Repair, assets, Creator Action | `src/artist/`。将来計画は [`ARTIST_SUPPORT_ROADMAP.md`](ARTIST_SUPPORT_ROADMAP.md) |
 | Budget | 月 $20 governor, URL 投資, 再配分 | `src/budget/` |
 | Router | cheap / balanced / high / critical | `src/ai/router.mjs` |
 | Account | 既存の publish unit。`music-tools-x` は維持 | `config/accounts.json` |

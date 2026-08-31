@@ -42,7 +42,7 @@ Taste → Personality / worldview → Profile visit → Interest in artist → M
 - `delay` — この slot は投稿しない
 - `skip` — 明示的 skip
 
-同じ本人投稿を AI が言い直すだけは禁止です。V2 の Human Anchor / AI Orbit / Funnel Repair は [`ARTIST_SUPPORT_V2.md`](ARTIST_SUPPORT_V2.md)。
+同じ本人投稿を AI が言い直すだけは禁止です。V2 の Human Anchor / AI Orbit / Funnel Repair は [`ARTIST_SUPPORT_V2.md`](ARTIST_SUPPORT_V2.md)。将来計画（Preview-first、Capability、Trend Scout、Approved Pool）は [`ARTIST_SUPPORT_ROADMAP.md`](ARTIST_SUPPORT_ROADMAP.md)。実装をこの Roadmap だけで開始しない。
 
 `artist.hybridMode` は artist-x / artist-instagram で `true`（どちらも disabled scaffold）。Creator Action は hybrid のときだけ検討します。
 
