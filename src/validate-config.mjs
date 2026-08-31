@@ -26,7 +26,10 @@ function validTimeZone(value) {
 export function validateConfig(config) {
   const errors = []; const modes = new Set(['auto', 'approval', 'manual', 'pause']); const platforms = new Set(['x', 'instagram']);
   const dayNames = new Set(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
-  const experimentDimensions = new Set(['hook', 'format', 'cta', 'mediaDecision']);
+  const experimentDimensions = new Set([
+    'hook', 'format', 'cta', 'mediaDecision', 'topic', 'media', 'url', 'postingTime', 'length',
+    'educational', 'opinion', 'discovery', 'comparison', 'freebie', 'story', 'tasteRecommendation'
+  ]);
   const imageQualities = new Set(['low', 'medium', 'high', 'auto']);
   const imageSizes = new Set(['auto', '1024x1024', '1536x1024', '1024x1536']);
   const videoSizes = new Set(['720x1280', '1280x720', '1024x1792', '1792x1024']);
@@ -147,6 +150,7 @@ export function validateConfig(config) {
         if (['fixed', 'external'].includes(strategy) && !media.url) errors.push(`${id}: Instagram media.${strategy} requires media.url`);
         if (strategy === 'endpoint' && !hasEndpoint) errors.push(`${id}: Instagram media.endpoint requires an HTTPS endpoint`);
         if (['auto', 'generate'].includes(strategy) && !hasLibrary && !hasEndpoint && !canGenerateInternally) errors.push(`${id}: Instagram ${strategy} requires library media, HTTPS media.endpoint, or matching built-in generation`);
+        if (strategy === 'hunter' && media.internalImageGeneration === true) errors.push(`${id}: Instagram hunter must keep internalImageGeneration false so AI images cannot substitute for product photos`);
       }
       if (account.platform === 'x' && strategy !== 'none') {
         if (strategy === 'pool' && !hasLibrary) errors.push(`${id}: X media pool is empty`);

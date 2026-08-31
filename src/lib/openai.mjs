@@ -183,6 +183,13 @@ function generationPrompt(accountId, account, history, context, feedback) {
       lengthBudget: lengthBudgetBrief(account),
       objectives: account.objectives || {}, recentPosts: recent, humanFeedback, learnedStrategy: context.strategy || null, trendBrief: context.trends || null,
       experiment,
+      brand: account.brand ? { brandId: account.brand.brandId, strategy: account.brand.strategy, sharedResearchId: account.brand.sharedResearchId } : null,
+      contentStrategy: account.contentStrategy || null,
+      artistVoice: account.contentStrategy === 'artist-support' ? {
+        confirmedPersonalMayUseExperience: true,
+        tasteMatchMustNotClaimExperience: true,
+        externalDiscoveryObjectiveOnly: true
+      } : null,
       candidateCount: Number(account.generation?.candidateCount ?? 5), retryFeedback: feedback || ''
     }, null, 2)
   };

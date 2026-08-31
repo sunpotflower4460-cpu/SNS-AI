@@ -11,12 +11,17 @@ import { createApprovalIssue, findApprovalIssue } from './lib/github.mjs';
 import { appendAudit } from './lib/audit.mjs';
 import { loadStrategy } from './learning/store.mjs';
 import { loadTrendBrief } from './research/trends.mjs';
+import { loadSharedTrendBrief } from './research/shared.mjs';
 import { recentHumanFeedback } from './feedback/store.mjs';
 import { loadExperimentState } from './experiments/store.mjs';
 import { assignmentForSlot } from './experiments/engine.mjs';
 import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from './ops/circuit.mjs';
 import { assertAutonomyBrakeClear } from './ops/brake.mjs';
 import { publish } from './publish.mjs';
+import { evaluateEditorialGuards } from './editorial/guards.mjs';
+import { remainingBudget, loadBudgetPolicy } from './budget/governor.mjs';
+import { readJson } from './lib/json-store.mjs';
+import { fileURLToPath } from 'node:url';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
 function bool(value) { return value === true || String(value).toLowerCase() === 'true'; }
@@ -27,17 +32,16 @@ function bool(value) { return value === true || String(value).toLowerCase() === 
 // directly unit-testable without having to drive a full runAutopilot() call through mocked media
 // generation.
 export function autopilotErrorStatus(error) {
-  if (error.code === 'BUDGET_EXHAUSTED') return 'budget-exhausted';
+  if (error.code === 'BUDGET_EXHAUSTED' || error.code === 'BUDGET_GOVERNOR_BLOCKED') return 'budget-exhausted';
   if (error.code === 'CIRCUIT_OPEN') return 'circuit-open';
   if (error.code === 'SLOT_ALREADY_CLAIMED') return 'already-handled';
   if (error.code === 'MEDIA_QA_FAILED' || error.code === 'MEDIA_QA_INPUT_TOO_LARGE') return 'media-qa-failed';
-  // Distinct from media-qa-failed: an oversize asset is a config-tuning problem (raise
-  // maxHostedImageBytes/maxHostedVideoBytes), not the AI-generated visual itself failing quality
-  // review - collapsing the two into one status would make an operator chase a nonexistent QA
-  // regression instead of a byte-limit setting.
   if (error.code === 'MEDIA_HOSTING_TOO_LARGE') return 'media-too-large';
   if (error.code === 'PROVIDER_DEPRECATED') return 'provider-deprecated';
   if (error.code === 'AUTONOMY_BRAKE') return 'safety-brake';
+  if (['MEDIA_HUNTER_SKIP', 'ARTIST_OVERLAP', 'URL_BUDGET_DEFER', 'UNCONFIRMED_FACTS', 'ARTIST_EVIDENCE_VIOLATION', 'RELATIONSHIP_DISCLOSURE_MISSING', 'RELATIONSHIP_UNKNOWN', 'MEDIA_ENTITY_MISMATCH'].includes(error.code)) {
+    return 'skipped';
+  }
   return 'failed';
 }
 
@@ -117,7 +121,9 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       const experimentAssignment = assignmentForSlot(experimentState?.active, slot.slotId);
       try {
         const history = await recentHistory(accountId, Number(account.generation?.historyWindow ?? 30));
-        const trends = account.research?.trendIntelligence === true ? await loadTrendBrief(accountId) : null;
+        const trends = account.research?.trendIntelligence === true
+          ? ((await loadSharedTrendBrief(account.brand, accountId)) || (await loadTrendBrief(accountId)))
+          : null;
         const humanFeedback = await recentHumanFeedback(accountId, Number(account.learning?.humanFeedbackWindow ?? 40));
         await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
 
@@ -127,9 +133,18 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         // operations never acquire an extra AI dependency. When disabled or unavailable it returns the
         // original draft unchanged; when enabled it also sees recent posts and human feedback.
         const naturalized = await naturalizeDraft(accountId, account, generatedDraft, { history, humanFeedback, dryRun });
-        const { draft, decision: linkDecision } = applyLinkPolicy({ accountId, account, draft: naturalized, history, now });
+        let budgetState = 'healthy';
+        try {
+          const policy = await loadBudgetPolicy();
+          const prior = await readJson(fileURLToPath(new URL('../data/reports/cost.json', import.meta.url)), null);
+          budgetState = remainingBudget(Number(prior?.governor?.accountedUsd || 0), policy).state;
+        } catch { budgetState = 'healthy'; }
+        const editorial = await evaluateEditorialGuards({
+          accountId, account, brand: account.brand, draft: naturalized, history, slotId: slot.slotId, budgetState, now
+        });
+        const { draft, decision: linkDecision } = applyLinkPolicy({ accountId, account, draft: editorial.draft, history, now });
         const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now });
-        ensureMediaForPlatform(account, media.url);
+        ensureMediaForPlatform(account, media.url, media);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
         const experimentApplied = experimentAssignment
           ? (experimentAssignment.dimension === 'mediaDecision'
@@ -156,7 +171,15 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
             issues: draft.naturalization.issues?.slice(0, 5) || [], fallback: Boolean(draft.naturalization.fallback)
           } : null,
           experiment, sourceCount: sources.length, dryRun,
-          linkPolicy: linkDecision.allowed ? null : { reason: linkDecision.reason, usage: linkDecision.usage || null }
+          linkPolicy: linkDecision.allowed ? null : { reason: linkDecision.reason, usage: linkDecision.usage || null },
+          selectedModelTier: editorial.audit?.selectedModelTier || null,
+          reasonForEscalation: editorial.audit?.escalationReason || null,
+          budgetState,
+          mediaEntityVerification: media.verification?.verificationStatus || editorial.audit?.mediaEntityVerification || null,
+          contentStrategy: editorial.audit?.contentStrategy || account.contentStrategy || null,
+          artistEvidenceLevel: editorial.audit?.artistEvidenceLevel || null,
+          urlDecision: editorial.audit?.urlDecision || null,
+          experimentMode: editorial.audit?.experimentMode || (draft.selectionMode === 'explore' ? 'explore' : 'exploit')
         });
 
         // A dry run never calls the publisher and (as of the dry-run budget-isolation fix) never even
@@ -175,7 +198,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       } catch (error) {
         // BUDGET_CONFIG_INVALID is a typo in budgets config, not a provider outage: opening the
         // resilience circuit for it pauses the account for a cooldown and buries the real cause.
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'BUDGET_CONFIG_INVALID', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'BUDGET_CONFIG_INVALID', 'BUDGET_GOVERNOR_BLOCKED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED', 'MEDIA_HUNTER_SKIP', 'ARTIST_OVERLAP', 'URL_BUDGET_DEFER', 'UNCONFIRMED_FACTS', 'ARTIST_EVIDENCE_VIOLATION', 'RELATIONSHIP_DISCLOSURE_MISSING', 'RELATIONSHIP_UNKNOWN', 'MEDIA_ENTITY_MISMATCH'];
         // Same reasoning as the dry-run success path above: a dry run proves nothing about whether a
         // real publish would succeed, so a FAILED dry-run preview (a transient Responses API hiccup,
         // malformed model output, etc.) must not be able to open/increment the live circuit either -

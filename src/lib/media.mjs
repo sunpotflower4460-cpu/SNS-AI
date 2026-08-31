@@ -2,6 +2,7 @@ import { consumeUsage } from '../ops/budget.mjs';
 import { generateAndHostImageDetailed } from '../media/openai-image.mjs';
 import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
 import { reviewVisualUrl } from '../media/qa.mjs';
+import { huntMedia } from '../media/hunter.mjs';
 import { assertPublicHttpsTarget, assertPublicHttpsUrl, fetchPublicHttps } from './http.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
@@ -48,6 +49,63 @@ async function generated(accountId, account, slotId, draft, dryRun = false, now 
 async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date() } = {}) {
   const media = account.media || {}; const strategy = media.strategy || 'none'; const mediaType = media.type || 'image';
   if (strategy === 'none') return { url: null, decision: 'none', source: null, altText: '', qa: null };
+  if (strategy === 'hunter') {
+    const libraryCandidates = (media.urls || media.libraryUrls || []).filter(Boolean).map((url) => ({
+      mediaUrl: url,
+      sourceUrl: url,
+      usageBasis: 'owned',
+      mediaSourceType: 'asset_library',
+      entityName: draft?.entityName || draft?.features?.topic,
+      vendor: draft?.vendor,
+      retrievedAt: now.toISOString()
+    }));
+    const hunted = await huntMedia({
+      target: {
+        entityName: draft?.entityName || draft?.features?.topic,
+        vendor: draft?.vendor,
+        canonicalUrl: draft?.canonicalUrl,
+        oneLiner: draft?.rationale,
+        audience: account.profile?.primaryPersona?.summary || account.profile?.audience,
+        badge: draft?.features?.badge
+      },
+      platform: account.platform,
+      candidates: [...(media.ownedAssets || []), ...(media.libraryAssets || []), ...libraryCandidates],
+      allowBrandCard: account.platform === 'instagram',
+      now
+    });
+    if (hunted.decision === 'skip') {
+      const error = new Error('Media Hunter skipped: no verified product image and no usable brand card.');
+      error.code = 'MEDIA_HUNTER_SKIP';
+      throw error;
+    }
+    if (hunted.decision === 'none') {
+      return { url: null, decision: 'none', source: 'hunter', altText: '', qa: null, verification: hunted.verification };
+    }
+    if (hunted.decision === 'brand-card') {
+      if (dryRun) {
+        return {
+          url: 'https://dry-run.invalid/brand-card.svg',
+          decision: 'brand-card',
+          source: 'brand-card',
+          altText: `${hunted.media.brandCard.badge} ${hunted.media.brandCard.productName}`,
+          qa: null,
+          verification: hunted.verification,
+          brandCard: hunted.media.brandCard
+        };
+      }
+      const error = new Error('Brand card is generated as SVG locally; Instagram publish requires a hosted raster URL. Skip rather than invent a product image.');
+      error.code = 'MEDIA_HUNTER_SKIP';
+      throw error;
+    }
+    return {
+      url: hunted.media.assetUrl || hunted.media.mediaUrl || hunted.media.url || null,
+      decision: hunted.decision,
+      source: 'hunter',
+      altText: String(hunted.media.altText || '').slice(0, 1000),
+      qa: null,
+      verification: hunted.verification
+    };
+  }
   if (strategy === 'fixed' || strategy === 'external') return { url: media.url || null, decision: media.url ? 'library' : 'none', source: strategy, altText: String(media.altText || '').slice(0, 1000), qa: null };
   if (strategy === 'pool') { const url = poolUrl(media, slotId); return { url, decision: url ? 'library' : 'none', source: 'pool', altText: '', qa: null }; }
   if (strategy === 'endpoint') {
@@ -120,7 +178,9 @@ export async function resolveMediaDetailed(accountId, account, slotId, draft, op
   return reviewSelectedImage(accountId, account, slotId, draft, resolved, options);
 }
 export async function resolveMedia(accountId, account, slotId, draft, options = {}) { return (await resolveMediaDetailed(accountId, account, slotId, draft, options)).url; }
-export function ensureMediaForPlatform(account, mediaUrl) {
-  if (account.platform === 'instagram' && !mediaUrl) throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto. Built-in OpenAI image generation is supported on public repositories.');
+export function ensureMediaForPlatform(account, mediaUrl, resolved = {}) {
+  if (account.platform === 'instagram' && !mediaUrl && resolved.decision !== 'brand-card') {
+    throw new Error('Instagram requires media. Configure media.strategy as fixed/pool/external/endpoint/generate/auto/hunter. Built-in OpenAI image generation is supported on public repositories.');
+  }
 }
 export const __test = { reviewSelectedImage, resolveRawMediaDetailed, mediaQaEnabled };

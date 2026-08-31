@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "note": "EXAMPLE ONLY. Copy to a gitignored local/operator store before filling real artist facts. Never commit personal data, private URLs that reveal identity, or unconfirmed claims. Empty arrays are the correct starting state.",
+  "brandId": "artist",
+  "displayName": "",
+  "evidence": {
+    "confirmed_personal": [],
+    "taste_match": [],
+    "external_discovery": []
+  },
+  "assets": {
+    "songs": [],
+    "lyrics": [],
+    "albumArtwork": [],
+    "musicVideos": [],
+    "liveVideos": [],
+    "acousticVideos": [],
+    "photos": [],
+    "studioFootage": [],
+    "shortClips": [],
+    "profilePhotos": [],
+    "releaseUrls": [],
+    "streamingUrls": [],
+    "songBackgroundStories": [],
+    "productionNotes": [],
+    "instruments": [],
+    "plugins": [],
+    "confirmedInterests": [],
+    "confirmedRecommendations": []
+  },
+  "itemShape": {
+    "id": "stable-id",
+    "title": "",
+    "entityName": "",
+    "evidenceLevel": "confirmed_personal | taste_match | external_discovery",
+    "confirmedAs": ["liked", "used", "heard", "visited", "owned", "used_in_production", "recommended"],
+    "mediaUrl": null,
+    "sourceUrl": null,
+    "canonicalUrl": null,
+    "usageBasis": "owned | official_press_asset | official_product_asset | licensed | unknown",
+    "notes": "",
+    "secret": false
+  }
+}

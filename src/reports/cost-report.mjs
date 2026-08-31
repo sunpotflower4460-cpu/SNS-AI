@@ -8,6 +8,8 @@ import { loadTrendBrief } from '../research/trends.mjs';
 import { usageToday } from '../ops/budget.mjs';
 import { postHasLink } from '../research/link-policy.mjs';
 import { readJson, writeJsonAtomic } from '../lib/json-store.mjs';
+import { loadGovernorInputs, buildGovernorSnapshot } from '../budget/snapshot.mjs';
+import { loadBrandsFile } from '../brands/registry.mjs';
 
 const JSON_PATH = fileURLToPath(new URL('../../data/reports/cost.json', import.meta.url));
 const MD_PATH = fileURLToPath(new URL('../../data/reports/cost.md', import.meta.url));
@@ -77,6 +79,7 @@ export async function buildCostReport({ accountFilter, now = new Date() } = {}) 
 
     result.accounts[accountId] = {
       platform: account.platform,
+      brandId: account.brandId || null,
       research: research ? {
         mode: research.mode,
         directFetchCount: research.fetchedCount ?? 0,
@@ -93,10 +96,41 @@ export async function buildCostReport({ accountFilter, now = new Date() } = {}) 
     };
   }
 
+  const { policy } = await loadGovernorInputs();
+  const brandsFile = await loadBrandsFile();
+  const usageByAccount = {};
+  const xByAccount = {};
+  for (const [accountId, row] of Object.entries(result.accounts)) {
+    usageByAccount[accountId] = {
+      brandId: row.brandId,
+      platform: row.platform,
+      openai: row.aiUsageToday.openaiRequests,
+      groq: row.aiUsageToday.groqRequests,
+      webSearch: row.aiUsageToday.webSearchRequests,
+      media: row.aiUsageToday.mediaRequests,
+      image: row.aiUsageToday.imageGenerations,
+      video: row.aiUsageToday.videoGenerations
+    };
+    if (row.xApi) xByAccount[accountId] = row.xApi;
+  }
+  result.governor = buildGovernorSnapshot({
+    policy,
+    pricing,
+    month: now.toISOString().slice(0, 7),
+    usageByAccount,
+    xByAccount,
+    brands: Object.entries(brandsFile.brands || {}).map(([brandId, brand]) => ({ brandId, ...brand })),
+    elapsedDays: now.getUTCDate(),
+    now
+  });
+  result.costTypesNote = 'actual = live billing API (none wired). estimated = operator-maintained model. unknown = unpriced, not a fabricated rate.';
+
   await writeJsonAtomic(JSON_PATH, result);
   const lines = [
     '# SNS-AI Cost & Usage Visibility', '', `Generated: ${result.generatedAt}`, '',
-    '> pricingModel values are operator-maintained estimates (config/x-api-pricing.json), not real X billing data.', ''
+    '> pricingModel values are operator-maintained estimates (config/x-api-pricing.json), not real X billing data.',
+    `> Global budget: $${result.governor.monthlyBudgetUsd} | accounted $${result.governor.accountedUsd} | remaining $${result.governor.remainingUsd} | projected month-end $${result.governor.projectedMonthEndUsd} | state **${result.governor.budgetState}**`,
+    `> ${result.costTypesNote}`, ''
   ];
   for (const [id, row] of Object.entries(result.accounts)) {
     lines.push(`## ${id} (${row.platform})`);
@@ -107,8 +141,17 @@ export async function buildCostReport({ accountFilter, now = new Date() } = {}) 
     if (row.xApi) {
       lines.push(`- X API (last ${row.xApi.periodDays}d): URL posts ${row.xApi.urlPosts}, non-URL posts ${row.xApi.nonUrlPosts}, read ops ${row.xApi.readOperations}, estimated monthly cost $${row.xApi.estimatedMonthlyCostUsd}`);
     }
+    if (row.brandId) lines.push(`- Brand: ${row.brandId}`);
     lines.push('');
   }
+  lines.push('## Global governor', '');
+  lines.push(`- Month: ${result.governor.month}`);
+  lines.push(`- Total estimated USD: ${result.governor.totalEstimatedUsd}`);
+  lines.push(`- Total actual USD: ${result.governor.totalActualUsd} (none unless a billing API is wired)`);
+  lines.push(`- Remaining: ${result.governor.remainingUsd} / ${result.governor.monthlyBudgetUsd}`);
+  lines.push(`- Projected month-end: ${result.governor.projectedMonthEndUsd}`);
+  lines.push(`- State: ${result.governor.budgetState}`);
+  lines.push('');
   await mkdir(dirname(MD_PATH), { recursive: true });
   await writeFile(MD_PATH, `${lines.join('\n')}\n`, 'utf8');
   return result;

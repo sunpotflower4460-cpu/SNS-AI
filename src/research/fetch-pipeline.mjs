@@ -14,8 +14,8 @@ const FETCHERS = {
 // (RSS/Atom, GitHub Releases) before ever spending an AI call. One dead source (a 404 feed, a DNS
 // failure, a GitHub rate limit) must never take down the whole account's research run - every source is
 // isolated in its own try/catch, and a failure is recorded to audit rather than thrown.
-export async function runDirectFetch(accountId, registry, { audit = appendAudit } = {}) {
-  const sources = sourcesForAccount(registry, accountId);
+export async function runDirectFetch(accountId, registry, { audit = appendAudit, sourceKeys = [], cacheAccountId = accountId } = {}) {
+  const sources = sourcesForAccount(registry, accountId, sourceKeys.filter((key) => key !== accountId));
   const sourceResults = [];
   const collected = [];
 
@@ -32,10 +32,10 @@ export async function runDirectFetch(accountId, registry, { audit = appendAudit 
     }
   }
 
-  const cache = await loadResearchCache(accountId);
+  const cache = await loadResearchCache(cacheAccountId);
   const { fresh, duplicates } = dedupeCandidates(collected, cache);
   for (const { hash } of [...fresh, ...duplicates]) markSeen(cache, hash);
-  await saveResearchCache(accountId, cache);
+  await saveResearchCache(cacheAccountId, cache);
 
   return {
     sourceResults,

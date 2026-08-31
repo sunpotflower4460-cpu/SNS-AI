@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-28T02:08:26.455Z",
+  "generatedAt": "2026-08-31T08:17:59.663Z",
   "pricingModel": {
     "schemaVersion": 1,
     "note": "Operator-maintained cost ESTIMATE model, not real X billing data. Fill in your actual X API tier pricing (USD) to get a useful monthly cost estimate from `npm run cost-report`. Left at zero after a fresh clone deliberately, so the report never fabricates a plausible-looking number nobody actually entered.",
@@ -11,6 +11,7 @@
   "accounts": {
     "music-tools-x": {
       "platform": "x",
+      "brandId": "plugin-radar",
       "research": null,
       "aiUsageToday": {
         "groqRequests": 0,
@@ -28,8 +29,91 @@
         "estimatedMonthlyCostUsd": 0
       }
     },
+    "plugin-radar-instagram": {
+      "platform": "instagram",
+      "brandId": "plugin-radar",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": null
+    },
+    "artist-x": {
+      "platform": "x",
+      "brandId": "artist",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": {
+        "periodDays": 30,
+        "urlPosts": 0,
+        "nonUrlPosts": 0,
+        "readOperations": 0,
+        "estimatedMonthlyCostUsd": 0
+      }
+    },
+    "artist-instagram": {
+      "platform": "instagram",
+      "brandId": "artist",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": null
+    },
+    "brand-c-x": {
+      "platform": "x",
+      "brandId": "brand-c",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": {
+        "periodDays": 30,
+        "urlPosts": 0,
+        "nonUrlPosts": 0,
+        "readOperations": 0,
+        "estimatedMonthlyCostUsd": 0
+      }
+    },
+    "brand-c-instagram": {
+      "platform": "instagram",
+      "brandId": "brand-c",
+      "research": null,
+      "aiUsageToday": {
+        "groqRequests": 0,
+        "openaiRequests": 0,
+        "webSearchRequests": 0,
+        "mediaRequests": 0,
+        "imageGenerations": 0,
+        "videoGenerations": 0
+      },
+      "xApi": null
+    },
     "example-x": {
       "platform": "x",
+      "brandId": null,
       "research": null,
       "aiUsageToday": {
         "groqRequests": 0,
@@ -49,6 +133,7 @@
     },
     "example-instagram": {
       "platform": "instagram",
+      "brandId": null,
       "research": null,
       "aiUsageToday": {
         "groqRequests": 0,
@@ -60,5 +145,92 @@
       },
       "xApi": null
     }
-  }
+  },
+  "governor": {
+    "month": "2026-08",
+    "totalEstimatedUsd": 0,
+    "totalActualUsd": 0,
+    "accountedUsd": 0,
+    "unknownCount": 8,
+    "remainingUsd": 20,
+    "projectedMonthEndUsd": 0,
+    "budgetState": "healthy",
+    "monthlyBudgetUsd": 20,
+    "operations": {
+      "openai": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "groq": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "webSearch": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "media": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "image": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "video": {
+        "count": 0,
+        "usd": 0,
+        "costType": "unknown"
+      },
+      "xPosting": {
+        "urlPosts": 0,
+        "nonUrlPosts": 0,
+        "usd": 0,
+        "costType": "estimated"
+      },
+      "xReads": {
+        "count": 0,
+        "usd": 0,
+        "costType": "estimated"
+      }
+    },
+    "perBrand": {
+      "plugin-radar": {
+        "estimatedUsd": 0,
+        "actualUsd": 0
+      },
+      "artist": {
+        "estimatedUsd": 0,
+        "actualUsd": 0
+      },
+      "brand-c": {
+        "estimatedUsd": 0,
+        "actualUsd": 0
+      },
+      "example-x": {
+        "estimatedUsd": 0,
+        "actualUsd": 0
+      },
+      "example-instagram": {
+        "estimatedUsd": 0,
+        "actualUsd": 0
+      }
+    },
+    "perPlatform": {
+      "x": 0,
+      "instagram": 0
+    },
+    "allocation": {
+      "plugin-radar": 0.333,
+      "artist": 0.333,
+      "brand-c": 0.333
+    },
+    "pricingNote": "operator-maintained estimates; zero means unpriced, not a fabricated rate"
+  },
+  "costTypesNote": "actual = live billing API (none wired). estimated = operator-maintained model. unknown = unpriced, not a fabricated rate."
 }
