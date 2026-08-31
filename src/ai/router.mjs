@@ -53,17 +53,61 @@ export function resolveRoute(account, task, options = {}) {
     provider: route.provider || null,
     model: route.model || null,
     reasons,
-    cascaded
+    cascaded,
+    escalationReason: reasons[0] || null
   };
 }
 
+export function constrainRouteForBudget(route, state = 'healthy', account = {}) {
+  if (state === 'stopped') {
+    return { ...route, allowed: false, constrained: true, constraintReason: 'budget-stopped' };
+  }
+  if ((state === 'conservative' || state === 'critical') && (route?.tier === 'high' || route?.tier === 'critical')) {
+    const config = defaultRouterConfig(account);
+    const balanced = config.balanced || {};
+    return {
+      tier: 'balanced',
+      provider: balanced.provider || 'openai',
+      model: balanced.model || account?.ai?.openaiTriageModel || null,
+      reasons: route.reasons || [],
+      cascaded: route.cascaded || false,
+      escalationReason: route.escalationReason || null,
+      allowed: true,
+      constrained: true,
+      constraintReason: `budget-${state}-downgrade-from-${route.tier}`,
+      originalTier: route.tier
+    };
+  }
+  return { ...route, allowed: true, constrained: false, constraintReason: null };
+}
+
 export function modelForOpenAiGeneration(account, task = 'post-generation', options = {}) {
-  const route = resolveRoute(account, task, options);
+  const route = constrainRouteForBudget(
+    resolveRoute(account, task, options),
+    options.budgetState || 'healthy',
+    account
+  );
   if (route.provider === 'openai' && route.model) return { ...route };
   return {
     ...route,
     provider: 'openai',
     model: account?.generation?.model || process.env.OPENAI_MODEL || null
+  };
+}
+
+export function resolveGenerationModel(account, context = {}) {
+  const base = context.route || resolveRoute(account, context.task || 'post-generation', {
+    escalateReasons: context.escalateReasons || []
+  });
+  const route = constrainRouteForBudget(base, context.budgetState || 'healthy', account);
+  const model = route.model || account?.generation?.model || process.env.OPENAI_MODEL || 'gpt-5';
+  return {
+    route: {
+      ...route,
+      provider: route.provider || 'openai',
+      model
+    },
+    model
   };
 }
 

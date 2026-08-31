@@ -1,6 +1,14 @@
 # Media Hunter
 
-Instagram のために毎回 AI 画像を生成する設計は使いません。投稿メディアは次の優先順位で探します。
+Instagram のために毎回 AI 画像を生成する設計は使いません。
+
+## 今できること / まだしないこと
+
+**現行の既定パスは「候補選択」です。** 渡された candidate（owned / Asset Library URL / オペレーター登録素材）を優先順位で並べ、entity verification を通したものだけ採用します。オープンウェブを巡回して公式画像を自動探索済み、という意味ではありません。
+
+公式ページの自動クロールは未接続が既定です。`media.acquireFromCanonical: true` かつ fetch adapter を渡したときだけ、**既知の canonical URL** から `og:image` 等を抽出します。抽出しても `usageBasis` は `unknown`、権利未確認のままです。Press kit / GitHub release の横断探索は V2 以降です。
+
+優先順位（渡された candidate に対して）:
 
 1. ユーザー所有素材
 2. 登録済み Asset Library

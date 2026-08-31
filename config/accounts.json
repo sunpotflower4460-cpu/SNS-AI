@@ -105,6 +105,27 @@
     "objectives": {
       "weights": {}
     },
+    "artist": {
+      "hybridMode": false,
+      "maxDirectPromotionShare": 0.2,
+      "aiMaxPostsPerDay": 2,
+      "mix": {
+        "tasteDiscovery": 0.4,
+        "musicAndCreation": 0.25,
+        "worldview": 0.2,
+        "directArtistPromotion": 0.15
+      },
+      "manualOverlap": {
+        "enabled": true,
+        "lookbackHours": 48,
+        "similarityThreshold": 0.55
+      },
+      "winnerResurface": {
+        "minDaysSinceLastUse": 180,
+        "requireNewAngle": true,
+        "requireDifferentClip": true
+      }
+    },
     "monetization": {
       "affiliate": {
         "enabled": false,
@@ -377,6 +398,7 @@
         "purposes": ["musicDiscovery", "release"]
       },
       "artist": {
+        "hybridMode": true,
         "mix": {
           "tasteDiscovery": 0.4,
           "musicAndCreation": 0.25,
@@ -425,6 +447,7 @@
         "purposes": ["musicDiscovery", "release"]
       },
       "artist": {
+        "hybridMode": true,
         "mix": {
           "tasteDiscovery": 0.4,
           "musicAndCreation": 0.25,

@@ -6,7 +6,8 @@ const NESTED_SECTION_KEYS = {
   safety: ['anomalyBrake'],
   generation: ['naturalization'],
   media: ['qa'],
-  monetization: ['affiliate']
+  monetization: ['affiliate'],
+  artist: ['manualOverlap', 'winnerResurface', 'mix']
 };
 
 export async function loadConfig() {

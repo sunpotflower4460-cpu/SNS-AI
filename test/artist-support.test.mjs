@@ -46,7 +46,10 @@ test('manual overlap reframes, replaces, or skips instead of repeating the same 
   });
   assert.equal(urlHit.overlapped, true);
   assert.ok(['reframe', 'delay', 'replace', 'skip'].includes(urlHit.action));
-  assert.equal(applyOverlapDecision(urlHit).proceed, false);
+  const applied = applyOverlapDecision(urlHit);
+  assert.equal(applied.proceed, true);
+  assert.equal(applied.needsRewrite, true);
+  assert.equal(applied.action, 'replace');
 
   const clear = detectManualOverlap({
     candidateText: '夜の制作でディレイのフィードバックを観察した',

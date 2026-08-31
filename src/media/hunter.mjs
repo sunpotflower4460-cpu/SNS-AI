@@ -1,5 +1,6 @@
 import { verifyMediaEntity, acceptAsProductImage } from './entity-verify.mjs';
 import { renderBrandCard } from './brand-card.mjs';
+import { acquireMediaCandidates } from './acquire.mjs';
 
 const PRIORITY = [
   'owned',
@@ -47,10 +48,24 @@ export async function huntMedia({
   candidates = [],
   allowBrandCard = true,
   brandCardInput = null,
-  now = new Date()
+  now = new Date(),
+  acquireFromCanonical = false,
+  fetchHtml = null
 } = {}) {
+  let pool = [...(candidates || [])];
+  let acquisition = { acquired: false, reason: 'not-requested', candidates: [], capability: 'canonical-html-extract' };
+  if ((!pool.length || acquireFromCanonical) && (target?.canonicalUrl || acquireFromCanonical)) {
+    acquisition = await acquireMediaCandidates({
+      canonicalUrl: target?.canonicalUrl,
+      entityName: target?.entityName || target?.name,
+      vendor: target?.vendor,
+      fetchHtml: acquireFromCanonical ? fetchHtml : null,
+      now
+    });
+    if (acquisition.acquired) pool = [...pool, ...acquisition.candidates];
+  }
   const inspected = [];
-  for (const candidate of sortHunterCandidates(candidates)) {
+  for (const candidate of sortHunterCandidates(pool)) {
     const verification = verifyMediaEntity(target, candidate);
     const record = {
       ...candidate,
@@ -67,7 +82,8 @@ export async function huntMedia({
         decision: 'verified-product-image',
         media: record,
         verification,
-        inspected
+        inspected,
+        acquisition
       };
     }
   }
@@ -78,7 +94,8 @@ export async function huntMedia({
       decision: 'verified-brand-visual',
       media: vendorVisual,
       verification: vendorVisual.verification,
-      inspected
+      inspected,
+      acquisition
     };
   }
 
@@ -106,17 +123,18 @@ export async function huntMedia({
           acceptedAsProductImage: false,
           reason: 'brand-card-fallback'
         },
-        inspected
+        inspected,
+        acquisition
       };
     }
-    return { decision: 'skip', media: null, verification: { verificationStatus: 'rejected', reason: 'brand-card-unavailable' }, inspected };
+    return { decision: 'skip', media: null, verification: { verificationStatus: 'rejected', reason: 'brand-card-unavailable' }, inspected, acquisition };
   }
 
   if (platform === 'x') {
-    return { decision: 'none', media: null, verification: { verificationStatus: 'unverified', reason: 'x-allows-no-media' }, inspected };
+    return { decision: 'none', media: null, verification: { verificationStatus: 'unverified', reason: 'x-allows-no-media' }, inspected, acquisition };
   }
 
-  return { decision: 'skip', media: null, verification: { verificationStatus: 'rejected', reason: 'no-verified-media' }, inspected };
+  return { decision: 'skip', media: null, verification: { verificationStatus: 'rejected', reason: 'no-verified-media' }, inspected, acquisition };
 }
 
 export const __test = { PRIORITY, SOURCE_TYPE_TO_PRIORITY, rank, sortHunterCandidates };

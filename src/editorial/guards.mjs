@@ -1,5 +1,5 @@
 import { assertArtistVoice } from '../artist/evidence.mjs';
-import { detectManualOverlap, applyOverlapDecision } from '../artist/overlap.mjs';
+import { detectManualOverlap, assertOverlapSafe } from '../artist/overlap.mjs';
 import { chooseLane } from '../artist/mix.mjs';
 import { decideUrlInvestment } from '../budget/url-intelligence.mjs';
 import { operationAllowed } from '../budget/governor.mjs';
@@ -9,6 +9,8 @@ import { assertConfirmedFacts } from '../research/source-quality.mjs';
 import { exploreAssignment } from '../growth/explore.mjs';
 import { objectivesForPostType } from '../growth/objectives.mjs';
 import { applyLinkPolicy, stripUrls } from '../content/link-gate.mjs';
+import { orbitRejectsCandidate } from '../artist/orbit.mjs';
+import { assertClaimsForLevel } from '../artist/provenance.mjs';
 
 export async function evaluateEditorialGuards({
   accountId,
@@ -19,11 +21,15 @@ export async function evaluateEditorialGuards({
   slotId,
   budgetState = 'healthy',
   mediaCandidates = [],
-  now = new Date()
+  now = new Date(),
+  route: providedRoute = null,
+  artistPlan = null
 } = {}) {
   const strategy = account.contentStrategy || brand?.strategy || null;
   const audit = {
     selectedModelTier: null,
+    selectedProvider: null,
+    selectedModel: null,
     escalationReason: null,
     estimatedCost: null,
     budgetRemaining: null,
@@ -32,7 +38,8 @@ export async function evaluateEditorialGuards({
     contentStrategy: strategy,
     artistEvidenceLevel: draft?.evidenceLevel || null,
     urlDecision: null,
-    experimentMode: null
+    experimentMode: null,
+    artistWhy: artistPlan?.why || null
   };
 
   const governor = operationAllowed({ operation: 'post-generation', state: budgetState, costType: 'estimated' });
@@ -45,9 +52,11 @@ export async function evaluateEditorialGuards({
   const escalateReasons = [];
   if (draft?.features?.linkRequired && draft?.features?.linkPurpose === 'highValueDiscovery') escalateReasons.push('high-value-url-post');
   if (Number(draft?.predictedScore || 0) >= 85 && draft?.selectionMode === 'explore') escalateReasons.push('experimental-high-potential');
-  const route = resolveRoute(account, 'post-generation', { escalateReasons });
+  const route = providedRoute || draft?.route || resolveRoute(account, 'post-generation', { escalateReasons });
   audit.selectedModelTier = route.tier;
-  audit.escalationReason = route.reasons[0] || null;
+  audit.selectedProvider = route.provider || null;
+  audit.selectedModel = route.model || null;
+  audit.escalationReason = route.escalationReason || route.reasons?.[0] || null;
 
   const explore = exploreAssignment(slotId, strategy, account.learning?.exploreRate ?? 0.2);
   audit.experimentMode = explore.mode;
@@ -62,6 +71,7 @@ export async function evaluateEditorialGuards({
   if (draft?.facts) assertConfirmedFacts(draft.text, draft.facts);
 
   if (strategy === 'artist-support') {
+    if (draft?.claims) assertClaimsForLevel(draft.claims, draft?.evidenceLevel || artistPlan?.funnel?.evidenceLevel);
     const voice = assertArtistVoice({ text: draft?.text, evidenceLevel: draft?.evidenceLevel || 'external_discovery' });
     audit.artistEvidenceLevel = voice.level;
     const overlap = detectManualOverlap({
@@ -73,14 +83,20 @@ export async function evaluateEditorialGuards({
       similarityThreshold: Number(account.artist?.manualOverlap?.similarityThreshold ?? 0.55),
       now
     });
-    const overlapDecision = applyOverlapDecision(overlap);
-    if (!overlapDecision.proceed) {
-      const error = new Error(`Artist manual overlap: ${overlapDecision.action}`);
+    assertOverlapSafe({ decision: overlap, candidateText: draft?.text, entity: draft?.entityName });
+    const orbitHit = orbitRejectsCandidate({
+      candidateText: draft?.text,
+      anchor: overlap.match?.entry || artistPlan?.anchors?.anchors?.[0],
+      entity: draft?.entityName
+    });
+    if (orbitHit.reject) {
+      const error = new Error(`Artist orbit rejected candidate: ${orbitHit.reason}`);
       error.code = 'ARTIST_OVERLAP';
-      error.action = overlapDecision.action;
+      error.action = overlap.action || 'skip';
       throw error;
     }
     audit.contentStrategy = `${strategy}:${chooseLane(slotId, account.artist?.mix, account).lane}`;
+    audit.overlapAction = overlap.action || null;
   }
 
   const urlDecision = decideUrlInvestment({

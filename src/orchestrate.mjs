@@ -19,9 +19,9 @@ import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from 
 import { assertAutonomyBrakeClear } from './ops/brake.mjs';
 import { publish } from './publish.mjs';
 import { evaluateEditorialGuards } from './editorial/guards.mjs';
-import { remainingBudget, loadBudgetPolicy } from './budget/governor.mjs';
-import { readJson } from './lib/json-store.mjs';
-import { fileURLToPath } from 'node:url';
+import { buildGenerationPreflight, loadBudgetSnapshot } from './budget/preflight.mjs';
+import { reservationAuditFields } from './budget/reservation.mjs';
+import { planArtistSlot } from './artist/plan.mjs';
 
 function parseArgs(argv) { const args = {}; for (let index = 0; index < argv.length; index += 1) { const token = argv[index]; if (!token.startsWith('--')) continue; const key = token.slice(2); const next = argv[index + 1]; if (!next || next.startsWith('--')) args[key] = true; else { args[key] = next; index += 1; } } return args; }
 function bool(value) { return value === true || String(value).toLowerCase() === 'true'; }
@@ -125,25 +125,63 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           ? ((await loadSharedTrendBrief(account.brand, accountId)) || (await loadTrendBrief(accountId)))
           : null;
         const humanFeedback = await recentHumanFeedback(accountId, Number(account.learning?.humanFeedbackWindow ?? 40));
-        await appendAudit({ account: accountId, stage: 'decision-start', slotId: slot.slotId, strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null, humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment });
+        let budget;
+        try { budget = await loadBudgetSnapshot(); }
+        catch { budget = { policy: null, state: 'healthy', remaining: null }; }
+        const preflight = buildGenerationPreflight(account, {
+          budget,
+          escalateReasons: [],
+          webSearch: Boolean(account.research?.webSearch)
+        });
+        await appendAudit({
+          account: accountId, stage: 'decision-start', slotId: slot.slotId,
+          strategyGeneratedAt: strategy?.generatedAt || null, trendGeneratedAt: trends?.generatedAt || null,
+          humanFeedbackCount: humanFeedback.length, experiment: experimentAssignment,
+          budgetState: preflight.state,
+          selectedModelTier: preflight.route.tier,
+          selectedProvider: preflight.route.provider,
+          selectedModel: preflight.route.model,
+          reasonForEscalation: preflight.route.escalationReason || null,
+          ...reservationAuditFields(preflight.reservation),
+          preflightOrder: preflight.order
+        });
 
-        const generatedDraft = await generatePost(accountId, account, history, { strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun });
+        let artistPlan = null;
+        if (account.contentStrategy === 'artist-support') {
+          artistPlan = planArtistSlot({
+            account: { ...account, id: accountId },
+            history,
+            budgetState: preflight.state,
+            slotId: slot.slotId,
+            now,
+            ingestConnected: false
+          });
+          if (!artistPlan.proceed) {
+            await appendAudit({
+              account: accountId, stage: 'artist-no-post', slotId: slot.slotId,
+              decision: artistPlan.decision, why: artistPlan.why, hybridMode: artistPlan.hybridMode
+            }).catch(() => {});
+            report.push({ account: accountId, slot: slot.slotId, status: 'skipped', reason: artistPlan.decision, why: artistPlan.why });
+            continue;
+          }
+        }
+
+        const generatedDraft = await generatePost(accountId, account, history, {
+          strategy, trends, humanFeedback, experimentAssignment, slotId: slot.slotId, dryRun,
+          route: preflight.route, artistPlan, allowWebSearch: preflight.allowWebSearch, budgetState: preflight.state
+        });
         // Naturalization is a final editorial pass on an already-valid winning candidate. It is
         // intentionally scoped here rather than inside the generic media resolver so low-level media
         // operations never acquire an extra AI dependency. When disabled or unavailable it returns the
         // original draft unchanged; when enabled it also sees recent posts and human feedback.
         const naturalized = await naturalizeDraft(accountId, account, generatedDraft, { history, humanFeedback, dryRun });
-        let budgetState = 'healthy';
-        try {
-          const policy = await loadBudgetPolicy();
-          const prior = await readJson(fileURLToPath(new URL('../data/reports/cost.json', import.meta.url)), null);
-          budgetState = remainingBudget(Number(prior?.governor?.accountedUsd || 0), policy).state;
-        } catch { budgetState = 'healthy'; }
+        const budgetState = preflight.state;
         const editorial = await evaluateEditorialGuards({
-          accountId, account, brand: account.brand, draft: naturalized, history, slotId: slot.slotId, budgetState, now
+          accountId, account, brand: account.brand, draft: naturalized, history, slotId: slot.slotId,
+          budgetState, now, route: generatedDraft.route || preflight.route, artistPlan
         });
         const { draft, decision: linkDecision } = applyLinkPolicy({ accountId, account, draft: editorial.draft, history, now });
-        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now });
+        const media = await resolveMediaDetailed(accountId, account, slot.slotId, draft, { dryRun, now, budgetState });
         ensureMediaForPlatform(account, media.url, media);
         draft.features = { ...(draft.features || {}), mediaDecision: media.decision };
         const experimentApplied = experimentAssignment
@@ -159,7 +197,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           source: account.mode === 'approval' ? 'approval' : 'auto', slotId: slot.slotId,
           features: draft.features, rationale: draft.rationale, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode, experiment, sources,
           mediaResolution: { decision: media.decision, source: media.source },
-          ai: { model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt, candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length, naturalization: draft.naturalization || null }
+          ai: {
+            model: draft.model, promptVersion: draft.promptVersion, attempt: draft.attempt,
+            candidatesConsidered: draft.candidatesConsidered, humanFeedbackCount: humanFeedback.length,
+            naturalization: draft.naturalization || null,
+            route: generatedDraft.route || preflight.route
+          }
         };
         await appendAudit({
           account: accountId, stage: 'candidate-selected', slotId: slot.slotId, predictedScore: draft.predictedScore, selectionMode: draft.selectionMode,
@@ -172,12 +215,15 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           } : null,
           experiment, sourceCount: sources.length, dryRun,
           linkPolicy: linkDecision.allowed ? null : { reason: linkDecision.reason, usage: linkDecision.usage || null },
-          selectedModelTier: editorial.audit?.selectedModelTier || null,
-          reasonForEscalation: editorial.audit?.escalationReason || null,
+          selectedModelTier: editorial.audit?.selectedModelTier || generatedDraft.route?.tier || preflight.route.tier,
+          selectedProvider: editorial.audit?.selectedProvider || generatedDraft.route?.provider || preflight.route.provider,
+          selectedModel: editorial.audit?.selectedModel || generatedDraft.route?.model || preflight.route.model,
+          reasonForEscalation: editorial.audit?.escalationReason || generatedDraft.route?.escalationReason || null,
           budgetState,
           mediaEntityVerification: media.verification?.verificationStatus || editorial.audit?.mediaEntityVerification || null,
           contentStrategy: editorial.audit?.contentStrategy || account.contentStrategy || null,
           artistEvidenceLevel: editorial.audit?.artistEvidenceLevel || null,
+          artistWhy: editorial.audit?.artistWhy || artistPlan?.why || null,
           urlDecision: editorial.audit?.urlDecision || null,
           experimentMode: editorial.audit?.experimentMode || (draft.selectionMode === 'explore' ? 'explore' : 'exploit')
         });

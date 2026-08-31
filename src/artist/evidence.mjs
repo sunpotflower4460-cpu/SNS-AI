@@ -82,7 +82,8 @@ export function emptyArtistLibrary() {
       songs: [], lyrics: [], albumArtwork: [], musicVideos: [], liveVideos: [], acousticVideos: [],
       photos: [], studioFootage: [], shortClips: [], profilePhotos: [], releaseUrls: [], streamingUrls: [],
       songBackgroundStories: [], productionNotes: [], instruments: [], plugins: [],
-      confirmedInterests: [], confirmedRecommendations: []
+      confirmedInterests: [], confirmedRecommendations: [],
+      masters: [], variants: []
     }
   };
 }

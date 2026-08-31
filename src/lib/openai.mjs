@@ -2,6 +2,7 @@ import { findNearDuplicate, safeDuplicateThreshold } from './duplicate.mjs';
 import { platformTextLimit, validateDraftText, xWeightedLength } from './safety.mjs';
 import { rankCandidates, shouldExplore } from './strategy-rank.mjs';
 import { consumeUsage } from '../ops/budget.mjs';
+import { resolveGenerationModel } from '../ai/router.mjs';
 
 const OPENAI_BASE = 'https://api.openai.com/v1';
 export const PROMPT_VERSION = 'sns-ai-2026-08-v3';
@@ -190,26 +191,46 @@ function generationPrompt(accountId, account, history, context, feedback) {
         tasteMatchMustNotClaimExperience: true,
         externalDiscoveryObjectiveOnly: true
       } : null,
+      artistPlan: context.artistPlan ? {
+        lane: context.artistPlan.lane || null,
+        orbit: context.artistPlan.orbit || null,
+        forbiddenParaphrases: context.artistPlan.forbiddenParaphrases || [],
+        funnel: context.artistPlan.funnel ? {
+          bottleneck: context.artistPlan.funnel.currentBottleneck,
+          recommendedLane: context.artistPlan.funnel.recommendedLane,
+          reason: context.artistPlan.funnel.reason
+        } : null,
+        why: context.artistPlan.why || []
+      } : null,
+      selectedRoute: context.route ? {
+        tier: context.route.tier,
+        provider: context.route.provider,
+        model: context.route.model,
+        escalationReason: context.route.escalationReason || context.route.reasons?.[0] || null
+      } : null,
       candidateCount: Number(account.generation?.candidateCount ?? 5), retryFeedback: feedback || ''
     }, null, 2)
   };
 }
 
-// Model precedence is account.generation.model -> OPENAI_MODEL -> 'gpt-5'. Note that
-// config/accounts.json sets defaults.generation.model and loadConfig merges defaults into every
-// account, so in practice the first branch always wins and the OPENAI_MODEL repository variable has no
-// effect. To change the model, edit config (per account, or defaults.generation.model) - not the
-// variable. The env fallback is kept for direct/local invocation against a config without that default.
+// Model comes from the AI router route decided BEFORE this call (budget preflight → reservation →
+// route → generation). A later silent fallback to a different default is forbidden when route.model
+// is set. If the route has no model (synthetic test accounts without ai.openaiTriageModel), fall back
+// to account.generation.model → OPENAI_MODEL → gpt-5 so existing mocks keep working.
 export async function generatePost(accountId, account, history = [], context = {}) {
   const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = safeDuplicateThreshold(account.generation?.duplicateThreshold, 0.72);
-  const model = account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5'; const explore = shouldExplore(context.slotId || new Date().toISOString(), account.learning?.exploreRate ?? context.strategy?.exploreRate ?? 0.2);
+  const resolved = resolveGenerationModel(account, context);
+  const route = resolved.route;
+  const model = resolved.model;
+  const explore = shouldExplore(context.slotId || new Date().toISOString(), account.learning?.exploreRate ?? context.strategy?.exploreRate ?? 0.2);
   const experiment = context.experimentAssignment || null;
   const dryRun = Boolean(context.dryRun);
+  const webSearch = Boolean(account.research?.webSearch) && context.allowWebSearch !== false;
   let feedback = '';
   let lastFallback = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const prompt = generationPrompt(accountId, account, history, context, feedback);
-    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch: Boolean(account.research?.webSearch), accountId, account, operation: 'post-generation', dryRun });
+    const prompt = generationPrompt(accountId, account, history, { ...context, route }, feedback);
+    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
     const valid = [];
     // Why the discard reasons are kept: when every candidate is rejected the retry prompt used to say only
     // "they were invalid or repetitive", so the model had no idea WHICH rule it broke and typically broke it
@@ -233,7 +254,17 @@ export async function generatePost(accountId, account, history = [], context = {
         features: winner.features || {}, predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
         sources: generated.citations || [], promptVersion: PROMPT_VERSION,
         experimentApplied: Boolean(experiment && String(winner.features?.[experiment.dimension] || '') === String(experiment.variant)),
-        model, attempt, candidatesConsidered: ranked.length };
+        model, attempt, candidatesConsidered: ranked.length,
+        route: {
+          tier: route.tier,
+          provider: route.provider,
+          model,
+          reasons: route.reasons || [],
+          escalationReason: route.escalationReason || route.reasons?.[0] || null,
+          constrained: Boolean(route.constrained),
+          constraintReason: route.constraintReason || null
+        }
+      };
     }
     const rejections = [...discardReasons].slice(0, 3);
     feedback = [

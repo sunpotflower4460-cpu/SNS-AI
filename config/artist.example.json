@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "EXAMPLE ONLY. Copy to a gitignored local/operator store before filling real artist facts. Never commit personal data, private URLs that reveal identity, or unconfirmed claims. Empty arrays are the correct starting state.",
+  "note": "EXAMPLE ONLY. Copy to a gitignored local/operator store before filling real artist facts. Never commit personal data, private URLs that reveal identity, or unconfirmed claims. Empty arrays are the correct starting state. Do not put signed or private storage URLs here.",
   "brandId": "artist",
   "displayName": "",
   "evidence": {
@@ -26,12 +26,16 @@
     "instruments": [],
     "plugins": [],
     "confirmedInterests": [],
-    "confirmedRecommendations": []
+    "confirmedRecommendations": [],
+    "masters": [],
+    "variants": []
   },
   "itemShape": {
     "id": "stable-id",
+    "masterAssetId": "stable-id",
     "title": "",
     "entityName": "",
+    "mediaType": "acoustic-performance | live-performance | mv | photo | ...",
     "evidenceLevel": "confirmed_personal | taste_match | external_discovery",
     "confirmedAs": ["liked", "used", "heard", "visited", "owned", "used_in_production", "recommended"],
     "mediaUrl": null,

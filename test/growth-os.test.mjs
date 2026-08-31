@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRoute, tierForTask, modelForOpenAiGeneration } from '../src/ai/router.mjs';
+import { resolveRoute, tierForTask, modelForOpenAiGeneration, constrainRouteForBudget, resolveGenerationModel } from '../src/ai/router.mjs';
 import { xAndInstagramFromBrief, buildCoreContentBrief } from '../src/brands/brief.mjs';
 import { assertAdaptedCopy, isCopyPaste } from '../src/content/platform-adapt.mjs';
 import { loadBrandsFile, resolveBrandForAccount, validateBrands } from '../src/brands/registry.mjs';
@@ -25,6 +25,15 @@ test('model router cascades cheap → balanced → high/critical instead of hard
   assert.equal(generation.provider, 'openai');
   assert.equal(generation.model, 'gpt-5-mini');
   assert.equal(modelForOpenAiGeneration(account, 'post-generation', { escalateReasons: ['high-value-url-post'] }).model, 'gpt-5');
+  const downgraded = constrainRouteForBudget(escalated, 'critical', account);
+  assert.equal(downgraded.tier, 'balanced');
+  assert.equal(downgraded.model, 'gpt-5-mini');
+  assert.equal(downgraded.constrained, true);
+  const used = resolveGenerationModel(account, { route: { tier: 'balanced', provider: 'openai', model: 'gpt-5-mini' } });
+  assert.equal(used.model, 'gpt-5-mini');
+  assert.notEqual(used.model, 'gpt-5');
+  const stopped = constrainRouteForBudget(escalated, 'stopped', account);
+  assert.equal(stopped.allowed, false);
 });
 
 test('one research brief becomes distinct X and Instagram copy specs', () => {

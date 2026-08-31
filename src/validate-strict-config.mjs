@@ -167,6 +167,12 @@ export function validateStrictConfig(config) {
     const experiments = merged(config, account, 'experiments');
     strictBoolean(errors, id, 'experiments.enabled', experiments.enabled);
 
+    const artist = merged(config, account, 'artist');
+    if (artist.hybridMode != null) strictBoolean(errors, id, 'artist.hybridMode', artist.hybridMode);
+    if (artist.maxDirectPromotionShare != null && (typeof artist.maxDirectPromotionShare !== 'number' || artist.maxDirectPromotionShare < 0 || artist.maxDirectPromotionShare > 1)) {
+      errors.push(`${id}: artist.maxDirectPromotionShare must be 0..1`);
+    }
+
     const media = merged(config, account, 'media');
     const strategy = media.strategy || 'none';
     if (!MEDIA_STRATEGIES.has(strategy)) errors.push(`${id}: unsupported media.strategy "${strategy}"`);

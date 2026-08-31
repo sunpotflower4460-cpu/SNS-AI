@@ -6,7 +6,8 @@ const X_PRICING_FILE = new URL('../../config/x-api-pricing.json', import.meta.ur
 
 export const BUDGET_STATES = ['healthy', 'warning', 'conservative', 'critical', 'stopped'];
 
-const EXPENSIVE = new Set(['image-generation', 'video-generation', 'web-search', 'high-model', 'critical-model', 'url-post', 'openai-generation']);
+const EXPENSIVE = new Set(['image-generation', 'video-generation', 'web-search', 'high-model', 'critical-model', 'url-post']);
+const PAID_GENERATION = new Set(['paid-ai-generation', 'openai-generation', 'post-generation', 'cheap-model', 'balanced-model', 'high-model', 'critical-model']);
 const PROTECTED = new Set(['safety', 'moderation', 'entity-verification', 'duplicate-check', 'factual-verification', 'manual-controls']);
 const FREE = new Set(['direct-fetch', 'cache-hit', 'brand-card', 'entity-verification', 'duplicate-check']);
 
@@ -110,4 +111,4 @@ export function nextCut(policy, alreadyCut = []) {
   return order.find((item) => !alreadyCut.includes(item)) || null;
 }
 
-export const __test = { EXPENSIVE, PROTECTED, FREE, line };
+export const __test = { EXPENSIVE, PAID_GENERATION, PROTECTED, FREE, line };

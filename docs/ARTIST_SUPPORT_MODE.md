@@ -35,4 +35,14 @@ Taste → Personality / worldview → Profile visit → Interest in artist → M
 
 ## 手動投稿との共存
 
-候補作成前に直近の本人投稿を見ます。同じ曲・同じURL・同じ告知なら `reframe` / `delay` / `replace` / `skip` し、短時間の機械的連投をしません。
+候補作成前に直近の本人投稿を見ます。同じ曲・同じURL・同じ告知なら:
+
+- `reframe` — 同一テーマを別の入口へ（言い直し禁止）
+- `replace` — 別 candidate / 別 asset / 別 topic
+- `delay` — この slot は投稿しない
+- `skip` — 明示的 skip
+
+同じ本人投稿を AI が言い直すだけは禁止です。V2 の Human Anchor / AI Orbit / Funnel Repair は [`ARTIST_SUPPORT_V2.md`](ARTIST_SUPPORT_V2.md)。
+
+`artist.hybridMode` は artist-x / artist-instagram で `true`（どちらも disabled scaffold）。Creator Action は hybrid のときだけ検討します。
+

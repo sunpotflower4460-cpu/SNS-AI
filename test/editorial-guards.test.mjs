@@ -38,6 +38,61 @@ test('editorial guards keep independent Plugin Radar posts and strip surplus URL
   assert.ok(result.route.tier);
 });
 
+test('provided generation route is the one audited; a later default model is not swapped in', async () => {
+  const account = {
+    platform: 'x',
+    contentStrategy: 'plugin-radar',
+    generation: { model: 'gpt-5' },
+    ai: { openaiTriageModel: 'gpt-5-mini' },
+    learning: { exploreRate: 0.2 },
+    linkPolicy: { maxUrlPostsPerWeek: 0, maxUrlPostsPerDay: 0, purposes: [] },
+    monetization: { affiliate: { enabled: false } },
+    media: { strategy: 'none' },
+    schedule: { timezone: 'UTC' }
+  };
+  const route = { tier: 'balanced', provider: 'openai', model: 'gpt-5-mini', reasons: [], escalationReason: null };
+  const result = await evaluateEditorialGuards({
+    accountId: 'music-tools-x',
+    account,
+    brand: { strategy: 'plugin-radar' },
+    draft: { text: '空間系を試す価値はある。', relationship: 'independent', route },
+    history: [],
+    slotId: 'music-tools-x:route',
+    budgetState: 'healthy',
+    route
+  });
+  assert.equal(result.audit.selectedModelTier, 'balanced');
+  assert.equal(result.audit.selectedProvider, 'openai');
+  assert.equal(result.audit.selectedModel, 'gpt-5-mini');
+});
+
+test('artist overlap reframe proceeds when the draft is a different entry, not a paraphrase', async () => {
+  const account = {
+    platform: 'x',
+    contentStrategy: 'artist-support',
+    artist: { mix: { tasteDiscovery: 0.4, musicAndCreation: 0.25, worldview: 0.2, directArtistPromotion: 0.15 }, manualOverlap: { lookbackHours: 48, similarityThreshold: 0.55 } },
+    learning: { exploreRate: 0.2 },
+    linkPolicy: { maxUrlPostsPerWeek: 0, maxUrlPostsPerDay: 0, purposes: [] },
+    media: { strategy: 'none' },
+    schedule: { timezone: 'UTC' }
+  };
+  const result = await evaluateEditorialGuards({
+    accountId: 'artist-x',
+    account,
+    brand: { strategy: 'artist-support' },
+    draft: {
+      text: '昔の弾き語りで、サビ前のギターだけ切り出した。',
+      evidenceLevel: 'confirmed_personal',
+      entityName: 'Re:trip'
+    },
+    history: [{ account: 'artist-x', source: 'manual', text: '今日はRe:tripを歌いました', at: '2026-08-31T10:00:00Z' }],
+    slotId: 'artist-x:orbit',
+    budgetState: 'healthy',
+    now: new Date('2026-08-31T12:00:00Z')
+  });
+  assert.match(result.audit.contentStrategy, /artist-support/);
+});
+
 test('hunter strategy on X with no verified media becomes a no-image post', async () => {
   const resolved = await resolveMediaDetailed('music-tools-x', {
     platform: 'x',

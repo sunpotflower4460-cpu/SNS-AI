@@ -33,6 +33,13 @@ test('conservative and critical block expensive ops but not safety or free ops',
   assert.equal(operationAllowed({ operation: 'entity-verification', state: 'stopped' }).allowed, true);
   assert.equal(operationAllowed({ operation: 'brand-card', state: 'stopped' }).allowed, true);
   assert.equal(operationAllowed({ operation: 'openai-generation', state: 'stopped' }).allowed, false);
+  assert.equal(operationAllowed({ operation: 'paid-ai-generation', state: 'stopped' }).allowed, false);
+  assert.equal(operationAllowed({ operation: 'post-generation', state: 'stopped' }).allowed, false);
+  assert.equal(operationAllowed({ operation: 'post-generation', state: 'critical' }).allowed, true);
+  assert.equal(operationAllowed({ operation: 'paid-ai-generation', state: 'critical' }).allowed, true);
+  assert.equal(operationAllowed({ operation: 'balanced-model', state: 'critical' }).allowed, true);
+  assert.equal(operationAllowed({ operation: 'high-model', state: 'critical' }).allowed, false);
+  assert.equal(operationAllowed({ operation: 'critical-model', state: 'conservative' }).allowed, false);
 });
 
 test('actual, estimated, and unknown cost types stay distinct', () => {

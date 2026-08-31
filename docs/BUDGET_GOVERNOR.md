@@ -30,7 +30,19 @@
 6. 投稿候補数
 7. 投稿頻度
 
-最後まで残す: safety / moderation / entity verification / duplicate check / factual verification / manual controls。
+## 生成前 preflight
+
+有料 AI generation は次の順です。**生成後に budget を見て止めることはしません。**
+
+1. budget preflight（`data/reports/cost.json` の accountedUsd。actual billing API は未配線）
+2. estimated reservation（課金ホールドではない。単価 0 は無料ではなく unknown）
+3. model selection（cheap / balanced / high / critical。critical/conservative では high/critical を選ばない）
+4. generation
+
+100% `stopped` では新規の有料 AI generation（dry-run の Responses 呼び出しを含む）を呼びません。95% `critical` では image / video / web-search / high / critical / url を API 前に止めます。cheap/balanced の本文生成は残します。safety / moderation / entity verification は止めません。
+
+実装: `src/budget/preflight.mjs`, `src/budget/reservation.mjs`。
+
 
 ## 再配分
 

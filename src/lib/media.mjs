@@ -4,6 +4,7 @@ import { generateAndHostVideoDetailed } from '../media/openai-video.mjs';
 import { reviewVisualUrl } from '../media/qa.mjs';
 import { huntMedia } from '../media/hunter.mjs';
 import { assertPublicHttpsTarget, assertPublicHttpsUrl, fetchPublicHttps } from './http.mjs';
+import { assertOperationAllowed } from '../budget/governor.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
@@ -32,21 +33,27 @@ async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
   return { url, altText: String(body.altText || '').slice(0, 1000), qa: endpointQa, endpointQa };
 }
 
-async function generated(accountId, account, slotId, draft, dryRun = false, now = new Date()) {
+async function generated(accountId, account, slotId, draft, dryRun = false, now = new Date(), budgetState = 'healthy') {
   const mediaType = account.media?.type || 'image';
   if (account.media?.endpoint) return dryRun
     ? { url: dryRunUrl('generate', mediaType), decision: 'generate', source: 'dry-run-endpoint', altText: '', qa: null }
     : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, 'generate')), decision: 'generate', source: 'endpoint' };
-  if (mediaType === 'reel' && account.media?.internalVideoGeneration !== false) return dryRun
-    ? { url: dryRunUrl('generate', 'reel'), decision: 'generate', source: 'dry-run-openai-video', altText: '', qa: null }
-    : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft, { now })), decision: 'generate', source: 'openai-video' };
-  if (mediaType === 'image' && account.media?.internalImageGeneration !== false) return dryRun
-    ? { url: dryRunUrl('generate', 'image'), decision: 'generate', source: 'dry-run-openai-image', altText: '', qa: null }
-    : { ...(await generateAndHostImageDetailed(accountId, account, slotId, draft)), decision: 'generate', source: 'openai-image' };
+  if (mediaType === 'reel' && account.media?.internalVideoGeneration !== false) {
+    if (!dryRun) assertOperationAllowed({ operation: 'video-generation', state: budgetState, costType: 'estimated' });
+    return dryRun
+      ? { url: dryRunUrl('generate', 'reel'), decision: 'generate', source: 'dry-run-openai-video', altText: '', qa: null }
+      : { ...(await generateAndHostVideoDetailed(accountId, account, slotId, draft, { now })), decision: 'generate', source: 'openai-video' };
+  }
+  if (mediaType === 'image' && account.media?.internalImageGeneration !== false) {
+    if (!dryRun) assertOperationAllowed({ operation: 'image-generation', state: budgetState, costType: 'estimated' });
+    return dryRun
+      ? { url: dryRunUrl('generate', 'image'), decision: 'generate', source: 'dry-run-openai-image', altText: '', qa: null }
+      : { ...(await generateAndHostImageDetailed(accountId, account, slotId, draft)), decision: 'generate', source: 'openai-image' };
+  }
   return { url: null, decision: 'none', source: null, altText: '', qa: null };
 }
 
-async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date() } = {}) {
+async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryRun = false, now = new Date(), budgetState = 'healthy' } = {}) {
   const media = account.media || {}; const strategy = media.strategy || 'none'; const mediaType = media.type || 'image';
   if (strategy === 'none') return { url: null, decision: 'none', source: null, altText: '', qa: null };
   if (strategy === 'hunter') {
@@ -71,7 +78,8 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
       platform: account.platform,
       candidates: [...(media.ownedAssets || []), ...(media.libraryAssets || []), ...libraryCandidates],
       allowBrandCard: account.platform === 'instagram',
-      now
+      now,
+      acquireFromCanonical: media.acquireFromCanonical === true
     });
     if (hunted.decision === 'skip') {
       const error = new Error('Media Hunter skipped: no verified product image and no usable brand card.');
@@ -113,7 +121,7 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
     return dryRun ? { url: dryRunUrl(decision, mediaType), decision, source: 'dry-run-endpoint', altText: '', qa: null }
       : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, decision)), decision, source: 'endpoint' };
   }
-  if (strategy === 'generate') return generated(accountId, account, slotId, draft, dryRun, now);
+  if (strategy === 'generate') return generated(accountId, account, slotId, draft, dryRun, now, budgetState);
   if (strategy === 'auto') {
     let decision = draft?.features?.mediaDecision || 'none';
     if (account.platform === 'instagram' && decision === 'none') decision = media.defaultInstagramDecision || 'generate';
@@ -121,16 +129,16 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
     if (decision === 'library') {
       const url = poolUrl(media, slotId);
       if (url) return { url, decision: 'library', source: 'pool', altText: '', qa: null };
-      return generated(accountId, account, slotId, draft, dryRun, now);
+      return generated(accountId, account, slotId, draft, dryRun, now, budgetState);
     }
     if (decision === 'search') {
       if (media.endpoint) return dryRun ? { url: dryRunUrl('search', mediaType), decision: 'search', source: 'dry-run-endpoint', altText: '', qa: null }
         : { ...(await requestMediaEndpoint(accountId, account, slotId, draft, 'search')), decision: 'search', source: 'endpoint' };
       const fallback = poolUrl(media, slotId);
       if (fallback) return { url: fallback, decision: 'library', source: 'pool-fallback', altText: '', qa: null };
-      return generated(accountId, account, slotId, draft, dryRun, now);
+      return generated(accountId, account, slotId, draft, dryRun, now, budgetState);
     }
-    if (decision === 'generate') return generated(accountId, account, slotId, draft, dryRun, now);
+    if (decision === 'generate') return generated(accountId, account, slotId, draft, dryRun, now, budgetState);
   }
   throw new Error(`Unsupported media strategy: ${strategy}`);
 }
@@ -139,7 +147,7 @@ function mediaQaEnabled(account = {}) {
   return account.media?.qa?.enabled !== false;
 }
 
-async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date() } = {}) {
+async function reviewSelectedImage(accountId, account, slotId, draft, resolved, { dryRun = false, now = new Date(), budgetState = 'healthy' } = {}) {
   const mediaType = account.media?.type || 'image';
   if (!mediaQaEnabled(account) || dryRun || mediaType !== 'image' || !resolved.url || (resolved.source === 'openai-image' && resolved.qa)) return resolved;
 
@@ -166,7 +174,7 @@ async function reviewSelectedImage(accountId, account, slotId, draft, resolved, 
     endpointQa: resolved.endpointQa || null, suitabilityReviewed: true, omittedUnsafeVisual: true
   };
   if (account.platform === 'instagram' && resolved.decision !== 'generate' && account.media?.internalImageGeneration !== false) {
-    const fallback = await generated(accountId, account, slotId, draft, false, now);
+    const fallback = await generated(accountId, account, slotId, draft, false, now, budgetState);
     if (fallback.url) return { ...fallback, fallbackFrom: resolved.source || resolved.decision, priorQa: qa };
   }
   const error = new Error('Selected image failed hard pre-publish visual QA.');
