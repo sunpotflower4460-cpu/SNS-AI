@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "note": "Global monthly governor across every brand and platform. Values here are operator policy, not live billing API data. actual vs estimated vs unknown must never be mixed.",
-  "monthlyBudgetUsd": 20,
+  "note": "Global monthly governor across every brand and platform. Current operational period: Plugin Radar X only (music-tools-x). monthlyBudgetUsd 8 covers X billing-cycle cap $4.50 + OpenAI monthly hard limit $3.00 + Groq Free Plan. Values here are operator policy, not live billing API data. actual vs estimated vs unknown must never be mixed.",
+  "monthlyBudgetUsd": 8,
   "warningThreshold": 0.7,
   "conservativeThreshold": 0.85,
   "hardStopThreshold": 0.95,
