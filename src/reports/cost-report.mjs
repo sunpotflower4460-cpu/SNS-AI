@@ -36,8 +36,8 @@ function sourceTypeCount(sourceResults, types) {
 // research fetch/dedup counts from the last persisted trend brief (src/research/trends.mjs), today's AI
 // provider usage from the existing budget ledger (src/ops/budget.mjs), and an X API usage/estimated-cost
 // summary derived from published post history (src/lib/history.mjs) plus an operator-maintained pricing
-// model (config/x-api-pricing.json). Nothing here invents numbers X itself does not expose - the pricing
-// model defaults to zero until an operator fills in real tier pricing.
+// model (config/x-api-pricing.json). Nothing here invents numbers X itself does not expose. The pricing
+// file is an operator-maintained estimate (currently 2026-09-02 X Pay-Per-Use); missing-file fallback is zero.
 export async function buildCostReport({ accountFilter, now = new Date() } = {}) {
   const accounts = await loadAccounts();
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);

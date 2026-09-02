@@ -22,7 +22,7 @@ Research → Select → Verify → Create → Media Match → Publish → Measur
 | Brief | Core brief → X版 / Instagram版へ分岐 | `src/brands/brief.mjs`, `src/content/platform-adapt.mjs` |
 | Media | Hunter + entity verification + brand card | `src/media/hunter.mjs`, `src/media/entity-verify.mjs`, `src/media/brand-card.mjs` |
 | Artist | Human Anchor, Orbit, Funnel Repair, assets, Creator Action | `src/artist/`。将来計画は [`ARTIST_SUPPORT_ROADMAP.md`](ARTIST_SUPPORT_ROADMAP.md) |
-| Budget | 月 $20 governor, URL 投資, 再配分 | `src/budget/` |
+| Budget | 月 $8 governor（現在の Plugin Radar X 運用期間）, URL 投資, 再配分 | `src/budget/` |
 | Router | cheap / balanced / high / critical | `src/ai/router.mjs` |
 | Account | 既存の publish unit。`music-tools-x` は維持 | `config/accounts.json` |
 

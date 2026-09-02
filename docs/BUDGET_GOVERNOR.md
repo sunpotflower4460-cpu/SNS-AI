@@ -1,6 +1,6 @@
 # Budget Governor
 
-3ブランド × X / Instagram の **全体** で月次ターゲット **20 USD** を管理します。
+現在の運用期間は Plugin Radar の X 1 アカウントのみです。全体の月次ターゲットは **8 USD** です（X 請求サイクル上限 $4.50 + OpenAI 月次 hard limit $3.00 + Groq Free Plan）。3ブランド × X / Instagram の設計枠は残していますが、Global cap は `config/budget-policy.json` の `monthlyBudgetUsd` が正です。
 
 ## 状態
 
