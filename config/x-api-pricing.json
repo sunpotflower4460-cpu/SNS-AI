@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "Operator-maintained cost ESTIMATE model, not live X billing API data. Set on 2026-09-02 from official X Pay-Per-Use prices: monthlyBaseFeeUsd 0, URL posts $0.20, non-URL posts $0.015, reads $0.005. SNS-AI metrics collection uses GET /2/tweets/{postId}, so reads are priced as Posts Read ($0.005), not Owned Read ($0.001). Re-check and update this file whenever X publishes a pricing change.",
+  "note": "Operator-maintained estimate set on 2026-09-02 from official X Pay-Per-Use prices: monthlyBaseFeeUsd 0, URL posts $0.20, non-URL posts $0.015, reads $0.005. Not live X billing API data. SNS-AI metrics collection uses GET /2/tweets/{postId}, so reads are priced as Posts Read ($0.005), not Owned Read ($0.001). Re-check and update this file whenever X publishes a pricing change.",
   "monthlyBaseFeeUsd": 0,
   "costPerUrlPostUsd": 0.20,
   "costPerNonUrlPostUsd": 0.015,
