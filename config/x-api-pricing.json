@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "note": "Operator-maintained cost ESTIMATE model, not real X billing data. Fill in your actual X API tier pricing (USD) to get a useful monthly cost estimate from `npm run cost-report`. Left at zero after a fresh clone deliberately, so the report never fabricates a plausible-looking number nobody actually entered.",
+  "note": "Operator-maintained cost ESTIMATE model, not live X billing API data. Set on 2026-09-02 from official X Pay-Per-Use prices: monthlyBaseFeeUsd 0, URL posts $0.20, non-URL posts $0.015, reads $0.005. SNS-AI metrics collection uses GET /2/tweets/{postId}, so reads are priced as Posts Read ($0.005), not Owned Read ($0.001). Re-check and update this file whenever X publishes a pricing change.",
   "monthlyBaseFeeUsd": 0,
-  "costPerUrlPostUsd": 0,
-  "costPerNonUrlPostUsd": 0,
-  "costPerReadOperationUsd": 0
+  "costPerUrlPostUsd": 0.20,
+  "costPerNonUrlPostUsd": 0.015,
+  "costPerReadOperationUsd": 0.005
 }

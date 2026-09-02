@@ -57,6 +57,20 @@ test('actual, estimated, and unknown cost types stay distinct', () => {
   assert.equal(summed.unknownCount, 1);
 });
 
+test('governor snapshot prices cost-report readOperations as Posts Read $0.005', () => {
+  const snapshot = buildGovernorSnapshot({
+    policy: { monthlyBudgetUsd: 8, warningThreshold: 0.7, conservativeThreshold: 0.85, hardStopThreshold: 0.95 },
+    pricing: { monthlyBaseFeeUsd: 0, costPerUrlPostUsd: 0.20, costPerNonUrlPostUsd: 0.015, costPerReadOperationUsd: 0.005 },
+    usageByAccount: { 'music-tools-x': { brandId: 'plugin-radar', platform: 'x' } },
+    xByAccount: { 'music-tools-x': { urlPosts: 1, nonUrlPosts: 2, readOperations: 4 } },
+    brands: [{ brandId: 'plugin-radar' }]
+  });
+  // 0.20 + 2*0.015 + 4*0.005 = 0.25
+  assert.equal(snapshot.totalEstimatedUsd, 0.25);
+  assert.equal(snapshot.monthlyBudgetUsd, 8);
+  assert.equal(snapshot.budgetState, 'healthy');
+});
+
 test('zero pricing is unknown rather than a fabricated rate', () => {
   const snapshot = buildGovernorSnapshot({
     policy,

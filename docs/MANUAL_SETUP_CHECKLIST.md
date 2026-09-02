@@ -56,7 +56,7 @@ In **Repository → Settings → Secrets and variables → Actions**, register o
 - [ ] Plugin Radar X remains `music-tools-x` with `credentialKey: music-tools-x`. Do not rename the credential key.
 - [ ] Instagram / Artist / Brand C accounts are disabled scaffolds. Do not invent Brand C's personality.
 - [ ] Copy `config/artist.example.json` to a gitignored `config/artist.json` only when real confirmed_personal facts exist. Never commit secrets or private artist data.
-- [ ] Fill `config/x-api-pricing.json` with real tier prices before treating cost-report USD as an estimate you can act on. Zero means unpriced, not free.
+- [ ] Keep `config/x-api-pricing.json` aligned with current X Pay-Per-Use prices. It is filled with a 2026-09-02 operator-maintained estimate (URL $0.20, non-URL $0.015, Posts Read $0.005 via `GET /2/tweets/{postId}`). Re-check when X changes pricing. Zero still means unpriced, not free.
 - [ ] Global cap is `config/budget-policy.json` (`monthlyBudgetUsd: 8` for the current Plugin Radar X-only period). Do not treat unknown AI unit prices as $0 actual spend.
 - [ ] Plugin Radar / Artist Instagram keep `internalImageGeneration: false`. Do not turn AI image generation on to "fill" a missing product photo.
 - [ ] Keep affiliate disabled until a separate reviewed change.

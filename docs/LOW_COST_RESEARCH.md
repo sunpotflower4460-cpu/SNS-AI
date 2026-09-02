@@ -133,8 +133,8 @@ exceeds the cap is not discarded — only its URL is stripped before publishing.
 `npm run cost-report` (`src/reports/cost-report.mjs`) reports, per account: direct-fetch/RSS/GitHub item
 counts, duplicate drops, today's Groq/OpenAI/Web Search/media call counts (from the existing budget
 ledger), and — for X accounts — published URL vs. non-URL post counts over the last 30 days plus an
-estimated monthly cost using the operator-maintained `config/x-api-pricing.json` pricing model (defaults to
-all zeros; fill in real tier pricing to get a meaningful estimate). None of this is real X billing data.
+estimated monthly cost using the operator-maintained `config/x-api-pricing.json` pricing model (2026-09-02
+X Pay-Per-Use operator estimate; re-check when X changes pricing). None of this is real X billing data.
 
 ## What this change does NOT do
 

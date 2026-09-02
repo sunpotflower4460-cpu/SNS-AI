@@ -267,7 +267,7 @@ Autopilot / Publish / Analytics / Researchを別々のCircuitとして監視し�
 
 金額ではなくAPI呼び出し回数で上限を掛けます。X API / OpenAI API側のcredits・billing・provider側rate limitは別途有効である必要があります。`budgets.groqCallsPerDay`はGroq research triage呼び出し専用の上限です。
 
-`npm run cost-report`（`src/reports/cost-report.mjs`）は、direct-fetch件数・重複除外件数・Groq/OpenAI/Web Search呼び出し件数・X APIのURL付き/なし投稿数と概算月額コスト（`config/x-api-pricing.json`をoperatorが実料金で埋めた場合のみ意味を持つ見積もり）を`data/reports/cost.{json,md}`にまとめます。
+`npm run cost-report`（`src/reports/cost-report.mjs`）は、direct-fetch件数・重複除外件数・Groq/OpenAI/Web Search呼び出し件数・X APIのURL付き/なし投稿数と概算月額コスト（`config/x-api-pricing.json`のoperator-maintained estimate。2026-09-02時点のX公式Pay-Per-Use。料金変更時は再確認）を`data/reports/cost.{json,md}`にまとめます。
 
 ## URL付き投稿の予算管理
 

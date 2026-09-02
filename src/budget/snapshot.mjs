@@ -1,14 +1,15 @@
 import { loadBudgetPolicy, loadXPricing, remainingBudget, projectedMonthEndCost, sumKnownUsd, classifyCostType } from './governor.mjs';
 import { reallocate } from './allocation.mjs';
 
-function estimateFromPricing(pricing, { urlPosts = 0, nonUrlPosts = 0, reads = 0 } = {}) {
+function estimateFromPricing(pricing, { urlPosts = 0, nonUrlPosts = 0, reads = 0, readOperations = 0 } = {}) {
   const url = Number(pricing.costPerUrlPostUsd || 0);
   const nonUrl = Number(pricing.costPerNonUrlPostUsd || 0);
   const read = Number(pricing.costPerReadOperationUsd || 0);
   const base = Number(pricing.monthlyBaseFeeUsd || 0);
+  const readCount = Number(reads || readOperations || 0);
   const allZero = url === 0 && nonUrl === 0 && read === 0 && base === 0;
   return classifyCostType({
-    estimatedUsd: base + urlPosts * url + nonUrlPosts * nonUrl + reads * read,
+    estimatedUsd: base + urlPosts * url + nonUrlPosts * nonUrl + readCount * read,
     unknown: allZero
   });
 }
