@@ -4,14 +4,14 @@ import { readFile } from 'node:fs/promises';
 
 const CONFIG = new URL('../config/accounts.json', import.meta.url);
 
-test('music-tools-x stays research-enabled but cannot publish before explicit activation', async () => {
+test('music-tools-x stays research-enabled and is activated only for controlled approval-mode dry-runs', async () => {
   const config = JSON.parse(await readFile(CONFIG, 'utf8'));
   const account = config.accounts?.['music-tools-x'];
 
   assert.ok(account, 'music-tools-x account must exist');
   assert.equal(account.platform, 'x');
-  assert.equal(account.enabled, false, 'production account must remain disabled until external setup is complete');
-  assert.equal(account.mode, 'approval', 'first live phase must require approval');
+  assert.equal(account.enabled, true, 'music-tools-x is enabled for controlled approval-mode dry-runs');
+  assert.equal(account.mode, 'approval', 'approval mode never publishes without an explicit dry_run:false + confirm_live:true workflow run');
   assert.equal(account.credentialKey, 'music-tools-x');
 
   assert.equal(account.research?.webSearch, true);

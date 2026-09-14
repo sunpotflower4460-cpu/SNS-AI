@@ -238,6 +238,10 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
 
     config.accounts['example-x'].enabled = false;
     config.accounts['example-x'].mode = 'pause';
+    // The shipped config enables music-tools-x in approval mode; pause it too so the unfiltered
+    // preflight really sees a config with nothing enabled (config is restored by the snapshot).
+    config.accounts['music-tools-x'].enabled = false;
+    config.accounts['music-tools-x'].mode = 'pause';
     await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     const nothingEnabled = await runLivePreflight();
     // Deliberately ok:false. With nothing enabled, preflight contacts neither OpenAI nor the provider

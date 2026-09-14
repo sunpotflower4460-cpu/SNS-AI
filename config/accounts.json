@@ -187,8 +187,8 @@
   "accounts": {
     "music-tools-x": {
       "platform": "x",
-      "enabled": false,
-      "mode": "pause",
+      "enabled": true,
+      "mode": "approval",
       "credentialKey": "music-tools-x",
       "brandId": "plugin-radar",
       "contentStrategy": "plugin-radar",

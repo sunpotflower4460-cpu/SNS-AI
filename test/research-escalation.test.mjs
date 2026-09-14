@@ -198,7 +198,7 @@ async function runWithBrief(top) {
   };
   try {
     await writeFile(TRENDS_FILE, `${JSON.stringify(trendBrief(top), null, 2)}\n`, 'utf8');
-    const report = await runAutopilot({ force: true, dryRun: true, now: new Date('2026-08-13T00:00:00+09:00') });
+    const report = await runAutopilot({ accountFilter: 'escalation-x', force: true, dryRun: true, now: new Date('2026-08-13T00:00:00+09:00') });
     return { report, bodies };
   } finally {
     globalThis.fetch = previousFetch;

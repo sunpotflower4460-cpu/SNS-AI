@@ -114,9 +114,15 @@ test('X automation compliance preflight blocks missing profile disclosure and AI
   assert.equal(instagram.checked, false);
   assert.equal(instagram.ok, true);
 
+  // The real config has xAutomationProfileComplianceConfirmedAccounts: ['music-tools-x'] (recorded via
+  // the compliance-attestation workflow as the approval-mode activation prerequisite), and the AI
+  // reply approval gate only fires while policy.autoReply is true - it is false, so the real
+  // compliance report for the approval-mode account must read ready.
   const realConfigReport = await runXAutomationCompliance({ accountFilter: 'music-tools-x' });
-  assert.equal(realConfigReport.ok, false);
+  assert.equal(realConfigReport.ok, true);
   assert.equal(realConfigReport.accounts[0].account, 'music-tools-x');
+  assert.equal(realConfigReport.accounts[0].profileComplianceConfirmed, true);
+  assert.equal(realConfigReport.accounts[0].aiReplyApprovalRequired, false, 'autoReply is off, so the AI reply bot gate stays inactive');
   await assert.rejects(() => runXAutomationCompliance({ accountFilter: 'missing-account' }), /Unknown account/);
 });
 

@@ -70,7 +70,8 @@ test('Plugin Radar keeps music-tools-x as the X account id', async () => {
   assert.equal(brand.handle.x, '@pluginradar_jp');
   const accounts = JSON.parse(await readFile(new URL('../config/accounts.json', import.meta.url), 'utf8'));
   assert.equal(accounts.accounts['music-tools-x'].credentialKey, 'music-tools-x');
-  assert.equal(accounts.accounts['music-tools-x'].enabled, false);
+  assert.equal(accounts.accounts['music-tools-x'].enabled, true, 'music-tools-x is enabled for controlled approval-mode dry-runs');
+  assert.equal(accounts.accounts['music-tools-x'].mode, 'approval', 'it must never run unattended');
   assert.equal(accounts.accounts['plugin-radar-instagram'].enabled, false);
   assert.equal(accounts.accounts['plugin-radar-instagram'].media.internalImageGeneration, false);
   assert.equal(accounts.accounts['artist-x'].enabled, false);
@@ -116,7 +117,12 @@ test('Manual-Only locks and affiliate stay in place after the growth-OS change',
   assert.equal(runtime.allowScheduledProviderPolling, false);
   const accounts = JSON.parse(await readFile(new URL('../config/accounts.json', import.meta.url), 'utf8'));
   for (const [id, account] of Object.entries(accounts.accounts)) {
-    assert.notEqual(account.enabled, true, `${id} must stay disabled`);
+    if (id === 'music-tools-x') {
+      assert.equal(account.enabled, true, 'music-tools-x is the single sanctioned enabled account');
+      assert.equal(account.mode, 'approval', 'enabled accounts must stay in approval mode under Manual-Only');
+    } else {
+      assert.notEqual(account.enabled, true, `${id} must stay disabled`);
+    }
     assert.notEqual(account.monetization?.affiliate?.enabled, true, `${id} must not enable affiliate`);
   }
 });

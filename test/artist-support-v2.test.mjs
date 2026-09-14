@@ -275,6 +275,11 @@ test('T: Manual-Only is not unlocked by Artist Support V2', async () => {
   assert.equal(runtime.allowAutomaticAccountActivation, false);
   const accounts = JSON.parse(await readFile(new URL('../config/accounts.json', import.meta.url), 'utf8'));
   for (const [id, account] of Object.entries(accounts.accounts)) {
+    if (id === 'music-tools-x') {
+      assert.equal(account.enabled, true, 'music-tools-x is the sanctioned approval-mode account');
+      assert.equal(account.mode, 'approval', 'it must never run unattended under Manual-Only');
+      continue;
+    }
     assert.notEqual(account.enabled, true, `${id} must stay disabled`);
   }
   assert.equal(accounts.accounts['artist-x'].artist.hybridMode, true);
