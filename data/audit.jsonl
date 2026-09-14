@@ -20,3 +20,5 @@
 {"at":"2026-08-19T18:00:19.354Z","schemaVersion":1,"account":"music-tools-x","stage":"strategy-updated","sampleSize":0,"strategyWindowDays":60,"confidence":0,"preferred":[],"experimentEvaluation":"none","activeExperiment":null}
 {"at":"2026-08-19T18:00:19.355Z","schemaVersion":1,"account":"example-x","stage":"strategy-updated","sampleSize":0,"strategyWindowDays":60,"confidence":0,"preferred":[],"experimentEvaluation":"none","activeExperiment":null}
 {"at":"2026-08-19T18:00:19.356Z","schemaVersion":1,"account":"example-instagram","stage":"strategy-updated","sampleSize":0,"strategyWindowDays":60,"confidence":0,"preferred":[],"experimentEvaluation":"none","activeExperiment":null}
+{"at":"2026-09-14T12:01:49.468Z","schemaVersion":1,"account":"music-tools-x","stage":"research-source-failed","sourceId":"kvr-news","sourceType":"rss","error":"RSS fetch failed for kvr-news: HTTP 301"}
+{"at":"2026-09-14T12:02:07.727Z","schemaVersion":1,"account":"music-tools-x","stage":"trend-error","code":null,"error":"Expected ',' or ']' after array element in JSON at position 2538 (line 1 column 2539)"}
