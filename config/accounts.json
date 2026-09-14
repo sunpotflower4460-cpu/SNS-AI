@@ -301,7 +301,9 @@
         "maxChars": 280,
         "historyWindow": 60,
         "duplicateThreshold": 0.68,
-        "candidateCount": 6
+        "candidateCount": 6,
+        "minPredictedScore": 35,
+        "lowScoreRetryCount": 1
       },
       "research": {
         "webSearch": true,

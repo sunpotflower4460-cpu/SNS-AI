@@ -83,6 +83,19 @@ export function validateStrictConfig(config) {
 
     const generation = merged(config, account, 'generation');
     strictPositiveInteger(errors, id, 'generation.maxChars', generation.maxChars);
+    // Publish-quality floor (see docs/PLUGIN_RADAR_QUALITY_GATE.md): predictedScore is always 0..100
+    // (src/lib/strategy-rank.mjs), so a threshold outside that range could never be satisfied (locking
+    // the account into permanent No Post) or could never actually gate anything. lowScoreRetryCount is
+    // capped at 3 so a misconfigured value cannot turn "one bounded retry" into a de facto unbounded
+    // regeneration loop - it can only ever consume attempts generatePost() already budgets, never add to
+    // that budget, but a very large value would still let it consume nearly all of it on score alone.
+    if (generation.minPredictedScore != null) strictRange(errors, id, 'generation.minPredictedScore', generation.minPredictedScore, 0, 100);
+    if (generation.lowScoreRetryCount != null) {
+      strictNonNegativeInteger(errors, id, 'generation.lowScoreRetryCount', generation.lowScoreRetryCount);
+      if (typeof generation.lowScoreRetryCount === 'number' && generation.lowScoreRetryCount > 3) {
+        errors.push(`${id}: generation.lowScoreRetryCount must be a small number (<=3)`);
+      }
+    }
     if (strictObject(errors, id, 'generation.naturalization', generation.naturalization) && generation.naturalization) {
       const naturalization = generation.naturalization;
       strictBoolean(errors, id, 'generation.naturalization.enabled', naturalization.enabled);

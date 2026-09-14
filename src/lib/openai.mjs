@@ -157,6 +157,37 @@ function lengthBudgetBrief(account) {
   };
 }
 
+// Plugin Radar (music-tools-x, contentStrategy: "plugin-radar") specific factual/category precision
+// rules. This is a GENERAL rule for the whole account's content, never a patch for one product: it must
+// never reference a specific product name (e.g. "SKR4CH") or ban a specific word (e.g. "音源") outright -
+// see the real production case this guards against in docs/PLUGIN_RADAR_QUALITY_GATE.md, where "音源その
+// ものを増やしたいなら" overstated a browser waveform/wavetable/sample DESIGN tool as if it added a new
+// instrument/sound source itself. No extra OpenAI call is added for this (the repository's $3/month hard
+// limit stays intact) - this only strengthens grounding inside the existing single generation call.
+const PLUGIN_RADAR_CATEGORY_PRECISION_RULES = [
+  'Product/entity type is a factual claim, not a marketing choice: preserve the type/function actually supported by the sources.',
+  'A browser/web tool must not be called a VST/plugin/instrument unless the sources say so.',
+  'A waveform, wavetable, preset, or sample material must not be described as a new instrument/sound source itself.',
+  'A utility/editor/designer must not be promoted into a synth/effect/plugin category without evidence.',
+  'If the exact category is uncertain, use a neutral term such as "ツール" instead of guessing.',
+  'Distinguish tool / plugin / instrument / synth / effect / sample / waveform / wavetable / preset / service / web app - keep this distinction in Japanese output too.',
+  'Do not convert "creates material for an existing synth" into "adds a new synth/sound source".',
+  'Never change or blur the product category to make it sound more exciting.',
+  'Prefer narrower, source-supported wording over a more exciting unsupported claim.'
+];
+
+// One deliberately bounded, non-exaggerating instruction for the low-predictedScore retry in
+// generatePost() below. Explicitly forbids every way a model could "cheat" the score up instead of
+// actually writing something better - see the quality floor comment on generatePost() for why this
+// exists and why it must never ask for more excitement/urgency instead of more substance.
+function lowScoreRetryFeedback(topScore, requiredScore) {
+  return [
+    `The best candidate scored ${topScore}, below the required minimum of ${requiredScore}.`,
+    'Regenerate with genuinely stronger substance: a sharper and more specific angle, a clearer answer to why this matters to this reader now, and more concrete, source-grounded detail.',
+    'Do NOT raise the score through exaggeration, clickbait, false urgency, fabricated benefits, fabricated personal experience, or unsupported comparisons - only real substance counts.'
+  ].join(' ');
+}
+
 function generationPrompt(accountId, account, history, context, feedback) {
   const recent = history.slice(0, Number(account.generation?.historyWindow ?? 30)).map((entry) => ({ at: entry.at, text: entry.text, features: entry.features || null }));
   const humanFeedback = (context.humanFeedback || []).map((row) => ({
@@ -176,7 +207,8 @@ function generationPrompt(accountId, account, history, context, feedback) {
       account.platform === 'x'
         ? `Length is measured in X weighted characters, not raw characters: full-width/CJK characters count as ${CJK_PROBE_WEIGHT} and every URL counts as ${URL_PROBE_WEIGHT}. Respect lengthBudget, not the raw character count.`
         : '',
-      experiment ? `Controlled experiment: candidates should use features.${experiment.dimension} exactly as "${experiment.variant}" while keeping other choices natural.` : ''
+      experiment ? `Controlled experiment: candidates should use features.${experiment.dimension} exactly as "${experiment.variant}" while keeping other choices natural.` : '',
+      account.contentStrategy === 'plugin-radar' ? PLUGIN_RADAR_CATEGORY_PRECISION_RULES.join('\n') : ''
     ].filter(Boolean).join('\n'),
     user: JSON.stringify({
       promptVersion: PROMPT_VERSION,
@@ -219,6 +251,16 @@ function generationPrompt(accountId, account, history, context, feedback) {
 // to account.generation.model → OPENAI_MODEL → gpt-5.6-luna so existing mocks keep working.
 export async function generatePost(accountId, account, history = [], context = {}) {
   const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = safeDuplicateThreshold(account.generation?.duplicateThreshold, 0.72);
+  // Publish-quality floor (opt-in, per-account - see docs/PLUGIN_RADAR_QUALITY_GATE.md): predictedScore
+  // is a RANKING score (spreadPotential/noveltyPotential/learned score - src/lib/strategy-rank.mjs), not
+  // a factual-accuracy score, so this floor only stops "ranked[0] anyway" from publishing a candidate
+  // that is weak by every account signal, not a fact-checker. minPredictedScore defaults to 0, which
+  // makes belowQualityFloor below always false - a complete no-op for every account that has not opted
+  // in. lowScoreRetryCount bounds how many of the EXISTING `attempts` iterations may be spent specifically
+  // on a quality-floor miss; it can only ever consume attempts generatePost already had budgeted, never
+  // add a call beyond `attempts`.
+  const minScore = Number(account.generation?.minPredictedScore ?? 0);
+  const lowScoreRetryLimit = Math.max(0, Number(account.generation?.lowScoreRetryCount ?? 0));
   const resolved = resolveGenerationModel(account, context);
   const route = resolved.route;
   const model = resolved.model;
@@ -228,6 +270,7 @@ export async function generatePost(accountId, account, history = [], context = {
   const webSearch = Boolean(account.research?.webSearch) && context.allowWebSearch !== false;
   let feedback = '';
   let lastFallback = [];
+  let qualityRetriesUsed = 0;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const prompt = generationPrompt(accountId, account, history, { ...context, route }, feedback);
     const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
@@ -249,12 +292,34 @@ export async function generatePost(accountId, account, history = [], context = {
     const pool = experiment && experimentMatched.length ? experimentMatched : (!experiment || attempt === attempts ? valid : []);
     const ranked = rankCandidates(pool, context.strategy, { explore });
     if (ranked.length) {
-      const winner = ranked[0]; if (!dryRun) await moderateText(winner.text, account, accountId);
+      const winner = ranked[0];
+      const belowQualityFloor = Number(winner.predictedScore) < minScore;
+      if (belowQualityFloor && qualityRetriesUsed < lowScoreRetryLimit && attempt < attempts) {
+        // Exactly one (or account.generation.lowScoreRetryCount) extra chance, spent from the SAME
+        // attempts budget the loop already has - not an additional API call beyond `attempts`.
+        qualityRetriesUsed += 1;
+        feedback = lowScoreRetryFeedback(winner.predictedScore, minScore);
+        continue;
+      }
+      if (belowQualityFloor) {
+        // Retry budget (or remaining attempts) is exhausted and the best candidate is still below the
+        // floor: this is an intentional editorial "No Post" for this slot, not a system failure - it must
+        // never be treated as a provider outage/circuit failure (see orchestrate.mjs's nonCircuitCodes).
+        const error = new Error(`Best candidate scored ${winner.predictedScore}, below the required minimum of ${minScore}.`);
+        error.code = 'CONTENT_QUALITY_BELOW_THRESHOLD';
+        error.predictedScore = winner.predictedScore;
+        error.requiredScore = minScore;
+        error.qualityRetriesUsed = qualityRetriesUsed;
+        error.selectionMode = explore ? 'explore' : 'exploit';
+        error.selectedModel = model;
+        throw error;
+      }
+      if (!dryRun) await moderateText(winner.text, account, accountId);
       return { text: winner.text, mediaPrompt: String(winner.mediaPrompt || ''), rationale: String(winner.rationale || ''),
         features: winner.features || {}, predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
         sources: generated.citations || [], promptVersion: PROMPT_VERSION,
         experimentApplied: Boolean(experiment && String(winner.features?.[experiment.dimension] || '') === String(experiment.variant)),
-        model, attempt, candidatesConsidered: ranked.length,
+        model, attempt, candidatesConsidered: ranked.length, qualityRetriesUsed,
         route: {
           tier: route.tier,
           provider: route.provider,
@@ -292,4 +357,4 @@ export async function generateTrendBrief(accountId, account) {
     user: JSON.stringify({ promptVersion: PROMPT_VERSION, accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', topics: account.profile?.topics || [] }, null, 2) });
 }
 
-export const __test = { generationPrompt, lengthBudgetBrief };
+export const __test = { generationPrompt, lengthBudgetBrief, lowScoreRetryFeedback, PLUGIN_RADAR_CATEGORY_PRECISION_RULES };

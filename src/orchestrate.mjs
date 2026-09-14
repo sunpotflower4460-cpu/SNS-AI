@@ -40,6 +40,11 @@ export function autopilotErrorStatus(error) {
   if (error.code === 'MEDIA_HOSTING_TOO_LARGE') return 'media-too-large';
   if (error.code === 'PROVIDER_DEPRECATED') return 'provider-deprecated';
   if (error.code === 'AUTONOMY_BRAKE') return 'safety-brake';
+  // A below-floor best candidate (src/lib/openai.mjs generatePost()) is a deliberate editorial "no post
+  // today" decision, not a bug or provider outage - given its own status (rather than folding into the
+  // generic 'skipped' bucket above) so an operator can tell "the AI decided not to post because quality
+  // was too low" apart from every other skip reason at a glance.
+  if (error.code === 'CONTENT_QUALITY_BELOW_THRESHOLD') return 'quality-no-post';
   if (['MEDIA_HUNTER_SKIP', 'ARTIST_OVERLAP', 'URL_BUDGET_DEFER', 'UNCONFIRMED_FACTS', 'ARTIST_EVIDENCE_VIOLATION', 'RELATIONSHIP_DISCLOSURE_MISSING', 'RELATIONSHIP_UNKNOWN', 'MEDIA_ENTITY_MISMATCH'].includes(error.code)) {
     return 'skipped';
   }
@@ -247,7 +252,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
       } catch (error) {
         // BUDGET_CONFIG_INVALID is a typo in budgets config, not a provider outage: opening the
         // resilience circuit for it pauses the account for a cooldown and buries the real cause.
-        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'BUDGET_CONFIG_INVALID', 'BUDGET_GOVERNOR_BLOCKED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED', 'MEDIA_HUNTER_SKIP', 'ARTIST_OVERLAP', 'URL_BUDGET_DEFER', 'UNCONFIRMED_FACTS', 'ARTIST_EVIDENCE_VIOLATION', 'RELATIONSHIP_DISCLOSURE_MISSING', 'RELATIONSHIP_UNKNOWN', 'MEDIA_ENTITY_MISMATCH'];
+        const nonCircuitCodes = ['BUDGET_EXHAUSTED', 'BUDGET_CONFIG_INVALID', 'BUDGET_GOVERNOR_BLOCKED', 'CIRCUIT_OPEN', 'AUTONOMY_BRAKE', 'MEDIA_QA_FAILED', 'MEDIA_QA_INPUT_TOO_LARGE', 'MEDIA_HOSTING_TOO_LARGE', 'SLOT_ALREADY_CLAIMED', 'PROVIDER_DEPRECATED', 'MEDIA_HUNTER_SKIP', 'ARTIST_OVERLAP', 'URL_BUDGET_DEFER', 'UNCONFIRMED_FACTS', 'ARTIST_EVIDENCE_VIOLATION', 'RELATIONSHIP_DISCLOSURE_MISSING', 'RELATIONSHIP_UNKNOWN', 'MEDIA_ENTITY_MISMATCH', 'CONTENT_QUALITY_BELOW_THRESHOLD'];
         // Same reasoning as the dry-run success path above: a dry run proves nothing about whether a
         // real publish would succeed, so a FAILED dry-run preview (a transient Responses API hiccup,
         // malformed model output, etc.) must not be able to open/increment the live circuit either -
@@ -257,6 +262,18 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
           error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
         }).catch(() => {});
+        if (error.code === 'CONTENT_QUALITY_BELOW_THRESHOLD') {
+          // A dedicated, easy-to-query audit stage for "the AI itself decided not to post today" -
+          // separate from the generic 'autopilot-error' row above so an operator (or a report) can find
+          // every quality-gated No Post without having to filter on `code` inside a free-text error
+          // message. No secret material and no full post text here; the score/config numbers are enough.
+          await appendAudit({
+            account: accountId, stage: 'candidate-quality-no-post', slotId: slot.slotId,
+            predictedScore: error.predictedScore ?? null, requiredScore: error.requiredScore ?? null,
+            qualityRetriesUsed: error.qualityRetriesUsed ?? null, selectionMode: error.selectionMode || null,
+            selectedModel: error.selectedModel || null, dryRun
+          }).catch(() => {});
+        }
         const status = autopilotErrorStatus(error);
         // PROVIDER_DEPRECATED, MEDIA_HOSTING_TOO_LARGE, and MEDIA_QA_INPUT_TOO_LARGE are all excluded
         // from the resilience circuit (see nonCircuitCodes above) precisely because they are
@@ -272,7 +289,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         // MEDIA_QA_FAILED - a genuine content-quality rejection that a fresh regeneration attempt with
         // different AI-generated content might actually pass - is deliberately NOT included here, even
         // though it shares the 'media-qa-failed' status with MEDIA_QA_INPUT_TOO_LARGE.
-        const TERMINAL_SKIP_CODES = new Set(['PROVIDER_DEPRECATED', 'MEDIA_HOSTING_TOO_LARGE', 'MEDIA_QA_INPUT_TOO_LARGE']);
+        // CONTENT_QUALITY_BELOW_THRESHOLD joins this set for the same reason PROVIDER_DEPRECATED etc. do:
+        // nothing else stops the SAME due slot from re-paying for a full generatePost() call (including
+        // its low-score retry) on every subsequent poll within its scheduling window. A quality-gated No
+        // Post is exactly as terminal for this slot as those other lifecycle/config skips - persisting it
+        // bounds the wasted spend to at most one paid attempt-plus-retry per slot per window.
+        const TERMINAL_SKIP_CODES = new Set(['PROVIDER_DEPRECATED', 'MEDIA_HOSTING_TOO_LARGE', 'MEDIA_QA_INPUT_TOO_LARGE', 'CONTENT_QUALITY_BELOW_THRESHOLD']);
         if (!dryRun && TERMINAL_SKIP_CODES.has(error.code)) {
           try {
             // The slotHandled() check at the top of this loop iteration is not atomic with this write -
@@ -294,7 +316,12 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
             continue;
           }
         }
-        report.push({ account: accountId, slot: slot.slotId, status, error: error.message });
+        report.push({
+          account: accountId, slot: slot.slotId, status, error: error.message,
+          ...(error.code === 'CONTENT_QUALITY_BELOW_THRESHOLD'
+            ? { predictedScore: error.predictedScore, requiredScore: error.requiredScore, qualityRetriesUsed: error.qualityRetriesUsed }
+            : {})
+        });
       }
     }
   }
