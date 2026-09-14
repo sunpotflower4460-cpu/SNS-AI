@@ -11,27 +11,38 @@ import { readFile } from 'node:fs/promises';
 
 test('model router cascades cheap → balanced → high/critical instead of hardcoding one model', () => {
   const account = {
-    generation: { model: 'gpt-5' },
-    ai: { groqModel: 'openai/gpt-oss-120b', openaiTriageModel: 'gpt-5-mini' }
+    generation: { model: 'gpt-5.6-luna' },
+    ai: {
+      groqModel: 'openai/gpt-oss-120b',
+      openaiTriageModel: 'gpt-5.6-luna',
+      openaiHighModel: 'gpt-5.6-terra',
+      openaiCriticalModel: 'gpt-5.6-sol'
+    }
   };
   assert.equal(tierForTask('research-triage').tier, 'cheap');
-  assert.equal(resolveRoute(account, 'research-triage').provider, 'groq');
+  const cheapRoute = resolveRoute(account, 'research-triage');
+  assert.equal(cheapRoute.provider, 'groq');
+  assert.equal(cheapRoute.model, 'openai/gpt-oss-120b');
   const escalated = resolveRoute(account, 'post-generation', { escalateReasons: ['high-value-url-post'] });
   assert.equal(escalated.tier, 'high');
+  assert.equal(escalated.provider, 'openai');
+  assert.equal(escalated.model, 'gpt-5.6-terra');
   assert.equal(escalated.cascaded, true);
   const critical = resolveRoute(account, 'weekly-strategy', { escalateReasons: ['weekly-strategy-review'] });
   assert.equal(critical.tier, 'critical');
+  assert.equal(critical.provider, 'openai');
+  assert.equal(critical.model, 'gpt-5.6-sol');
   const generation = modelForOpenAiGeneration(account, 'post-generation');
   assert.equal(generation.provider, 'openai');
-  assert.equal(generation.model, 'gpt-5-mini');
-  assert.equal(modelForOpenAiGeneration(account, 'post-generation', { escalateReasons: ['high-value-url-post'] }).model, 'gpt-5');
+  assert.equal(generation.model, 'gpt-5.6-luna');
+  assert.equal(modelForOpenAiGeneration(account, 'post-generation', { escalateReasons: ['high-value-url-post'] }).model, 'gpt-5.6-terra');
   const downgraded = constrainRouteForBudget(escalated, 'critical', account);
   assert.equal(downgraded.tier, 'balanced');
-  assert.equal(downgraded.model, 'gpt-5-mini');
+  assert.equal(downgraded.model, 'gpt-5.6-luna');
   assert.equal(downgraded.constrained, true);
-  const used = resolveGenerationModel(account, { route: { tier: 'balanced', provider: 'openai', model: 'gpt-5-mini' } });
-  assert.equal(used.model, 'gpt-5-mini');
-  assert.notEqual(used.model, 'gpt-5');
+  const used = resolveGenerationModel(account, { route: { tier: 'balanced', provider: 'openai', model: 'gpt-5.6-luna' } });
+  assert.equal(used.model, 'gpt-5.6-luna');
+  assert.notEqual(used.model, 'gpt-5.6-terra', 'an explicit balanced route must not be swapped for the high-tier model');
   const stopped = constrainRouteForBudget(escalated, 'stopped', account);
   assert.equal(stopped.allowed, false);
 });

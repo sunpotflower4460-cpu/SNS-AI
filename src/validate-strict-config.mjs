@@ -149,6 +149,8 @@ export function validateStrictConfig(config) {
     }
     if (ai.groqModel != null && typeof ai.groqModel !== 'string') errors.push(`${id}: ai.groqModel must be a string`);
     if (ai.openaiTriageModel != null && typeof ai.openaiTriageModel !== 'string') errors.push(`${id}: ai.openaiTriageModel must be a string`);
+    if (ai.openaiHighModel != null && typeof ai.openaiHighModel !== 'string') errors.push(`${id}: ai.openaiHighModel must be a string`);
+    if (ai.openaiCriticalModel != null && typeof ai.openaiCriticalModel !== 'string') errors.push(`${id}: ai.openaiCriticalModel must be a string`);
 
     const linkPolicy = merged(config, account, 'linkPolicy');
     strictBoolean(errors, id, 'linkPolicy.preferNoLink', linkPolicy.preferNoLink);

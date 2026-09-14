@@ -216,7 +216,7 @@ function generationPrompt(accountId, account, history, context, feedback) {
 // Model comes from the AI router route decided BEFORE this call (budget preflight → reservation →
 // route → generation). A later silent fallback to a different default is forbidden when route.model
 // is set. If the route has no model (synthetic test accounts without ai.openaiTriageModel), fall back
-// to account.generation.model → OPENAI_MODEL → gpt-5 so existing mocks keep working.
+// to account.generation.model → OPENAI_MODEL → gpt-5.6-luna so existing mocks keep working.
 export async function generatePost(accountId, account, history = [], context = {}) {
   const attempts = Number(account.generation?.maxAttempts ?? 3); const threshold = safeDuplicateThreshold(account.generation?.duplicateThreshold, 0.72);
   const resolved = resolveGenerationModel(account, context);
@@ -286,7 +286,7 @@ const TREND_SCHEMA = { type: 'object', additionalProperties: false, required: ['
     } } }
 } };
 export async function generateTrendBrief(accountId, account) {
-  const model = account.research?.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5';
+  const model = account.research?.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
   return responseJson({ model, webSearch: true, schema: TREND_SCHEMA, name: 'trend_brief', accountId, account, operation: 'trend-intelligence',
     system: 'Research current public information for one social account. Prefer recent, credible sources. Return trends that are actually relevant; do not force a trend. Risk includes misinformation, sensitivity, legal, and brand risk.',
     user: JSON.stringify({ promptVersion: PROMPT_VERSION, accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', topics: account.profile?.topics || [] }, null, 2) });

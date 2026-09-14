@@ -251,14 +251,21 @@ test('R: direct promo hard cap is maintained under funnel mix', () => {
 
 test('S: budget critical does not select expensive model options', () => {
   const account = {
-    generation: { model: 'gpt-5' },
-    ai: { openaiTriageModel: 'gpt-5-mini', groqModel: 'openai/gpt-oss-120b' }
+    generation: { model: 'gpt-5.6-luna' },
+    ai: {
+      openaiTriageModel: 'gpt-5.6-luna',
+      openaiHighModel: 'gpt-5.6-terra',
+      openaiCriticalModel: 'gpt-5.6-sol',
+      groqModel: 'openai/gpt-oss-120b'
+    }
   };
   const high = resolveRoute(account, 'post-generation', { escalateReasons: ['high-value-url-post'] });
+  assert.equal(high.model, 'gpt-5.6-terra');
   const constrained = constrainRouteForBudget(high, 'critical', account);
   assert.notEqual(constrained.tier, 'high');
   assert.notEqual(constrained.tier, 'critical');
   assert.equal(constrained.tier, 'balanced');
+  assert.equal(constrained.model, 'gpt-5.6-luna');
 });
 
 test('T: Manual-Only is not unlocked by Artist Support V2', async () => {

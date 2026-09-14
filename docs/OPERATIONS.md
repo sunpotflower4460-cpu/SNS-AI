@@ -32,7 +32,8 @@ npm run maintenance
 
 既定:
 
-- text / QA: `gpt-5`
+- text（triage/balanced）: `gpt-5.6-luna`（high: `gpt-5.6-terra` / critical: `gpt-5.6-sol` — escalation reasonが必要）
+- QA: `media.qa.model`（未設定時はgeneration.model = `gpt-5.6-luna`へfallback）
 - image: `gpt-image-2`
 - video: `sora-2`（**OpenAI Videos APIは2026-09-24に終了**。既定の`internalVideoGeneration`は`false`）
 

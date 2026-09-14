@@ -111,7 +111,7 @@ Web Search is never called first for a `directFetch: true` account.
   `'groq'` usage kind.
 - `src/ai/openai-task.mjs` — the OpenAI-side implementation of the same cheap-task interface, reusing
   `src/lib/openai.mjs`'s existing transport (so budget consumption/retries stay identical to every other
-  OpenAI call in this repository) with a smaller/cheaper model (`gpt-5-mini` by default).
+  OpenAI call in this repository) with a smaller/cheaper model (`gpt-5.6-luna` by default).
 - `GROQ_API_KEY` is entirely optional. Missing it, or any Groq failure, falls forward to OpenAI —
   **OpenAI-only configurations keep working exactly as before.** OpenAI integration itself
   (`src/lib/openai.mjs generatePost/generateTrendBrief/moderateText`) is unmodified; Groq is additive.

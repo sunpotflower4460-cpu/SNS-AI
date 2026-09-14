@@ -1,6 +1,6 @@
 import { openaiRequest, outputText, parseJsonText } from '../lib/openai.mjs';
 
-const DEFAULT_MODEL = 'gpt-5-mini';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
 
 // The OpenAI-side implementation of the same cheap-task interface Groq implements
 // (src/ai/groq.mjs) - a smaller/cheaper OpenAI model for triage-style work, reusing the existing
