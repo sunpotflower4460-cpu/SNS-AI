@@ -213,7 +213,7 @@ test('X Reel publishing runs video download, initialize, append, finalize, proce
 
 test('Instagram Live Preflight validates identity, OpenAI models, and public hosting and blocks private hosting', async () => {
   const previousFetch = globalThis.fetch;
-  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
+  const env = saveEnv('OPENAI_API_KEY', 'GROQ_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_REPOSITORY');
   await withFiles([CONFIG], async () => {
     try {
       const config = JSON.parse(await readFile(CONFIG, 'utf8'));
@@ -232,6 +232,7 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
       await writeFile(CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 
       process.env.OPENAI_API_KEY = 'preflight-openai-key';
+      process.env.GROQ_API_KEY = 'test-groq-key';
       process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
         'example-instagram': { accessToken: 'ig-access-token', igUserId: 'ig-user-123' }
       });
@@ -250,6 +251,9 @@ test('Instagram Live Preflight validates identity, OpenAI models, and public hos
         }
         const modelProbe = target.match(/^https:\/\/api\.openai\.com\/v1\/models\/([^/]+)$/);
         if (modelProbe) return jsonResponse({ id: modelProbe[1], owned_by: 'openai' });
+        if (target === 'https://api.groq.com/openai/v1/models') {
+          return jsonResponse({ object: 'list', data: [{ id: 'openai/gpt-oss-120b', object: 'model' }] });
+        }
         if (target === 'https://api.github.com/repos/sunpotflower4460-cpu/SNS-AI') {
           assert.equal(options.headers.Authorization, 'Bearer github-test-token');
           return jsonResponse({ private: privateRepo });

@@ -192,7 +192,7 @@ test('Instagram top-level autopilot publishes media and collects insights with m
 test('approval mode creates an approval issue and X media preflight validates OAuth2 identity and scopes', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv(
-    'OPENAI_API_KEY', 'OPENAI_MODEL', 'SOCIAL_CREDENTIALS_JSON',
+    'OPENAI_API_KEY', 'OPENAI_MODEL', 'GROQ_API_KEY', 'SOCIAL_CREDENTIALS_JSON',
     'GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_REPOSITORY', 'X_OAUTH2_STATE_KEY'
   );
   try {
@@ -223,6 +223,7 @@ test('approval mode creates an approval issue and X media preflight validates OA
 
       process.env.OPENAI_API_KEY = 'test-openai-key';
       process.env.OPENAI_MODEL = 'gpt-5';
+      process.env.GROQ_API_KEY = 'test-groq-key';
       process.env.GITHUB_TOKEN = 'test-gh-token';
       delete process.env.GH_TOKEN;
       process.env.GITHUB_REPOSITORY = 'owner/repo';
@@ -248,6 +249,9 @@ test('approval mode creates an approval issue and X media preflight validates OA
         }
         if (target === 'https://api.openai.com/v1/models/gpt-5') {
           return jsonResponse({ id: 'gpt-5', owned_by: 'openai' });
+        }
+        if (target === 'https://api.groq.com/openai/v1/models') {
+          return jsonResponse({ object: 'list', data: [{ id: 'openai/gpt-oss-120b', object: 'model' }] });
         }
         if (target.startsWith('https://api.github.com/repos/owner/repo/issues?state=open') && !options.method) {
           githubCalls.push('issue-lookup');

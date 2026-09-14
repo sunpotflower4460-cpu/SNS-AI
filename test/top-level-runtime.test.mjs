@@ -60,7 +60,7 @@ async function restore(path, saved) {
 
 test('top-level autonomous runtime wires generation, publishing, preflight, and metrics safely', async () => {
   const previousFetch = globalThis.fetch;
-  const env = saveEnv('OPENAI_API_KEY', 'OPENAI_MODEL', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
+  const env = saveEnv('OPENAI_API_KEY', 'OPENAI_MODEL', 'GROQ_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY');
   const tracked = [CONFIG_FILE, ...MUTABLE_FILES];
   const savedFiles = new Map();
   for (const path of tracked) savedFiles.set(path, await snapshot(path));
@@ -99,6 +99,7 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
 
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.OPENAI_MODEL = 'gpt-5';
+    process.env.GROQ_API_KEY = 'test-groq-key';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
       'example-x': {
         consumerKey: 'consumer-key',
@@ -141,6 +142,9 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
       }
       if (target === 'https://api.openai.com/v1/models/gpt-5') {
         return jsonResponse({ id: 'gpt-5', owned_by: 'openai' });
+      }
+      if (target === 'https://api.groq.com/openai/v1/models') {
+        return jsonResponse({ object: 'list', data: [{ id: 'openai/gpt-oss-120b', object: 'model' }] });
       }
       if (target === 'https://api.x.com/2/users/me?user.fields=id,name,username') {
         return jsonResponse({ data: { id: 'user-1', username: 'example', name: 'Example' } });

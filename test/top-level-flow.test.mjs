@@ -194,11 +194,12 @@ test('autopilot publishes through X and the metrics collector captures the first
 
 test('Live Preflight validates OpenAI model visibility and the authenticated X identity without posting', async () => {
   const previousFetch = globalThis.fetch;
-  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
+  const env = saveEnv('OPENAI_API_KEY', 'GROQ_API_KEY', 'SOCIAL_CREDENTIALS_JSON');
   const files = await snapshotFiles([CONFIG_FILE, ...DATA_FILES]);
   try {
     await installIntegrationAccount();
     process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.GROQ_API_KEY = 'test-groq-key';
     process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({ 'integration-x': credentials() });
 
     let postAttempted = false;
@@ -210,6 +211,9 @@ test('Live Preflight validates OpenAI model visibility and the authenticated X i
       if (target === 'https://api.openai.com/v1/models/gpt-5') {
         assert.equal(options.headers.Authorization, 'Bearer test-openai-key');
         return jsonResponse({ id: 'gpt-5', owned_by: 'openai' });
+      }
+      if (target === 'https://api.groq.com/openai/v1/models') {
+        return jsonResponse({ object: 'list', data: [{ id: 'openai/gpt-oss-120b', object: 'model' }] });
       }
       if (target === 'https://api.x.com/2/users/me?user.fields=id,name,username') {
         assert.match(String(options.headers.Authorization), /^OAuth /);
