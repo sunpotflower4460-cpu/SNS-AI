@@ -64,7 +64,7 @@
     "ai": {
       "providers": ["groq", "openai"],
       "allowFallback": true,
-      "groqModel": "llama-3.1-8b-instant",
+      "groqModel": "openai/gpt-oss-120b",
       "openaiTriageModel": "gpt-5-mini"
     },
     "linkPolicy": {

@@ -54,7 +54,7 @@ test('preflight blocks paid generation at 100% and expensive tiers at 95% before
 test('model selection happens after budget preflight and does not pick expensive options when critical', () => {
   const account = {
     generation: { model: 'gpt-5' },
-    ai: { groqModel: 'llama-3.1-8b-instant', openaiTriageModel: 'gpt-5-mini' }
+    ai: { groqModel: 'openai/gpt-oss-120b', openaiTriageModel: 'gpt-5-mini' }
   };
   const healthy = selectGenerationRoute(account, { escalateReasons: ['high-value-url-post'], budgetState: 'healthy' });
   assert.equal(healthy.tier, 'high');

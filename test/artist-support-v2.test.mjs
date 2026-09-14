@@ -252,7 +252,7 @@ test('R: direct promo hard cap is maintained under funnel mix', () => {
 test('S: budget critical does not select expensive model options', () => {
   const account = {
     generation: { model: 'gpt-5' },
-    ai: { openaiTriageModel: 'gpt-5-mini', groqModel: 'llama-3.1-8b-instant' }
+    ai: { openaiTriageModel: 'gpt-5-mini', groqModel: 'openai/gpt-oss-120b' }
   };
   const high = resolveRoute(account, 'post-generation', { escalateReasons: ['high-value-url-post'] });
   const constrained = constrainRouteForBudget(high, 'critical', account);

@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 test('model router cascades cheap → balanced → high/critical instead of hardcoding one model', () => {
   const account = {
     generation: { model: 'gpt-5' },
-    ai: { groqModel: 'llama-3.1-8b-instant', openaiTriageModel: 'gpt-5-mini' }
+    ai: { groqModel: 'openai/gpt-oss-120b', openaiTriageModel: 'gpt-5-mini' }
   };
   assert.equal(tierForTask('research-triage').tier, 'cheap');
   assert.equal(resolveRoute(account, 'research-triage').provider, 'groq');
