@@ -90,8 +90,16 @@ const CANDIDATE_SCHEMA = {
         text: { type: 'string' }, mediaPrompt: { type: 'string' }, rationale: { type: 'string' },
         spreadPotential: { type: 'number', minimum: 0, maximum: 100 }, noveltyPotential: { type: 'number', minimum: 0, maximum: 100 },
         features: { type: 'object', additionalProperties: false,
-          required: ['topic', 'angle', 'hook', 'emotion', 'format', 'cta', 'mediaDecision', 'trendUsed'],
-          properties: { topic: { type: 'string' }, angle: { type: 'string' }, hook: { type: 'string' }, emotion: { type: 'string' }, format: { type: 'string' }, cta: { type: 'string' }, mediaDecision: { type: 'string', enum: ['none', 'library', 'search', 'generate'] }, trendUsed: { type: 'boolean' } }
+          required: ['topic', 'angle', 'hook', 'emotion', 'format', 'cta', 'mediaDecision', 'trendUsed', 'trendEvidenceIndex'],
+          properties: {
+            topic: { type: 'string' }, angle: { type: 'string' }, hook: { type: 'string' }, emotion: { type: 'string' }, format: { type: 'string' }, cta: { type: 'string' }, mediaDecision: { type: 'string', enum: ['none', 'library', 'search', 'generate'] }, trendUsed: { type: 'boolean' },
+            // Nullable rather than omittable: OpenAI's strict json_schema mode requires every property to
+            // be listed in `required`, so "no trend item was used" is expressed as trendEvidenceIndex:null,
+            // not by leaving the field out. Points at the evidenceIndex trendBrief.items were annotated
+            // with in generationPrompt() below - a stable position reference, never a product name/id, so
+            // this mechanism works identically for any account and any product.
+            trendEvidenceIndex: { type: ['integer', 'null'], minimum: 0 }
+          }
         }
       }
     }}
@@ -173,7 +181,14 @@ const PLUGIN_RADAR_CATEGORY_PRECISION_RULES = [
   'Distinguish tool / plugin / instrument / synth / effect / sample / waveform / wavetable / preset / service / web app - keep this distinction in Japanese output too.',
   'Do not convert "creates material for an existing synth" into "adds a new synth/sound source".',
   'Never change or blur the product category to make it sound more exciting.',
-  'Prefer narrower, source-supported wording over a more exciting unsupported claim.'
+  'Prefer narrower, source-supported wording over a more exciting unsupported claim.',
+  // Guards the second real production case: a generated post added "DAW内で完結したい人には対象外" (not
+  // for people who want to stay inside their DAW) about OXO Steps - an inferred limitation the bound
+  // source never actually stated. Compatibility/limitation claims are exactly as factual as the category
+  // claims above, so they get the same "only if the evidence says so, otherwise omit" rule.
+  'Compatibility, limitation, and "not for X" claims (not compatible, unsupported, cannot, only works with X, requires X, not for people who want Y) are factual claims: state one only when the selected/bound evidence explicitly confirms it, never as an inferred conclusion.',
+  'Do not infer an unstated limitation from a positive fact (evidence saying a product supports macOS does not, by itself, support a claim that it lacks Windows support) unless the evidence explicitly states the limitation.',
+  'When the evidence does not explicitly support a negative/limitation claim, omit that claim rather than guessing.'
 ];
 
 // One deliberately bounded, non-exaggerating instruction for the low-predictedScore retry in
@@ -186,6 +201,60 @@ function lowScoreRetryFeedback(topScore, requiredScore) {
     'Regenerate with genuinely stronger substance: a sharper and more specific angle, a clearer answer to why this matters to this reader now, and more concrete, source-grounded detail.',
     'Do NOT raise the score through exaggeration, clickbait, false urgency, fabricated benefits, fabricated personal experience, or unsupported comparisons - only real substance counts.'
   ].join(' ');
+}
+
+// Entity <-> evidence binding. Fixes the real production case where a music-tools-x candidate selected
+// "OXO Steps" as its topic but payload.sources only carried OTHER products' trend URLs (SKR4CH, FRCTL
+// Audio GRN, KVEIK) - the winning candidate and its "evidence" were for different entities. trendIndex is
+// a stable ARRAY POSITION reference into trendBrief.items, never a product name/id, so this mechanism is
+// entirely general and works identically for any product.
+function trendEvidenceItems(trends) {
+  return Array.isArray(trends?.items) ? trends.items : [];
+}
+
+// Annotates each trend item with the evidenceIndex the model is asked to reference back - done once, on
+// the copy actually sent to the model, so the index the model returns always lines up with what
+// resolveTrendEvidence() below re-derives from the SAME context.trends the candidate was generated from.
+function trendBriefForPrompt(trends) {
+  if (!trends) return null;
+  const items = trendEvidenceItems(trends).map((item, index) => ({ ...item, evidenceIndex: index }));
+  return { ...trends, items };
+}
+
+// Resolves features.trendEvidenceIndex back to the real trend item it names, or null if the index is
+// missing, out of range, malformed, or points at an item with no usable (https) URL. This is the single
+// source of truth both the Plugin Radar validation below and the source-binding on the winning candidate
+// use, so they can never disagree about what counts as "a valid reference."
+function resolveTrendEvidence(candidate, trends) {
+  const items = trendEvidenceItems(trends);
+  const index = candidate?.features?.trendEvidenceIndex;
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= items.length) return null;
+  const item = items[index];
+  if (!item || typeof item.url !== 'string' || !/^https:\/\//i.test(item.url)) return null;
+  return { index, url: item.url, title: item.topic || null };
+}
+
+// Plugin Radar only (contentStrategy: "plugin-radar"): a candidate that claims to have used a trend
+// (features.trendUsed: true) but cannot be bound to a real, URL-bearing trend item is rejected here -
+// through the SAME per-candidate validation path text/duplicate checks already use (see the try/catch
+// around this call in generatePost()), so a mismatch costs no extra API call and is bounded by the
+// existing `attempts` retry loop exactly like any other invalid candidate, never an unbounded retry.
+function assertPluginRadarTrendEvidence(candidate, trends) {
+  if (candidate?.features?.trendUsed !== true) return;
+  if (!resolveTrendEvidence(candidate, trends)) {
+    throw new Error('trendUsed candidate did not reference a valid trend evidence item (features.trendEvidenceIndex must point at a real trendBrief.items entry with a URL).');
+  }
+}
+
+function dedupeSources(sources) {
+  const seen = new Set();
+  const result = [];
+  for (const source of sources || []) {
+    if (!source?.url || seen.has(source.url)) continue;
+    seen.add(source.url);
+    result.push(source);
+  }
+  return result;
 }
 
 function generationPrompt(accountId, account, history, context, feedback) {
@@ -208,13 +277,16 @@ function generationPrompt(accountId, account, history, context, feedback) {
         ? `Length is measured in X weighted characters, not raw characters: full-width/CJK characters count as ${CJK_PROBE_WEIGHT} and every URL counts as ${URL_PROBE_WEIGHT}. Respect lengthBudget, not the raw character count.`
         : '',
       experiment ? `Controlled experiment: candidates should use features.${experiment.dimension} exactly as "${experiment.variant}" while keeping other choices natural.` : '',
+      context.trends
+        ? 'trendBrief.items each carry an evidenceIndex. When features.trendUsed is true, set features.trendEvidenceIndex to the evidenceIndex of the ONE specific trend item you actually used as your primary factual basis for this candidate - not a different item, and not an item about a different product. Set it to null when trendUsed is false or no single trend item was the basis.'
+        : '',
       account.contentStrategy === 'plugin-radar' ? PLUGIN_RADAR_CATEGORY_PRECISION_RULES.join('\n') : ''
     ].filter(Boolean).join('\n'),
     user: JSON.stringify({
       promptVersion: PROMPT_VERSION,
       accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', generation: account.generation || {},
       lengthBudget: lengthBudgetBrief(account),
-      objectives: account.objectives || {}, recentPosts: recent, humanFeedback, learnedStrategy: context.strategy || null, trendBrief: context.trends || null,
+      objectives: account.objectives || {}, recentPosts: recent, humanFeedback, learnedStrategy: context.strategy || null, trendBrief: trendBriefForPrompt(context.trends),
       experiment,
       brand: account.brand ? { brandId: account.brand.brandId, strategy: account.brand.strategy, sharedResearchId: account.brand.sharedResearchId } : null,
       contentStrategy: account.contentStrategy || null,
@@ -284,6 +356,7 @@ export async function generatePost(accountId, account, history = [], context = {
       try {
         candidate.text = validateDraftText(account, candidate.text);
         const duplicate = findNearDuplicate(candidate.text, history, threshold); if (duplicate) continue;
+        if (account.contentStrategy === 'plugin-radar') assertPluginRadarTrendEvidence(candidate, context.trends);
         valid.push(candidate);
       } catch (error) { discardReasons.add(String(error?.message || 'invalid candidate')); }
     }
@@ -315,9 +388,21 @@ export async function generatePost(accountId, account, history = [], context = {
         throw error;
       }
       if (!dryRun) await moderateText(winner.text, account, accountId);
+      // Bound trend evidence (Plugin Radar only, since assertPluginRadarTrendEvidence above already
+      // guarantees any trendUsed:true winner has one) goes FIRST - it is the entity the candidate is
+      // actually about, unlike generated.citations, which are only known to be relevant to this account's
+      // topics in general, not necessarily to the selected candidate's specific entity (the real bug: an
+      // "OXO Steps" candidate previously shipped with only SKR4CH/FRCTL/KVEIK citations). Deduped by URL;
+      // the existing max-source cap is unchanged (orchestrate.mjs still slices to 30 downstream).
+      const boundEvidence = account.contentStrategy === 'plugin-radar' ? resolveTrendEvidence(winner, context.trends) : null;
+      const mergedSources = dedupeSources([
+        ...(boundEvidence ? [{ url: boundEvidence.url, title: boundEvidence.title }] : []),
+        ...(generated.citations || [])
+      ]);
       return { text: winner.text, mediaPrompt: String(winner.mediaPrompt || ''), rationale: String(winner.rationale || ''),
-        features: winner.features || {}, predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
-        sources: generated.citations || [], promptVersion: PROMPT_VERSION,
+        features: { ...(winner.features || {}), trendEvidenceUrl: boundEvidence?.url || null },
+        predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',
+        sources: mergedSources, promptVersion: PROMPT_VERSION,
         experimentApplied: Boolean(experiment && String(winner.features?.[experiment.dimension] || '') === String(experiment.variant)),
         model, attempt, candidatesConsidered: ranked.length, qualityRetriesUsed,
         route: {
@@ -357,4 +442,7 @@ export async function generateTrendBrief(accountId, account) {
     user: JSON.stringify({ promptVersion: PROMPT_VERSION, accountId, platform: account.platform, profile: account.profile || {}, instructions: account.instructions || '', topics: account.profile?.topics || [] }, null, 2) });
 }
 
-export const __test = { generationPrompt, lengthBudgetBrief, lowScoreRetryFeedback, PLUGIN_RADAR_CATEGORY_PRECISION_RULES };
+export const __test = {
+  generationPrompt, lengthBudgetBrief, lowScoreRetryFeedback, PLUGIN_RADAR_CATEGORY_PRECISION_RULES,
+  trendBriefForPrompt, resolveTrendEvidence, assertPluginRadarTrendEvidence, dedupeSources
+};

@@ -233,7 +233,14 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           artistEvidenceLevel: editorial.audit?.artistEvidenceLevel || null,
           artistWhy: editorial.audit?.artistWhy || artistPlan?.why || null,
           urlDecision: editorial.audit?.urlDecision || null,
-          experimentMode: editorial.audit?.experimentMode || (draft.selectionMode === 'explore' ? 'explore' : 'exploit')
+          experimentMode: editorial.audit?.experimentMode || (draft.selectionMode === 'explore' ? 'explore' : 'exploit'),
+          // Entity<->evidence binding (Plugin Radar; see src/lib/openai.mjs generatePost()): lets an
+          // operator confirm after the fact what the published candidate was actually based on, without
+          // storing the full source text - only the already-public URL it resolved to (or null when the
+          // candidate did not use a specific trend item).
+          trendEvidenceIndex: draft.features?.trendEvidenceIndex ?? null,
+          trendEvidenceUrl: draft.features?.trendEvidenceUrl ?? null,
+          boundEvidenceCount: draft.features?.trendEvidenceUrl ? 1 : 0
         });
 
         // A dry run never calls the publisher and (as of the dry-run budget-isolation fix) never even
