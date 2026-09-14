@@ -12,6 +12,7 @@ import { appendAudit } from './lib/audit.mjs';
 import { loadStrategy } from './learning/store.mjs';
 import { loadTrendBrief } from './research/trends.mjs';
 import { loadSharedTrendBrief } from './research/shared.mjs';
+import { deriveResearchEscalationReasons } from './research/escalation.mjs';
 import { recentHumanFeedback } from './feedback/store.mjs';
 import { loadExperimentState } from './experiments/store.mjs';
 import { assignmentForSlot } from './experiments/engine.mjs';
@@ -128,9 +129,10 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         let budget;
         try { budget = await loadBudgetSnapshot(); }
         catch { budget = { policy: null, state: 'healthy', remaining: null }; }
+        const escalationReasons = deriveResearchEscalationReasons(trends);
         const preflight = buildGenerationPreflight(account, {
           budget,
-          escalateReasons: [],
+          escalateReasons: escalationReasons,
           webSearch: Boolean(account.research?.webSearch)
         });
         await appendAudit({
@@ -142,6 +144,7 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
           selectedProvider: preflight.route.provider,
           selectedModel: preflight.route.model,
           reasonForEscalation: preflight.route.escalationReason || null,
+          escalationReasons,
           ...reservationAuditFields(preflight.reservation),
           preflightOrder: preflight.order
         });
