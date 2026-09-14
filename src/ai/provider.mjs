@@ -26,13 +26,23 @@ export function providerOrderFor(account, task) {
 // for callers that need a specific provider or nothing (e.g. to deliberately measure Groq alone), and
 // each provider still enforces its own budget independently - falling forward can never bypass a
 // configured cap, only move the spend to a different, still-budgeted provider.
+//
+// An optional params.validate(result) lets a caller reject a response that parsed as JSON but does not
+// actually match the shape it needs (e.g. src/research/triage.mjs's schema check) - Groq's json_object
+// response format only guarantees syntactically valid JSON, not schema conformance the way OpenAI's
+// strict json_schema mode does, and a truncated response can in principle still parse as valid-but-wrong
+// JSON. Treating a validate() throw exactly like a provider call throwing keeps this on the same
+// fall-forward path as every other provider failure, instead of silently accepting malformed data or
+// hard-failing before OpenAI gets a chance to answer.
 export async function runAiTask(accountId, account, task, params = {}) {
+  const { validate, ...providerParams } = params;
   const order = providerOrderFor(account, task);
   if (!order.length) throw new Error(`No AI provider configured for task "${task}".`);
   let lastError;
   for (const name of order) {
     try {
-      const result = await PROVIDERS[name](accountId, account, task, params);
+      const result = await PROVIDERS[name](accountId, account, task, providerParams);
+      if (validate) validate(result);
       return { ...result, provider: name };
     } catch (error) {
       lastError = error;

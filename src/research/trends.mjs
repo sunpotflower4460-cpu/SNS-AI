@@ -102,7 +102,23 @@ export async function refreshTrends({ accountFilter, force = false } = {}) {
   }
   return report;
 }
+// Only 'failed' is a real research failure. 'fresh'/'shared'/'updated'/'budget-exhausted'/'circuit-open'
+// are all intended control states (nothing broke; the run simply skipped, deferred, or already
+// succeeded elsewhere) and must never be treated as fatal - that would fail a normal, healthy CI run
+// every time a brief was already fresh. This mirrors src/orchestrate.mjs's hasFatalStatus/FATAL_STATUSES
+// for exactly the same reason: a scheduled/manual run must not exit 0 and look green while research
+// actually failed (e.g. a source fetch or triage JSON parse error), which previously happened because
+// refreshTrends() only recorded 'failed' into the report without ever surfacing it as a process exit code.
+const FATAL_TREND_STATUSES = new Set(['failed']);
+export function hasFatalTrendStatus(report) {
+  return (report || []).some((entry) => FATAL_TREND_STATUSES.has(entry.status));
+}
+
 const idx = process.argv.indexOf('--account');
-if (import.meta.url === `file://${process.argv[1]}`) console.log(JSON.stringify(await refreshTrends({ accountFilter: idx >= 0 ? process.argv[idx + 1] : undefined, force: process.argv.includes('--force') }), null, 2));
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const report = await refreshTrends({ accountFilter: idx >= 0 ? process.argv[idx + 1] : undefined, force: process.argv.includes('--force') });
+  console.log(JSON.stringify(report, null, 2));
+  if (hasFatalTrendStatus(report)) process.exitCode = 1;
+}
 
 export const __test = { opportunityScore, buildResearchResult };

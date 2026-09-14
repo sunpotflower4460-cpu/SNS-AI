@@ -1,4 +1,4 @@
-import { fetchPublicHttps } from '../../lib/http.mjs';
+import { fetchWithSafeRedirects } from '../../lib/http.mjs';
 import { normalizeCandidate } from './normalize.mjs';
 
 function decodeEntities(text) {
@@ -52,7 +52,13 @@ export function parseFeed(xml) {
 
 export async function fetchRssSource(source) {
   if (!source?.url) throw new Error(`RSS source ${source?.id || '(unknown)'} is missing a url.`);
-  const response = await fetchPublicHttps(source.url, {}, `research-source:${source.id}`);
+  // Vendor RSS feeds routinely move (a canonical-URL change, a CDN/host migration) and return a
+  // redirect rather than serving the feed directly - a bare, non-redirect-following fetch here treats
+  // that 301/302 as an outright failure (see kvr-news's HTTP 301 in the audit trail) even though the
+  // feed itself is perfectly reachable one hop away. fetchWithSafeRedirects re-validates each hop as a
+  // public HTTPS destination exactly like the first request, so this gains no SSRF surface over a
+  // direct fetch - it only tolerates the same kind of redirect downloadMedia() already follows for media.
+  const response = await fetchWithSafeRedirects(source.url, {}, 5, `research-source:${source.id}`);
   if (!response.ok) throw new Error(`RSS fetch failed for ${source.id}: HTTP ${response.status}`);
   const xml = await response.text();
   const items = parseFeed(xml);
