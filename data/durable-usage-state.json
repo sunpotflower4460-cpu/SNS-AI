@@ -10,7 +10,8 @@
     "music-tools-x": {
       "localDate": "2026-09-15",
       "counts": {
-        "openai": 1
+        "openai": 1,
+        "webSearch": 1
       }
     },
     "music-tools-x::dry-run-preview": {
@@ -21,5 +22,5 @@
       }
     }
   },
-  "updatedAt": "2026-09-15T00:28:40.372Z"
+  "updatedAt": "2026-09-15T00:28:41.583Z"
 }
