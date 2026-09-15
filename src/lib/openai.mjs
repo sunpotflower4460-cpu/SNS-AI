@@ -494,16 +494,22 @@ export async function generatePost(accountId, account, history = [], context = {
       }
       if (!dryRun) await moderateText(winner.text, account, accountId);
       // Bound trend evidence (Plugin Radar only, since assertPluginRadarTrendEvidence above already
-      // guarantees any trendUsed:true winner has one) goes FIRST - it is the entity the candidate is
-      // actually about, unlike generated.citations, which are only known to be relevant to this account's
-      // topics in general, not necessarily to the selected candidate's specific entity (the real bug: an
-      // "OXO Steps" candidate previously shipped with only SKR4CH/FRCTL/KVEIK citations). Deduped by URL;
-      // the existing max-source cap is unchanged (orchestrate.mjs still slices to 30 downstream).
+      // guarantees any trendUsed:true winner has one) is the entity the candidate is actually about.
+      // generated.citations are NOT merged in for Plugin Radar: they are only known to be relevant to
+      // this account's topics in general, never independently verified to correspond to the specific
+      // selected candidate's entity - the real production bug (SNS Autopilot #338): a "FRCTL Audio GRN"
+      // candidate shipped with its correct bound evidence PLUS an unrelated Web Search citation for a
+      // completely different product ("Polarity Glue"). Task 4 originally kept unrelated citations as
+      // "supplements" (see git history), which is exactly the provenance-contamination bug #338
+      // reproduced - so Plugin Radar's sources are now restricted to ONLY the bound evidence (0 or 1
+      // entries). If a verified citation source is ever added here, it must be independently checked
+      // against the winning candidate's specific entity first; an unverifiable citation must never be
+      // included. Non-Plugin-Radar accounts are unaffected: boundEvidence is always null for them, so
+      // mergedSources is exactly generated.citations, deduped, same as before.
       const boundEvidence = account.contentStrategy === 'plugin-radar' ? resolveTrendEvidence(winner, context.trends) : null;
-      const mergedSources = dedupeSources([
-        ...(boundEvidence ? [{ url: boundEvidence.url, title: boundEvidence.title }] : []),
-        ...(generated.citations || [])
-      ]);
+      const mergedSources = account.contentStrategy === 'plugin-radar'
+        ? dedupeSources(boundEvidence ? [{ url: boundEvidence.url, title: boundEvidence.title }] : [])
+        : dedupeSources(generated.citations || []);
       return { text: winner.text, mediaPrompt: String(winner.mediaPrompt || ''), rationale: String(winner.rationale || ''),
         features: { ...(winner.features || {}), trendEvidenceUrl: boundEvidence?.url || null },
         predictedScore: winner.predictedScore, selectionMode: explore ? 'explore' : 'exploit',

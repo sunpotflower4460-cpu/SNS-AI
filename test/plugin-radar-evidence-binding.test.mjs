@@ -179,43 +179,53 @@ test('E: non-plugin-radar accounts are completely unaffected (existing behavior 
 });
 
 // -----------------------------------------------------------------------------------------------
-// F-I: the winning candidate's bound URL ends up in sources - first, deduped, cap-preserving.
+// F-I: Plugin Radar's sources are restricted to ONLY the winning candidate's own bound trend
+// evidence - see SNS Autopilot #338 (git history: source-contamination fix). generated.citations are
+// never independently verified to correspond to the specific selected candidate's entity, so - unlike
+// the earlier version of this fix, which kept them as "supplements" and reproduced #338's exact
+// contamination (a correctly-bound "FRCTL Audio GRN" candidate that also shipped an unrelated
+// "Polarity Glue" citation) - they are never merged into sources for Plugin Radar at all.
 // -----------------------------------------------------------------------------------------------
-test('F/G: the winner\'s bound trend URL is included even when Web Search citations are all for OTHER entities (the real bug)', async () => {
+test('F/G: Plugin Radar sources contain ONLY the bound trend evidence - unrelated Web Search citations for other entities are never mixed in (the real production bug, SNS Autopilot #338)', async () => {
   const account = pluginRadarAccount({ research: { webSearch: true } });
   const response = citationsResponse('OXO Steps post.', { trendUsed: true, trendEvidenceIndex: OXO_INDEX }, [
     'https://vendor.example/skr4ch', 'https://vendor.example/grn', 'https://vendor.example/kveik'
   ]);
   await withMockedGeneration([response], async () => {
     const result = await generatePost('music-tools-x', account, [], { trends: TREND_BRIEF });
-    assert.ok(result.sources.some((s) => s.url === OXO_URL), 'the bound OXO Steps source must be present');
-    assert.equal(result.sources[0].url, OXO_URL, 'the bound trend source is primary, listed before unrelated citations');
-    // The original bug: the OTHER products' URLs alone, with no OXO Steps URL, would have been accepted.
-    assert.ok(result.sources.some((s) => s.url === 'https://vendor.example/skr4ch'), 'unrelated citations are kept as supplements, not discarded');
+    assert.deepEqual(result.sources.map((s) => s.url), [OXO_URL], 'sources must be exactly the bound evidence - no unrelated/unverified citations, not even as "supplements"');
   });
 });
 
-test('H: an identical URL in both the bound evidence and Web Search citations is deduplicated', async () => {
+test('H: the bound evidence URL is never duplicated even if it also happens to appear among the (otherwise-discarded) Web Search citations', async () => {
   const account = pluginRadarAccount({ research: { webSearch: true } });
   const response = citationsResponse('OXO Steps post.', { trendUsed: true, trendEvidenceIndex: OXO_INDEX }, [OXO_URL, 'https://vendor.example/skr4ch']);
   await withMockedGeneration([response], async () => {
     const result = await generatePost('music-tools-x', account, [], { trends: TREND_BRIEF });
-    const oxoCount = result.sources.filter((s) => s.url === OXO_URL).length;
-    assert.equal(oxoCount, 1, 'the bound URL must not appear twice just because it was also cited');
+    assert.deepEqual(result.sources.map((s) => s.url), [OXO_URL]);
   });
 });
 
-test('I: the existing max-30-sources cap (enforced downstream in orchestrate.mjs) still keeps the bound URL, since it is placed first', async () => {
+test('I: a trendUsed:false candidate has no bound evidence, so Plugin Radar sources are empty - it never falls back to unverified Web Search citations', async () => {
   const account = pluginRadarAccount({ research: { webSearch: true } });
-  const manyCitations = Array.from({ length: 35 }, (_, i) => `https://vendor.example/citation-${i}`);
-  const response = citationsResponse('OXO Steps post.', { trendUsed: true, trendEvidenceIndex: OXO_INDEX }, manyCitations);
+  const response = citationsResponse('No trend used.', { trendUsed: false, trendEvidenceIndex: null }, ['https://vendor.example/unrelated']);
   await withMockedGeneration([response], async () => {
     const result = await generatePost('music-tools-x', account, [], { trends: TREND_BRIEF });
-    // generatePost() itself does not cap (orchestrate.mjs's unmodified `.slice(0, 30)` does) - what
-    // matters here is that the bound URL survives that downstream cap because it is sorted first.
-    const capped = result.sources.slice(0, 30);
-    assert.ok(capped.some((s) => s.url === OXO_URL), 'the bound URL must survive the existing 30-source cap');
-    assert.equal(capped.length, 30);
+    assert.deepEqual(result.sources, [], 'no bound evidence and no verifiable citation means sources must be empty, never raw citations');
+  });
+});
+
+test('non-Plugin-Radar accounts keep their existing Web Search citation behavior unaffected, including dedup and the existing extractUrlCitations 30-item cap', async () => {
+  const account = pluginRadarAccount({ contentStrategy: 'artist-support', research: { webSearch: true } });
+  const manyCitations = Array.from({ length: 35 }, (_, i) => `https://vendor.example/citation-${i}`);
+  const response = citationsResponse('Some post.', { trendUsed: false, trendEvidenceIndex: null }, manyCitations);
+  await withMockedGeneration([response], async () => {
+    const result = await generatePost('some-account', account, [], { trends: TREND_BRIEF });
+    // extractUrlCitations() itself already caps at 30 (unrelated to this fix, unchanged by it) - what
+    // matters here is that non-Plugin-Radar accounts still get generated.citations at all, unlike
+    // Plugin Radar, which now never merges them in regardless of count.
+    assert.equal(result.sources.length, 30);
+    assert.ok(result.sources.every((s) => s.url.startsWith('https://vendor.example/citation-')));
   });
 });
 
