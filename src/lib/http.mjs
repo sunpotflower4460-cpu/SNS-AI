@@ -260,22 +260,29 @@ export async function fetchPublicHttps(value, options = {}, label = 'mediaUrl', 
   });
 }
 
-async function fetchMediaWithSafeRedirects(url, maxRedirects = 5) {
-  let current = assertPublicHttpsUrl(url);
+// Bounded HTTPS redirect follower shared by any caller that needs to follow a same-origin-or-not
+// redirect chain without losing SSRF safety at any hop. Each hop's Location header is re-resolved and
+// re-validated through assertPublicHttpsUrl (and, via fetchPublicHttps, DNS-pinned/re-checked against
+// private/local network ranges) exactly like the first request - a redirect to a private, local, or
+// otherwise unsafe destination is rejected the same way an unsafe initial URL would be, not trusted
+// just because the chain started at a public host. maxRedirects bounds the chain so a misbehaving or
+// malicious origin can never cause unbounded following.
+export async function fetchWithSafeRedirects(url, options = {}, maxRedirects = 5, label = 'mediaUrl') {
+  let current = assertPublicHttpsUrl(url, label);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
-    const response = await fetchPublicHttps(current, { redirect: 'manual' });
+    const response = await fetchPublicHttps(current, { ...options, redirect: 'manual' }, label);
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-    if (redirect === maxRedirects) throw new Error(`Media redirect limit exceeded (${maxRedirects}).`);
+    if (redirect === maxRedirects) throw new Error(`Redirect limit exceeded (${maxRedirects}) for ${label}.`);
     const location = response.headers.get('location');
-    if (!location) throw new Error(`Media redirect (${response.status}) did not include a Location header.`);
+    if (!location) throw new Error(`Redirect (${response.status}) for ${label} did not include a Location header.`);
     await response.body?.cancel?.().catch(() => {});
-    current = assertPublicHttpsUrl(new URL(location, current).toString());
+    current = assertPublicHttpsUrl(new URL(location, current).toString(), label);
   }
-  throw new Error('Media redirect resolution failed.');
+  throw new Error(`Redirect resolution failed for ${label}.`);
 }
 
 export async function downloadMedia(url, { maxBytes = 25 * 1024 * 1024 } = {}) {
-  const response = await fetchMediaWithSafeRedirects(url);
+  const response = await fetchWithSafeRedirects(url, {}, 5, 'mediaUrl');
   if (!response.ok) throw new Error(`Could not download media (${response.status}).`);
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > maxBytes) throw new Error(`Media exceeds configured download limit (${maxBytes} bytes).`);
@@ -316,5 +323,6 @@ export const __test = {
   assertPublicHttpsUrl,
   assertPublicHttpsTarget,
   pinnedLookup,
-  resolvePublicHttpsTarget
+  resolvePublicHttpsTarget,
+  fetchWithSafeRedirects
 };

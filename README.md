@@ -7,7 +7,7 @@ GitHub Actionsを実行エンジンにした、**複数アカウント対応のX
 
 **現在このリポジトリはManual-Onlyでロックされています**（[`docs/MANUAL_ONLY_MODE.md`](docs/MANUAL_ONLY_MODE.md)）。以下の自動化はコードとして実装済みですが、`config/runtime-policy.json`の`manualOnly: true`により、SNSを操作するoperator workflow（投稿・エンゲージメント・アカウント制御など）のscheduleは全て外され、`mode: auto`への遷移も拒否されます。これらのoperator workflowは現時点では**全て`workflow_dispatch`による手動実行のみ**です（`ci.yml`と`failure-watch.yml`はGitHub内部の自動workflowで、この対象外の例外として引き続き自動実行されます — 詳細は「GitHub Actions」節）。自動実行を再開するのは別途レビュー済みの変更として扱ってください（[`docs/MANUAL_SETUP_CHECKLIST.md`](docs/MANUAL_SETUP_CHECKLIST.md) §11）。
 
-ブランド層（Plugin Radar / Artist / Brand C）と月次 $20 Budget Governor、Media Hunter、Artist Support V2 の設計は実装済みですが、**アカウントはすべて `enabled: false`** のままです。詳細は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`docs/MULTI_BRAND_OPERATION.md`](docs/MULTI_BRAND_OPERATION.md)、[`docs/BUDGET_GOVERNOR.md`](docs/BUDGET_GOVERNOR.md)、[`docs/MEDIA_HUNTER.md`](docs/MEDIA_HUNTER.md)、[`docs/ARTIST_SUPPORT_MODE.md`](docs/ARTIST_SUPPORT_MODE.md)、[`docs/ARTIST_SUPPORT_V2.md`](docs/ARTIST_SUPPORT_V2.md)。Artist Support の将来計画（実装ではない）は [`docs/ARTIST_SUPPORT_ROADMAP.md`](docs/ARTIST_SUPPORT_ROADMAP.md)。
+ブランド層（Plugin Radar / Artist / Brand C）と月次 $8 Budget Governor（現在の Plugin Radar X 運用期間）、Media Hunter、Artist Support V2 の設計は実装済みですが、**アカウントはすべて `enabled: false`** のままです。詳細は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、[`docs/MULTI_BRAND_OPERATION.md`](docs/MULTI_BRAND_OPERATION.md)、[`docs/BUDGET_GOVERNOR.md`](docs/BUDGET_GOVERNOR.md)、[`docs/MEDIA_HUNTER.md`](docs/MEDIA_HUNTER.md)、[`docs/ARTIST_SUPPORT_MODE.md`](docs/ARTIST_SUPPORT_MODE.md)、[`docs/ARTIST_SUPPORT_V2.md`](docs/ARTIST_SUPPORT_V2.md)。Artist Support の将来計画（実装ではない）は [`docs/ARTIST_SUPPORT_ROADMAP.md`](docs/ARTIST_SUPPORT_ROADMAP.md)。
 
 ## 主な自動化
 
@@ -267,7 +267,7 @@ Autopilot / Publish / Analytics / Researchを別々のCircuitとして監視し�
 
 金額ではなくAPI呼び出し回数で上限を掛けます。X API / OpenAI API側のcredits・billing・provider側rate limitは別途有効である必要があります。`budgets.groqCallsPerDay`はGroq research triage呼び出し専用の上限です。
 
-`npm run cost-report`（`src/reports/cost-report.mjs`）は、direct-fetch件数・重複除外件数・Groq/OpenAI/Web Search呼び出し件数・X APIのURL付き/なし投稿数と概算月額コスト（`config/x-api-pricing.json`をoperatorが実料金で埋めた場合のみ意味を持つ見積もり）を`data/reports/cost.{json,md}`にまとめます。
+`npm run cost-report`（`src/reports/cost-report.mjs`）は、direct-fetch件数・重複除外件数・Groq/OpenAI/Web Search呼び出し件数・X APIのURL付き/なし投稿数と概算月額コスト（`config/x-api-pricing.json`のoperator-maintained estimate。2026-09-02時点のX公式Pay-Per-Use。料金変更時は再確認）を`data/reports/cost.{json,md}`にまとめます。
 
 ## URL付き投稿の予算管理
 

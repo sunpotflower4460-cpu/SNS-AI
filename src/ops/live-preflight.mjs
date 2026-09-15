@@ -40,6 +40,17 @@ function needsOpenAI(account) {
     || Boolean(builtInMediaKind(account));
 }
 
+// Groq is part of the cost-control design for accounts that list it as a provider (Plugin Radar
+// triage runs on Groq Free), so preflight must verify its readiness explicitly: an unnoticed dead
+// Groq key would silently shift triage load onto the OpenAI Luna fallback and burn the OpenAI
+// budget. Mirrors the effective provider order in src/ai/provider.mjs (account config wins, else
+// the groq-first repository default) so "requires Groq" means exactly what the runtime would use.
+function requiresGroq(account) {
+  const configured = account.ai?.providers;
+  const providers = Array.isArray(configured) && configured.length ? configured : ['groq', 'openai'];
+  return providers.includes('groq') && typeof account.ai?.groqModel === 'string' && account.ai.groqModel.length > 0;
+}
+
 function xUsesMedia(account) {
   return account.platform === 'x' && (account.media?.strategy || 'none') !== 'none';
 }
@@ -76,6 +87,25 @@ async function checkOpenAIModel(model) {
     return { model, ok: body?.id === model, owner: body?.owned_by || null, error: body?.id === model ? null : 'OpenAI returned a different model id.' };
   } catch (error) {
     return { model, ok: false, error: error.message };
+  }
+}
+
+// Read-only Groq readiness: the model LIST endpoint only (GET /openai/v1/models). No chat completion
+// or generation call is made, so the probe never spends inference tokens; the first real Groq triage
+// call remains the endpoint-specific proof, same philosophy as the OpenAI model probes above.
+async function groqModelCatalog() {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return { ok: false, error: 'GROQ_API_KEY is missing.', ids: null };
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${key}` }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: body?.error?.message || `Groq model list failed with ${response.status}`, ids: null };
+    const ids = new Set((body?.data || []).map((entry) => entry?.id).filter(Boolean));
+    return { ok: true, error: null, ids };
+  } catch (error) {
+    return { ok: false, error: error.message, ids: null };
   }
 }
 
@@ -232,7 +262,7 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
   const globalEngagementPolicy = await loadEngagementPolicy();
   const selected = Object.entries(accounts).filter(([id, account]) => accountFilter ? id === accountFilter : account.enabled === true && account.mode !== 'pause');
   if (accountFilter && !accounts[accountFilter]) throw new Error(`Unknown account "${accountFilter}".`);
-  if (!selected.length) return { ok: false, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
+  if (!selected.length) return { ok: false, state: 'nothing_enabled', accounts: [], openai: { checked: false, models: [] }, groq: { checked: false, ok: null, error: null, models: [] }, mediaHosting: { checked: false }, durableState: { checked: false } };
 
   const rows = [];
   let openaiChecked = false;
@@ -248,6 +278,28 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
     }
     modelChecks = await Promise.all(modelNames.map(checkOpenAIModel));
   }
+
+  const groqAccounts = selected.filter(([, account]) => requiresGroq(account));
+  const groqChecked = groqAccounts.length > 0;
+  let groqError = null;
+  let groqModels = [];
+  if (groqChecked) {
+    const catalog = await groqModelCatalog();
+    groqError = catalog.error;
+    const wanted = [...new Set(groqAccounts.map(([, account]) => account.ai.groqModel))];
+    groqModels = wanted.map((model) => {
+      const available = catalog.ok ? catalog.ids.has(model) : false;
+      return {
+        model,
+        ok: available,
+        accounts: groqAccounts.filter(([, account]) => account.ai.groqModel === model).map(([id]) => id),
+        error: catalog.ok
+          ? (available ? null : `Groq model "${model}" is not available on this Groq account.`)
+          : catalog.error
+      };
+    });
+  }
+  const groqOk = groqChecked ? groqModels.every((check) => check.ok) : null;
 
   const builtInMediaNeeded = selected.some(([, account]) => Boolean(builtInMediaKind(account)));
   const mediaHosting = await repositoryHostingCheck(builtInMediaNeeded);
@@ -296,8 +348,11 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
       const kind = builtInMediaKind(account);
       const ownModels = requiredModels(account);
       const ownModelFailures = modelChecks.filter((check) => ownModels.includes(check.model) && !check.ok);
+      const groqNeed = requiresGroq(account);
+      const ownGroq = groqNeed ? groqModels.find((check) => check.model === account.ai.groqModel) : null;
+      const groqReady = !groqNeed || ownGroq?.ok === true;
       const mediaReady = !kind || mediaHosting.ok;
-      const accountReady = durableReady && mediaReady && ownModelFailures.length === 0 && (account.mode !== 'approval' || approvalReady);
+      const accountReady = durableReady && mediaReady && groqReady && ownModelFailures.length === 0 && (account.mode !== 'approval' || approvalReady);
       rows.push({
         account: id,
         platform: resolved.platform,
@@ -317,6 +372,13 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
             : 'Engagement checks are intentionally deferred during publish-only preflight; run with --engagement before activating inbound automation.'
         } : { configured: false, checked: false, live: false, credentialReady: null, requiredScopes: [] },
         openaiModels: ownModels.map((model) => modelChecks.find((check) => check.model === model)).filter(Boolean),
+        groq: groqNeed ? {
+          required: true,
+          model: account.ai.groqModel,
+          ok: ownGroq?.ok === true,
+          error: ownGroq?.error || null,
+          note: 'Groq is part of this account\'s cost-control design (triage runs on Groq Free). A dead Groq key would silently shift load onto the OpenAI fallback; the runtime fallback itself is unchanged.'
+        } : { required: false },
         builtInMedia: kind ? {
           configured: true,
           kind,
@@ -331,12 +393,13 @@ export async function runLivePreflight({ accountFilter, includeEngagement = fals
   }
 
   const modelFailure = modelChecks.some((check) => !check.ok);
-  const ok = durableReady && approvalReady && !openaiError && !modelFailure && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
+  const ok = durableReady && approvalReady && !openaiError && !modelFailure && (!groqChecked || groqOk === true) && (!mediaHosting.checked || mediaHosting.ok) && rows.every((row) => row.ok);
   return {
     ok,
     state: ok ? 'ready' : 'blocked',
     mode: includeEngagement ? 'publish+engagement' : 'publish',
     openai: { checked: openaiChecked, ok: openaiChecked ? !openaiError && !modelFailure : null, error: openaiError, models: modelChecks },
+    groq: { checked: groqChecked, ok: groqOk, error: groqError, models: groqModels },
     mediaHosting,
     approvalChannel,
     durableState,

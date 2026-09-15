@@ -2,7 +2,7 @@ import { consumeUsage } from '../ops/budget.mjs';
 import { parseJsonText } from '../lib/openai.mjs';
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
-const DEFAULT_MODEL = 'llama-3.1-8b-instant';
+const DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 function apiKey() {
   const key = process.env.GROQ_API_KEY;

@@ -1,0 +1,16 @@
+{
+  "circuits": {
+    "music-tools-x:research": {
+      "failures": 0,
+      "lastSuccess": "2026-09-14T13:05:20.153Z",
+      "openUntil": null,
+      "lastError": null
+    },
+    "music-tools-x:autopilot": {
+      "failures": 0,
+      "lastSuccess": "2026-09-15T00:29:14.604Z",
+      "openUntil": null,
+      "lastError": null
+    }
+  }
+}

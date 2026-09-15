@@ -29,13 +29,13 @@ test('manual-only posture forbids operational schedule triggers', async () => {
   }
 });
 
-test('manual-only posture keeps every configured SNS account disabled', async () => {
+test('manual-only posture keeps exactly one account enabled in approval mode', async () => {
   const config = JSON.parse(await readFile('config/accounts.json', 'utf8'));
   const entries = Object.entries(config.accounts || {});
   assert.ok(entries.length > 0, 'expected at least one configured account');
-  for (const [id, account] of entries) {
-    assert.notEqual(account.enabled, true, `${id} must remain disabled in manual-only posture`);
-  }
+  const enabled = entries.filter(([, account]) => account.enabled === true);
+  assert.deepEqual(enabled.map(([id]) => id), ['music-tools-x'], 'only the sanctioned Plugin Radar account may be enabled');
+  assert.equal(enabled[0][1].mode, 'approval', 'the enabled account must stay in approval mode');
 });
 
 test('manual-only posture keeps unattended engagement liveAccounts empty', async () => {

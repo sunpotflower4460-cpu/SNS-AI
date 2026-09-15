@@ -23,11 +23,14 @@ const ESCALATION = new Set([
 ]);
 
 export function defaultRouterConfig(account = {}) {
+  // Per-tier OpenAI models: explicit tier config wins; when it is absent (synthetic/test accounts)
+  // degrade to the triage model, then generation.model - never upgrade straight to the critical model.
+  const triage = account.ai?.openaiTriageModel || null;
   return {
     cheap: { provider: 'groq', model: account.ai?.groqModel || null },
-    balanced: { provider: 'openai', model: account.ai?.openaiTriageModel || null },
-    high: { provider: 'openai', model: account.generation?.model || null },
-    critical: { provider: 'openai', model: account.generation?.model || null },
+    balanced: { provider: 'openai', model: triage },
+    high: { provider: 'openai', model: account.ai?.openaiHighModel || triage || account.generation?.model || null },
+    critical: { provider: 'openai', model: account.ai?.openaiCriticalModel || triage || account.generation?.model || null },
     ...(account.ai?.router || {})
   };
 }
@@ -100,7 +103,7 @@ export function resolveGenerationModel(account, context = {}) {
     escalateReasons: context.escalateReasons || []
   });
   const route = constrainRouteForBudget(base, context.budgetState || 'healthy', account);
-  const model = route.model || account?.generation?.model || process.env.OPENAI_MODEL || 'gpt-5';
+  const model = route.model || account?.generation?.model || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
   return {
     route: {
       ...route,

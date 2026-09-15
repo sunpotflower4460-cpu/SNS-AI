@@ -1,0 +1,405 @@
+{
+  "schemaVersion": 1,
+  "entries": {
+    "149521415d6f1aa8263a9185c42d27276190452c7fc0d8b9af9c1631b85a360c": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 0,
+        "topic": "Polarity-Glue：無料のSSL系バスコンプレッサー",
+        "whyNow": "無料でmacOS・Windows・Linuxに対応する新作として公開されたばかり。",
+        "angle": "Ableton Glue Compressor系の無料代替候補として、ドラムバスやミックス用途で既存ユーザーが試す価値を判断する。",
+        "relevance": 92,
+        "novelty": 72,
+        "usefulness": 85,
+        "priceValue": 96,
+        "newsworthiness": 78,
+        "japanNovelty": 82,
+        "audienceFit": 93,
+        "confidence": 88,
+        "risk": 18
+      }
+    },
+    "ec723d6c6384185666c57025187bfd95d17c1e8e06d898b724d7f383db758549": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 1,
+        "topic": "AlterVerb 53：無料のWindows向けリバーブ",
+        "whyNow": "無料の新作リバーブが公開されたばかり。",
+        "angle": "明るく混雑した素材向けという設計意図に絞り、ドラム・ボーカルで既存リバーブと使い分けられるかを見る。",
+        "relevance": 90,
+        "novelty": 63,
+        "usefulness": 82,
+        "priceValue": 95,
+        "newsworthiness": 74,
+        "japanNovelty": 80,
+        "audienceFit": 88,
+        "confidence": 87,
+        "risk": 15
+      }
+    },
+    "14370a004f2b412b396509bfb42a9b9cdc6bad9dbefd40a10bbcd880a77a7c3c": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 2,
+        "topic": "SKR4CH：ブラウザで使える無料波形デザイナー",
+        "whyNow": "インストール不要で使える新しい無料の音作りツールとして登場。",
+        "angle": "単周期波形・ウェーブテーブル・サンプルをブラウザで作れる点を、シンセユーザー向けの制作ワークフローとして紹介する。",
+        "relevance": 94,
+        "novelty": 91,
+        "usefulness": 87,
+        "priceValue": 98,
+        "newsworthiness": 86,
+        "japanNovelty": 91,
+        "audienceFit": 95,
+        "confidence": 86,
+        "risk": 12
+      }
+    },
+    "15f9a7de5153cdc0938ab6ace39167cb4b99e6d6e5d400d2a0a3464d146d12a5": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 3,
+        "topic": "VAS Reverse Reverb：無料のテンポ同期リサー",
+        "whyNow": "macOS・Windows対応の無料新作として公開されたばかり。",
+        "angle": "反転リバーブを手作業で作る工程を短縮する、リサウンドや展開用の実用ツールとして評価する。",
+        "relevance": 88,
+        "novelty": 79,
+        "usefulness": 86,
+        "priceValue": 97,
+        "newsworthiness": 80,
+        "japanNovelty": 86,
+        "audienceFit": 91,
+        "confidence": 88,
+        "risk": 14
+      }
+    },
+    "3198a693f443c8ea589d3fe1c6b43893d3c08412da4f42706669c7230056e51c": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 4,
+        "topic": "Golden DSP Silkbrush Reverbの無料プレゼント企画",
+        "whyNow": "5本限定の抽選企画で、記事内コメントによる応募期限が提示されている。",
+        "angle": "通常価格59ドルのリバーブを抽選で入手できる機会として、応募条件と締切を簡潔に伝える。",
+        "relevance": 67,
+        "novelty": 43,
+        "usefulness": 61,
+        "priceValue": 88,
+        "newsworthiness": 66,
+        "japanNovelty": 70,
+        "audienceFit": 65,
+        "confidence": 89,
+        "risk": 35
+      }
+    },
+    "ccb1bcad5b3feff7da84b82224cb5d278bcb13cb1f392635d9d0aa724f14bc63": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 5,
+        "topic": "WIDENER：29.99ドルのステレオ拡張プラグイン",
+        "whyNow": "9月30日までのイントロ価格が設定された新作。",
+        "angle": "ステレオ拡張系の買い足し候補として、既存DAW機能や所有済みツールと重複しない人向けかを判断する。",
+        "relevance": 84,
+        "novelty": 58,
+        "usefulness": 73,
+        "priceValue": 78,
+        "newsworthiness": 75,
+        "japanNovelty": 80,
+        "audienceFit": 81,
+        "confidence": 86,
+        "risk": 22
+      }
+    },
+    "e31c390b2e93c5468093a5b1aaafbb61a692e45ef5435ac526be36f002461b54": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 6,
+        "topic": "Aurora：無料の24バンド・ダイナミックEQ",
+        "whyNow": "主要OS対応の無料新作としてリリースされたばかり。",
+        "angle": "無料ダイナミックEQが増える中で、定番ツールとの差別化が見えにくい製品として、試す条件と見送る条件を整理する。",
+        "relevance": 91,
+        "novelty": 51,
+        "usefulness": 74,
+        "priceValue": 96,
+        "newsworthiness": 72,
+        "japanNovelty": 81,
+        "audienceFit": 88,
+        "confidence": 91,
+        "risk": 20
+      }
+    },
+    "c6ff549af22ec76be00174d88f53fe4a2874c2273355b492f1bfafd1fa0ee081": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 7,
+        "topic": "OXO Steps：無料の6トラックMIDIステップシーケンサー",
+        "whyNow": "macOS向けの無料新作として公開されたばかり。",
+        "angle": "1つのコード入力から最大6系統を別MIDIチャンネルへ展開できる点を、ベース・シンセの多層シーケンス用途で紹介する。",
+        "relevance": 94,
+        "novelty": 88,
+        "usefulness": 89,
+        "priceValue": 98,
+        "newsworthiness": 85,
+        "japanNovelty": 91,
+        "audienceFit": 95,
+        "confidence": 88,
+        "risk": 14
+      }
+    },
+    "8aab85edd7c2c6df113f3f061c14a31bcc6ccb628a13652f535b9fac54bdea2c": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 8,
+        "topic": "Chimera：無料Vital用シネマティックプリセット抽選",
+        "whyNow": "無料Vital向けプリセットの再配布キャンペーンが実施されている。",
+        "angle": "Vitalユーザー限定で、シネマティック音色を追加したい人向けの無料入手機会として扱う。",
+        "relevance": 73,
+        "novelty": 48,
+        "usefulness": 67,
+        "priceValue": 90,
+        "newsworthiness": 63,
+        "japanNovelty": 74,
+        "audienceFit": 73,
+        "confidence": 87,
+        "risk": 34
+      }
+    },
+    "52b92a58a9131d898e31750481017e69ce0f088bd60ecbbf1341a951c30166d6": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 9,
+        "topic": "KVEIK 1.2：ドラムからメロディー・和声対応へ拡張",
+        "whyNow": "無料ではない可能性がある既存シーケンサーのメジャーアップデートが公開されたばかり。",
+        "angle": "ドラム専用からベースやシンセまで扱えるようになった変更点に絞り、既存ユーザーが更新する価値を判断する。",
+        "relevance": 94,
+        "novelty": 90,
+        "usefulness": 88,
+        "priceValue": 50,
+        "newsworthiness": 91,
+        "japanNovelty": 92,
+        "audienceFit": 94,
+        "confidence": 88,
+        "risk": 16
+      }
+    },
+    "92b462a6a08560c3301086da813fe2095cb0d6a3db9a9774b2cf424636f0dcc2": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 10,
+        "topic": "True Panner：無料のステレオ・空間定位ユーティリティ",
+        "whyNow": "新興デベロッパーの無料新作として公開されたばかり。",
+        "angle": "通常の左右パンとは異なる空間定位を試せる無料ツールとして、ステレオ配置の実験用途を提案する。",
+        "relevance": 90,
+        "novelty": 82,
+        "usefulness": 79,
+        "priceValue": 97,
+        "newsworthiness": 82,
+        "japanNovelty": 87,
+        "audienceFit": 91,
+        "confidence": 84,
+        "risk": 20
+      }
+    },
+    "9e8ffa7d45e3e9cefeb2b7a5ad67788728dfc74275d4bfaa48ec55655f682576": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 11,
+        "topic": "Gazer FX：無料のシューゲイズ系マルチエフェクト",
+        "whyNow": "新規デベロッパーの初リリースとして無料公開されたばかり。",
+        "angle": "複数エフェクトを一つにまとめた手軽さを軸に、シンセやギターの質感作りで試す候補として紹介する。",
+        "relevance": 91,
+        "novelty": 78,
+        "usefulness": 83,
+        "priceValue": 97,
+        "newsworthiness": 83,
+        "japanNovelty": 87,
+        "audienceFit": 93,
+        "confidence": 87,
+        "risk": 15
+      }
+    },
+    "23decacfae0d0efd80927d53ad00d686e02c88704e7c2e114dc36968a79d9681": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 12,
+        "topic": "Imaginando Visual Synthesizer用Minimal拡張",
+        "whyNow": "62種類のシェーダーと55プリセットを含む新拡張が公開された。",
+        "angle": "音声・MIDI連動ビジュアル制作を行うユーザー向けに、既存Visual Synthesizerの表現を増やす拡張として扱う。",
+        "relevance": 67,
+        "novelty": 78,
+        "usefulness": 65,
+        "priceValue": 45,
+        "newsworthiness": 72,
+        "japanNovelty": 78,
+        "audienceFit": 60,
+        "confidence": 87,
+        "risk": 18
+      }
+    },
+    "1e2e06e945fa4c4f53782e4b8862d3cf2dfe4c1b4afc448b2644ff1b75443028": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 13,
+        "topic": "Heat Man：5エンジン搭載のWindows向け創作ディストーション",
+        "whyNow": "新作のWindows向け歪み系プラグインが公開されたばかり。",
+        "angle": "レトロ携帯ゲーム機風のUIと、5種類のエンジンを直列・並列で組める独自性に焦点を当てる。",
+        "relevance": 91,
+        "novelty": 90,
+        "usefulness": 80,
+        "priceValue": 48,
+        "newsworthiness": 86,
+        "japanNovelty": 91,
+        "audienceFit": 92,
+        "confidence": 82,
+        "risk": 23
+      }
+    },
+    "98c327f707a7e40f9f4f4dbcfed57354ec41db079eb0639c5ce06f8970b92bd5": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 14,
+        "topic": "SSL Xシリーズの期間限定セール",
+        "whyNow": "定番SSL系プラグインが10ドルからの期間限定価格で販売されている。",
+        "angle": "定番コンプレッサーやリミッターのセールとして、無料・標準DAW機能との差を踏まえて買うべき製品を絞る。",
+        "relevance": 82,
+        "novelty": 37,
+        "usefulness": 82,
+        "priceValue": 91,
+        "newsworthiness": 79,
+        "japanNovelty": 61,
+        "audienceFit": 83,
+        "confidence": 91,
+        "risk": 18
+      }
+    },
+    "93cc8e72ebd038aa419f87c9b88c2c6a5a183feaa71af751adb1c4e2a177f8a7": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 15,
+        "topic": "AIR Xpand!2：29ドルのマルチティンバー音源セール",
+        "whyNow": "Plugin of the Weekとして70%オフの短期セールが実施されている。",
+        "angle": "4パート構成の定番ワークステーション音源として、幅広い音色を一台で補いたい人向けかを判断する。",
+        "relevance": 76,
+        "novelty": 29,
+        "usefulness": 77,
+        "priceValue": 88,
+        "newsworthiness": 75,
+        "japanNovelty": 57,
+        "audienceFit": 75,
+        "confidence": 92,
+        "risk": 15
+      }
+    },
+    "8fca72bb1e576e9e3e99c4ee1fac67ccd4815d1deeea67eb73ba462f92a989dc": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 16,
+        "topic": "Mellodyzedd：Serum用100プリセットの期間限定無料配布",
+        "whyNow": "Serum用サウンドセットが数週間限定で無料配布されている。",
+        "angle": "Serum所有者向けに、Future系の音色追加を無料で試せる期間限定オファーとして紹介する。",
+        "relevance": 81,
+        "novelty": 42,
+        "usefulness": 72,
+        "priceValue": 94,
+        "newsworthiness": 78,
+        "japanNovelty": 70,
+        "audienceFit": 83,
+        "confidence": 90,
+        "risk": 24
+      }
+    },
+    "ba06486921c6e53eee356c91799e96e7f98a25ddef0a8a1f37f040b67a5528b9": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 17,
+        "topic": "Playhead：言葉で音の処理内容を指定する音楽制作ソフト",
+        "whyNow": "自然言語で音の処理を指示する新しいAI系ワークフローとして紹介されている。",
+        "angle": "『暖かく』『ヴィンテージ感』などの要求を音処理に変換する発想を、既存プラグインとの違いとともに検討する。",
+        "relevance": 96,
+        "novelty": 94,
+        "usefulness": 78,
+        "priceValue": 45,
+        "newsworthiness": 92,
+        "japanNovelty": 93,
+        "audienceFit": 96,
+        "confidence": 77,
+        "risk": 45
+      }
+    },
+    "9d52d7fab4ae961043ed7bc93f911fdcbc8cac6cbb682f6abc71808ef7f52921": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 18,
+        "topic": "FRCTL Audio GRN 4.0：新エンジン搭載のグラニュラーエフェクト更新",
+        "whyNow": "グラニュラーエフェクトのメジャーアップデートが公開され、新エンジンが追加された。",
+        "angle": "ループやボーカルを音階付きの粒状テクスチャへ変える既存製品として、所有者が更新する価値を確認する。",
+        "relevance": 96,
+        "novelty": 91,
+        "usefulness": 86,
+        "priceValue": 62,
+        "newsworthiness": 90,
+        "japanNovelty": 93,
+        "audienceFit": 96,
+        "confidence": 86,
+        "risk": 17
+      }
+    },
+    "4f14c717fddbbf4d6f6578656d0cf5d3e1edb4e72a8aa6e6bb2b0d57fe0a5139": {
+      "firstSeenAt": "2026-09-14T13:05:20.149Z",
+      "lastSeenAt": "2026-09-14T13:05:20.149Z",
+      "evaluatedAt": "2026-09-14T13:05:20.149Z",
+      "evaluation": {
+        "index": 19,
+        "topic": "GSi Piano Studio 1.1.0：物理モデリング系ピアノ音源の更新",
+        "whyNow": "Windows・Mac・iOS対応のピアノ音源がバージョン1.1.0へ更新された。",
+        "angle": "サンプル主体ではなく物理モデリングでグランドピアノを再現する選択肢として、既存所有者向けのアップデート情報にする。",
+        "relevance": 89,
+        "novelty": 81,
+        "usefulness": 75,
+        "priceValue": 48,
+        "newsworthiness": 77,
+        "japanNovelty": 85,
+        "audienceFit": 87,
+        "confidence": 82,
+        "risk": 18
+      }
+    }
+  }
+}

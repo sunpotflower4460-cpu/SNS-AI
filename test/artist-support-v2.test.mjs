@@ -251,14 +251,21 @@ test('R: direct promo hard cap is maintained under funnel mix', () => {
 
 test('S: budget critical does not select expensive model options', () => {
   const account = {
-    generation: { model: 'gpt-5' },
-    ai: { openaiTriageModel: 'gpt-5-mini', groqModel: 'llama-3.1-8b-instant' }
+    generation: { model: 'gpt-5.6-luna' },
+    ai: {
+      openaiTriageModel: 'gpt-5.6-luna',
+      openaiHighModel: 'gpt-5.6-terra',
+      openaiCriticalModel: 'gpt-5.6-sol',
+      groqModel: 'openai/gpt-oss-120b'
+    }
   };
   const high = resolveRoute(account, 'post-generation', { escalateReasons: ['high-value-url-post'] });
+  assert.equal(high.model, 'gpt-5.6-terra');
   const constrained = constrainRouteForBudget(high, 'critical', account);
   assert.notEqual(constrained.tier, 'high');
   assert.notEqual(constrained.tier, 'critical');
   assert.equal(constrained.tier, 'balanced');
+  assert.equal(constrained.model, 'gpt-5.6-luna');
 });
 
 test('T: Manual-Only is not unlocked by Artist Support V2', async () => {
@@ -268,6 +275,11 @@ test('T: Manual-Only is not unlocked by Artist Support V2', async () => {
   assert.equal(runtime.allowAutomaticAccountActivation, false);
   const accounts = JSON.parse(await readFile(new URL('../config/accounts.json', import.meta.url), 'utf8'));
   for (const [id, account] of Object.entries(accounts.accounts)) {
+    if (id === 'music-tools-x') {
+      assert.equal(account.enabled, true, 'music-tools-x is the sanctioned approval-mode account');
+      assert.equal(account.mode, 'approval', 'it must never run unattended under Manual-Only');
+      continue;
+    }
     assert.notEqual(account.enabled, true, `${id} must stay disabled`);
   }
   assert.equal(accounts.accounts['artist-x'].artist.hybridMode, true);

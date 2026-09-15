@@ -1,9 +1,9 @@
 # SNS-AI Cost & Usage Visibility
 
-Generated: 2026-08-31T08:17:59.663Z
+Generated: 2026-09-02T09:53:49.457Z
 
 > pricingModel values are operator-maintained estimates (config/x-api-pricing.json), not real X billing data.
-> Global budget: $20 | accounted $0 | remaining $20 | projected month-end $0 | state **healthy**
+> Global budget: $8 | accounted $0 | remaining $8 | projected month-end $0 | state **healthy**
 > actual = live billing API (none wired). estimated = operator-maintained model. unknown = unpriced, not a fabricated rate.
 
 ## music-tools-x (x)
@@ -42,10 +42,10 @@ Generated: 2026-08-31T08:17:59.663Z
 
 ## Global governor
 
-- Month: 2026-08
+- Month: 2026-09
 - Total estimated USD: 0
 - Total actual USD: 0 (none unless a billing API is wired)
-- Remaining: 20 / 20
+- Remaining: 8 / 8
 - Projected month-end: 0
 - State: healthy
 

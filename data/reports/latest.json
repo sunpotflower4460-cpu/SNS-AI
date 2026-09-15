@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-20T07:25:35.336Z",
+  "generatedAt": "2026-09-14T13:05:20.250Z",
   "policies": {
     "x": null,
     "instagram": null
@@ -7,7 +7,7 @@
   "accounts": {
     "music-tools-x": {
       "platform": "x",
-      "enabled": false,
+      "enabled": true,
       "mode": "approval",
       "postCount": 0,
       "lastPost": null,
@@ -19,7 +19,194 @@
         "preferred": [],
         "avoid": []
       },
-      "trends": null,
+      "trends": {
+        "generatedAt": "2026-09-14T13:05:20.151Z",
+        "summary": "Direct-fetch triage of 20 candidate(s) from 2 source(s).",
+        "top": [
+          {
+            "topic": "FRCTL Audio GRN 4.0：新エンジン搭載のグラニュラーエフェクト更新",
+            "whyNow": "グラニュラーエフェクトのメジャーアップデートが公開され、新エンジンが追加された。",
+            "angle": "ループやボーカルを音階付きの粒状テクスチャへ変える既存製品として、所有者が更新する価値を確認する。",
+            "relevance": 96,
+            "novelty": 91,
+            "usefulness": 86,
+            "priceValue": 62,
+            "newsworthiness": 90,
+            "japanNovelty": 93,
+            "audienceFit": 96,
+            "confidence": 86,
+            "risk": 17,
+            "url": "https://rekkerd.org/frctl-audio-updates-grn-granular-effect-to-v4-0-0-incl-new-engine/",
+            "sourceId": "rekkerd",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-09-14T10:05:41.000Z",
+            "opportunityScore": 93.8
+          },
+          {
+            "topic": "SKR4CH：ブラウザで使える無料波形デザイナー",
+            "whyNow": "インストール不要で使える新しい無料の音作りツールとして登場。",
+            "angle": "単周期波形・ウェーブテーブル・サンプルをブラウザで作れる点を、シンセユーザー向けの制作ワークフローとして紹介する。",
+            "relevance": 94,
+            "novelty": 91,
+            "usefulness": 87,
+            "priceValue": 98,
+            "newsworthiness": 86,
+            "japanNovelty": 91,
+            "audienceFit": 95,
+            "confidence": 86,
+            "risk": 12,
+            "url": "https://bedroomproducersblog.com/2026/09/13/skr4ch-waveform-designer/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-09-13T14:42:32.000Z",
+            "opportunityScore": 93.1
+          },
+          {
+            "topic": "KVEIK 1.2：ドラムからメロディー・和声対応へ拡張",
+            "whyNow": "無料ではない可能性がある既存シーケンサーのメジャーアップデートが公開されたばかり。",
+            "angle": "ドラム専用からベースやシンセまで扱えるようになった変更点に絞り、既存ユーザーが更新する価値を判断する。",
+            "relevance": 94,
+            "novelty": 90,
+            "usefulness": 88,
+            "priceValue": 50,
+            "newsworthiness": 91,
+            "japanNovelty": 92,
+            "audienceFit": 94,
+            "confidence": 88,
+            "risk": 16,
+            "url": "https://bedroomproducersblog.com/2026/09/11/kveik-midi-sequencer/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-09-11T14:50:58.000Z",
+            "opportunityScore": 92.6
+          },
+          {
+            "topic": "OXO Steps：無料の6トラックMIDIステップシーケンサー",
+            "whyNow": "macOS向けの無料新作として公開されたばかり。",
+            "angle": "1つのコード入力から最大6系統を別MIDIチャンネルへ展開できる点を、ベース・シンセの多層シーケンス用途で紹介する。",
+            "relevance": 94,
+            "novelty": 88,
+            "usefulness": 89,
+            "priceValue": 98,
+            "newsworthiness": 85,
+            "japanNovelty": 91,
+            "audienceFit": 95,
+            "confidence": 88,
+            "risk": 14,
+            "url": "https://bedroomproducersblog.com/2026/09/12/oxo-steps-midi-sequencer/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-09-12T09:20:41.000Z",
+            "opportunityScore": 92.5
+          },
+          {
+            "topic": "Playhead：言葉で音の処理内容を指定する音楽制作ソフト",
+            "whyNow": "自然言語で音の処理を指示する新しいAI系ワークフローとして紹介されている。",
+            "angle": "『暖かく』『ヴィンテージ感』などの要求を音処理に変換する発想を、既存プラグインとの違いとともに検討する。",
+            "relevance": 96,
+            "novelty": 94,
+            "usefulness": 78,
+            "priceValue": 45,
+            "newsworthiness": 92,
+            "japanNovelty": 93,
+            "audienceFit": 96,
+            "confidence": 77,
+            "risk": 45,
+            "url": "https://rekkerd.org/shape-sounds-with-playhead-by-describing-the-mix-you-hear-in-your-head/",
+            "sourceId": "rekkerd",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-09-14T10:20:10.000Z",
+            "opportunityScore": 91.4
+          }
+        ],
+        "sources": [
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/14/polarity-glue-compressor/",
+            "title": "Polarity releases Polarity-Glue, a FREE SSL-inspired bus compressor"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/14/t4-alterverb-53/",
+            "title": "t4 Digital Studio releases AlterVerb 53, a FREE Windows reverb plugin"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/13/skr4ch-waveform-designer/",
+            "title": "SKR4CH is a FREE browser-based waveform designer for synths and samplers"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/13/vas-reverse-reverb/",
+            "title": "Vandeta Audio releases VAS Reverse Reverb, a FREE tempo-synced riser plugin"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/12/giveaway-golden-dsp-silkbrush-reverb/",
+            "title": "GIVEAWAY: Win Golden DSP Silkbrush Reverb (5 copies)"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/12/wave-mastering-widener/",
+            "title": "Wave Mastering launches WIDENER stereo enhancement plugin for $29.99"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/12/13x-audio-aurora-eq/",
+            "title": "13X Audio releases Aurora, a FREE 24-band dynamic EQ plugin"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/12/oxo-steps-midi-sequencer/",
+            "title": "OXO-Music releases OXO Steps, a FREE six-track MIDI sequencer for macOS"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/11/chimera-giveaway/",
+            "title": "GIVEAWAY: Win Chimera cinematic presets for the FREE Vital synthesizer"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/11/kveik-midi-sequencer/",
+            "title": "KVEIK 1.2 expands its block-based MIDI sequencer beyond drums"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/11/the-note-audio-true-panner/",
+            "title": "The Note Audio releases True Panner spatial imaging plugin for FREE"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/09/11/amplimood-gazer-fx/",
+            "title": "Amplimood releases Gazer FX, a FREE shoegaze multi-effect plugin"
+          },
+          {
+            "url": "https://rekkerd.org/imaginando-releases-minimal-expansion-for-visual-synthesizer/",
+            "title": "Imaginando releases Minimal expansion for Visual Synthesizer"
+          },
+          {
+            "url": "https://rekkerd.org/pleatech-audio-releases-heat-man-creative-distortion-plugin/",
+            "title": "Pleatech Audio releases Heat Man creative distortion plugin (Windows)"
+          },
+          {
+            "url": "https://rekkerd.org/solid-state-logic-x-range-effect-plugins-sale/",
+            "title": "Solid State Logic&#8217;s X range of effect plugins on sale from $10 USD!"
+          },
+          {
+            "url": "https://rekkerd.org/air-music-technology-pand2-virtual-instrument-on-sale/",
+            "title": "Xpand!2 virtual instrument by AIR Music Tech on sale for $29 USD"
+          },
+          {
+            "url": "https://rekkerd.org/free-red-sounds-mellodyzedd-soundset-for-serum-limited-time/",
+            "title": "FREE: Red Sounds Mellodyzedd soundset for Serum (limited time)"
+          },
+          {
+            "url": "https://rekkerd.org/shape-sounds-with-playhead-by-describing-the-mix-you-hear-in-your-head/",
+            "title": "Shape sounds with Playhead by describing the mix you hear in your head"
+          },
+          {
+            "url": "https://rekkerd.org/frctl-audio-updates-grn-granular-effect-to-v4-0-0-incl-new-engine/",
+            "title": "FRCTL Audio updates GRN granular effect to v4.0.0, incl. new engine"
+          },
+          {
+            "url": "https://rekkerd.org/gsi-updates-piano-studio-virtual-instrument-to-v1-1-0-desktop-ios/",
+            "title": "GSi updates Piano Studio virtual instrument to v1.1.0 (Desktop &#038; iOS)"
+          }
+        ]
+      },
       "experiment": null,
       "completedExperiments": [],
       "humanFeedback": [
@@ -65,6 +252,67 @@
           "open": false
         },
         "research": {
+          "failures": 0,
+          "lastSuccess": "2026-09-14T13:05:20.153Z",
+          "openUntil": null,
+          "lastError": null,
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 2,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": [
+        {
+          "at": "2026-09-14T12:02:07.727Z",
+          "schemaVersion": 1,
+          "account": "music-tools-x",
+          "stage": "trend-error",
+          "code": null,
+          "error": "Expected ',' or ']' after array element in JSON at position 2538 (line 1 column 2539)"
+        }
+      ]
+    },
+    "plugin-radar-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
           "open": false
         }
       },
@@ -85,7 +333,200 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "artist-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "artist-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "brand-c-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "brand-c-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     },
@@ -138,7 +579,8 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     },
@@ -191,7 +633,8 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     }

@@ -229,6 +229,12 @@ test('preflight handles nothing-enabled and unknown-account branches without ext
   const previousFetch = globalThis.fetch;
   const files = await snapshotFiles([CONFIG_FILE]);
   try {
+    // The shipped config enables music-tools-x in approval mode; this branch test needs a config
+    // with no enabled accounts, so the fixture pauses it (restored by snapshot/restoreFiles).
+    const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
+    config.accounts['music-tools-x'].enabled = false;
+    config.accounts['music-tools-x'].mode = 'pause';
+    await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     globalThis.fetch = async () => { throw new Error('network must not be called'); };
     const nothing = await runLivePreflight();
     assert.equal(nothing.state, 'nothing_enabled');

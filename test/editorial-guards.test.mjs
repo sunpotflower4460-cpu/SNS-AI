@@ -42,15 +42,15 @@ test('provided generation route is the one audited; a later default model is not
   const account = {
     platform: 'x',
     contentStrategy: 'plugin-radar',
-    generation: { model: 'gpt-5' },
-    ai: { openaiTriageModel: 'gpt-5-mini' },
+    generation: { model: 'gpt-5.6-luna' },
+    ai: { openaiTriageModel: 'gpt-5.6-luna' },
     learning: { exploreRate: 0.2 },
     linkPolicy: { maxUrlPostsPerWeek: 0, maxUrlPostsPerDay: 0, purposes: [] },
     monetization: { affiliate: { enabled: false } },
     media: { strategy: 'none' },
     schedule: { timezone: 'UTC' }
   };
-  const route = { tier: 'balanced', provider: 'openai', model: 'gpt-5-mini', reasons: [], escalationReason: null };
+  const route = { tier: 'balanced', provider: 'openai', model: 'gpt-5.6-luna', reasons: [], escalationReason: null };
   const result = await evaluateEditorialGuards({
     accountId: 'music-tools-x',
     account,
@@ -63,7 +63,7 @@ test('provided generation route is the one audited; a later default model is not
   });
   assert.equal(result.audit.selectedModelTier, 'balanced');
   assert.equal(result.audit.selectedProvider, 'openai');
-  assert.equal(result.audit.selectedModel, 'gpt-5-mini');
+  assert.equal(result.audit.selectedModel, 'gpt-5.6-luna');
 });
 
 test('artist overlap reframe proceeds when the draft is a different entry, not a paraphrase', async () => {

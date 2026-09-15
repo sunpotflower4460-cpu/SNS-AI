@@ -111,7 +111,7 @@ Web Search is never called first for a `directFetch: true` account.
   `'groq'` usage kind.
 - `src/ai/openai-task.mjs` — the OpenAI-side implementation of the same cheap-task interface, reusing
   `src/lib/openai.mjs`'s existing transport (so budget consumption/retries stay identical to every other
-  OpenAI call in this repository) with a smaller/cheaper model (`gpt-5-mini` by default).
+  OpenAI call in this repository) with a smaller/cheaper model (`gpt-5.6-luna` by default).
 - `GROQ_API_KEY` is entirely optional. Missing it, or any Groq failure, falls forward to OpenAI —
   **OpenAI-only configurations keep working exactly as before.** OpenAI integration itself
   (`src/lib/openai.mjs generatePost/generateTrendBrief/moderateText`) is unmodified; Groq is additive.
@@ -133,8 +133,8 @@ exceeds the cap is not discarded — only its URL is stripped before publishing.
 `npm run cost-report` (`src/reports/cost-report.mjs`) reports, per account: direct-fetch/RSS/GitHub item
 counts, duplicate drops, today's Groq/OpenAI/Web Search/media call counts (from the existing budget
 ledger), and — for X accounts — published URL vs. non-URL post counts over the last 30 days plus an
-estimated monthly cost using the operator-maintained `config/x-api-pricing.json` pricing model (defaults to
-all zeros; fill in real tier pricing to get a meaningful estimate). None of this is real X billing data.
+estimated monthly cost using the operator-maintained `config/x-api-pricing.json` pricing model (2026-09-02
+X Pay-Per-Use operator estimate; re-check when X changes pricing). None of this is real X billing data.
 
 ## What this change does NOT do
 

@@ -87,3 +87,57 @@ test('buildCostReport surfaces research fetch counts, AI usage, and X URL/non-UR
 test('buildCostReport rejects an unknown account filter', async () => {
   await assert.rejects(buildCostReport({ accountFilter: 'does-not-exist' }), /Unknown account/);
 });
+
+test('committed x-api-pricing.json is the 2026-09-02 X Pay-Per-Use operator estimate', async () => {
+  const pricing = JSON.parse(await readFile(PRICING, 'utf8'));
+  assert.equal(pricing.monthlyBaseFeeUsd, 0);
+  assert.equal(pricing.costPerUrlPostUsd, 0.2);
+  assert.equal(pricing.costPerNonUrlPostUsd, 0.015);
+  assert.equal(pricing.costPerReadOperationUsd, 0.005);
+  assert.match(pricing.note, /2026-09-02/);
+  assert.match(pricing.note, /Pay-Per-Use/);
+  assert.match(pricing.note, /operator-maintained estimate/i);
+  assert.match(pricing.note, /GET \/2\/tweets\/\{postId\}/);
+  assert.match(pricing.note, /Owned Read/);
+  assert.match(pricing.note, /Re-check/i);
+});
+
+test('X metrics collector uses GET /2/tweets/{postId} so reads are Posts Read $0.005 not Owned Read $0.001', async () => {
+  const src = await readFile(fileURLToPath(new URL('../src/analytics/x-metrics.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /api\.x\.com\/2\/tweets\/\$\{encodeURIComponent\(postId\)\}/);
+  const pricing = JSON.parse(await readFile(PRICING, 'utf8'));
+  assert.equal(pricing.costPerReadOperationUsd, 0.005);
+  assert.notEqual(pricing.costPerReadOperationUsd, 0.001);
+});
+
+test('buildCostReport applies committed Pay-Per-Use rates including Posts Read $0.005', async () => {
+  await isolated(async () => {
+    const now = new Date();
+    const historyPath = fileURLToPath(new URL('../data/history.jsonl', import.meta.url));
+    const auditPath = fileURLToPath(new URL('../data/audit.jsonl', import.meta.url));
+    const savedHistory = await snap(historyPath);
+    const savedAudit = await snap(auditPath);
+    try {
+      await mkdir(dirname(historyPath), { recursive: true });
+      await writeFile(historyPath, [
+        JSON.stringify({ account: 'example-x', status: 'published', text: '新製品です https://vendor.example/x', at: now.toISOString() }),
+        JSON.stringify({ account: 'example-x', status: 'published', text: 'リンクなし投稿', at: now.toISOString() })
+      ].join('\n') + '\n', 'utf8');
+      await writeFile(auditPath, `${JSON.stringify({ account: 'example-x', stage: 'metrics-collected', at: now.toISOString() })}\n`, 'utf8');
+
+      const report = await buildCostReport({ accountFilter: 'example-x', now });
+      const row = report.accounts['example-x'];
+      assert.equal(report.pricingModel.costPerUrlPostUsd, 0.2);
+      assert.equal(report.pricingModel.costPerNonUrlPostUsd, 0.015);
+      assert.equal(report.pricingModel.costPerReadOperationUsd, 0.005);
+      assert.equal(row.xApi.urlPosts, 1);
+      assert.equal(row.xApi.nonUrlPosts, 1);
+      assert.equal(row.xApi.readOperations, 1);
+      // 0.20 (url) + 0.015 (non-url) + 0.005 (GET /2/tweets Posts Read) = 0.22
+      assert.equal(row.xApi.estimatedMonthlyCostUsd, 0.22);
+    } finally {
+      await restore(historyPath, savedHistory);
+      await restore(auditPath, savedAudit);
+    }
+  });
+});

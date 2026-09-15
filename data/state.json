@@ -1,3 +1,10 @@
 {
-  "slots": {}
+  "slots": {
+    "music-tools-x:manual:2026-09-15T00:28": {
+      "status": "approval_pending",
+      "at": "2026-09-15T00:29:14.603Z",
+      "account": "music-tools-x",
+      "issue": 98
+    }
+  }
 }

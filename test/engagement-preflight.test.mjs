@@ -39,6 +39,7 @@ async function withPreflightFixture(task, {
   const savedFiles = await snapshot([CONFIG, POLICY, OAUTH_STATE]);
   const savedEnv = {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
     SOCIAL_CREDENTIALS_JSON: process.env.SOCIAL_CREDENTIALS_JSON,
     X_OAUTH2_STATE_KEY: process.env.X_OAUTH2_STATE_KEY,
     GITHUB_TOKEN: process.env.GITHUB_TOKEN,
@@ -66,6 +67,7 @@ async function withPreflightFixture(task, {
 
     await rm(OAUTH_STATE, { force: true });
     process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.GROQ_API_KEY = 'test-groq-key';
     process.env.X_OAUTH2_STATE_KEY = '0123456789abcdef0123456789abcdef';
     process.env.GITHUB_TOKEN = 'test-github-token';
     delete process.env.GH_TOKEN;
@@ -106,9 +108,11 @@ function installFetchMock({ tokenScopes }) {
     if (target === 'https://api.openai.com/v1/moderations') {
       return response({ results: [{ flagged: false, categories: {} }] });
     }
-    if (target === 'https://api.openai.com/v1/models/gpt-5') {
-      return response({ id: 'gpt-5', owned_by: 'openai' });
+    if (target === 'https://api.groq.com/openai/v1/models') {
+      return response({ object: 'list', data: [{ id: 'openai/gpt-oss-120b', object: 'model' }] });
     }
+    const modelProbe = target.match(/^https:\/\/api\.openai\.com\/v1\/models\/([^/]+)$/);
+    if (modelProbe) return response({ id: modelProbe[1], owned_by: 'openai' });
     if (target === 'https://api.x.com/2/oauth2/token' && method === 'POST') {
       oauth2Attempted = true;
       return response({

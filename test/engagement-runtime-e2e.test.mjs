@@ -109,6 +109,9 @@ async function withFixture(platform, task, { suffix = 'main', webSearch = false,
     row.research = { ...(row.research || {}), webSearch, trendIntelligence: false };
     row.budgets = { ...(row.budgets || {}), enabled: false };
     row.safety = { ...(row.safety || {}), moderation: true };
+    // The shipped account pins engagement approval on at the account level (revoke-safe posture);
+    // this fixture explicitly opts into automatic sending, so it must relax that pin here too.
+    row.engagement = { ...(row.engagement || {}), approvalRequired: false };
     await writeFile(CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 
     const policy = JSON.parse(snap.get(POLICY));

@@ -3,7 +3,7 @@
     "timezone": "Asia/Tokyo",
     "mode": "pause",
     "generation": {
-      "model": "gpt-5",
+      "model": "gpt-5.6-luna",
       "historyWindow": 30,
       "duplicateThreshold": 0.72,
       "maxAttempts": 3,
@@ -38,7 +38,13 @@
     },
     "analytics": {
       "enabled": true,
-      "checkpointsMinutes": [60, 360, 1440, 4320, 10080],
+      "checkpointsMinutes": [
+        60,
+        360,
+        1440,
+        4320,
+        10080
+      ],
       "maxAgeDays": 30
     },
     "learning": {
@@ -62,10 +68,15 @@
       "maxTriageCandidates": 20
     },
     "ai": {
-      "providers": ["groq", "openai"],
+      "providers": [
+        "groq",
+        "openai"
+      ],
       "allowFallback": true,
-      "groqModel": "llama-3.1-8b-instant",
-      "openaiTriageModel": "gpt-5-mini"
+      "groqModel": "openai/gpt-oss-120b",
+      "openaiTriageModel": "gpt-5.6-luna",
+      "openaiHighModel": "gpt-5.6-terra",
+      "openaiCriticalModel": "gpt-5.6-sol"
     },
     "linkPolicy": {
       "preferNoLink": false,
@@ -89,7 +100,12 @@
     },
     "experiments": {
       "enabled": true,
-      "dimensions": ["hook", "format", "cta", "mediaDecision"],
+      "dimensions": [
+        "hook",
+        "format",
+        "cta",
+        "mediaDecision"
+      ],
       "minSamplesPerVariant": 3,
       "maxDays": 14,
       "minimumStrategySamples": 6
@@ -171,7 +187,7 @@
   "accounts": {
     "music-tools-x": {
       "platform": "x",
-      "enabled": false,
+      "enabled": true,
       "mode": "approval",
       "credentialKey": "music-tools-x",
       "brandId": "plugin-radar",
@@ -258,16 +274,36 @@
       "instructions": "このアカウント固有の最優先コンセプトは『海外のまだ知られていない良いプラグインを発掘して、買う価値まで日本語で判断する』。一般的な新着ニュースやセール一覧を埋めることより、読者がまだ知らない良作・小規模デベロッパー・珍しい技術・日本語圏で未飽和なテーマの発見を優先する。投稿候補を作る前にWeb SearchとTrend Briefを積極的に使い、メーカー公式、公式ニュース、リリースノート、公式SNS、公式GitHubを一次情報として最優先する。海外フォーラムや専門コミュニティは発見源として使えるが、製品仕様・価格・対応環境・期限などの事実は可能な限り公式情報へ戻って確認する。候補ごとに『誰に向くか』『何が新しい/珍しいか』『既存ツールと何が違うか』『既に似た製品を持つ人が買い足す価値があるか』『見送ってよいのは誰か』『無料または安価な代替があるか』から、投稿に最も重要な判断材料を最低1つ入れる。すべてを毎回詰め込まず、その投稿の中心ペルソナを1つ選んで短く書く。実際に使用したという事実が明示されていない製品について、使用感・音質評価・個人的体験を捏造しない。価格やセール期限を載せる場合は投稿生成時点で確認できた情報だけを使い、条件が曖昧なら無理に書かない。無料・セールだけに偏らず、新技術、独自設計、ワークフロー改善、定番との使い分けも扱う。単に『海外で話題』で終わらず、日本語圏の読者が『なぜ面白いか』『自分に必要か』を判断できる一言を加える。既存製品で十分ならそう書き、affiliateの有無・報酬率・提携先都合を推薦順位に使わない。リンクは原則として最も信頼できる公式URLを1つまで。ハッシュタグは必要な場合のみ少数。過去投稿と製品・テーマ・フック・構成が近い場合は別テーマへ切り替える。",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
-        "times": ["09:00", "20:00"],
-        "adaptiveCandidateTimes": ["08:00", "09:00", "12:30", "18:00", "20:00", "22:00"],
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ],
+        "times": [
+          "09:00",
+          "20:00"
+        ],
+        "adaptiveCandidateTimes": [
+          "08:00",
+          "09:00",
+          "12:30",
+          "18:00",
+          "20:00",
+          "22:00"
+        ],
         "windowMinutes": 30
       },
       "generation": {
         "maxChars": 280,
         "historyWindow": 60,
         "duplicateThreshold": 0.68,
-        "candidateCount": 6
+        "candidateCount": 6,
+        "minPredictedScore": 35,
+        "lowScoreRetryCount": 1
       },
       "research": {
         "webSearch": true,
@@ -293,7 +329,12 @@
         "preferNoLink": true,
         "maxUrlPostsPerWeek": 3,
         "maxUrlPostsPerDay": 1,
-        "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
+        "purposes": [
+          "affiliate",
+          "sale",
+          "roundup",
+          "highValueDiscovery"
+        ]
       },
       "monetization": {
         "affiliate": {
@@ -302,6 +343,9 @@
       },
       "media": {
         "strategy": "none"
+      },
+      "engagement": {
+        "approvalRequired": true
       }
     },
     "plugin-radar-instagram": {
@@ -325,7 +369,12 @@
           "無料なのに面白いプラグイン・期間限定無料配布",
           "買う価値・見送ってよい条件・既存所有者向け判断"
         ],
-        "style": ["日本語", "視覚の文脈を先に置く", "保存価値", "誇張しない"],
+        "style": [
+          "日本語",
+          "視覚の文脈を先に置く",
+          "保存価値",
+          "誇張しない"
+        ],
         "avoid": [
           "未確認の発売日・価格・割引率・セール期限",
           "使用していない製品を使ったことがあるように書くこと",
@@ -336,11 +385,20 @@
       "instructions": "同一ブランドのResearch / Core Content Briefを再利用し、X投稿のコピペは禁止。Instagramは視覚文脈・保存価値・キャプション形式へ変換する。製品画像はMedia Hunterとentity verificationを通過したものだけ。検証できない場合はブランドカード、それも無理なら投稿しない。AI画像生成で製品外観を作らない。",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["tue", "thu", "sat"],
-        "times": ["18:00"],
+        "days": [
+          "tue",
+          "thu",
+          "sat"
+        ],
+        "times": [
+          "18:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 1800, "candidateCount": 4 },
+      "generation": {
+        "maxChars": 1800,
+        "candidateCount": 4
+      },
       "research": {
         "webSearch": true,
         "trendIntelligence": true,
@@ -353,9 +411,18 @@
         "preferNoLink": true,
         "maxUrlPostsPerWeek": 3,
         "maxUrlPostsPerDay": 1,
-        "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
+        "purposes": [
+          "affiliate",
+          "sale",
+          "roundup",
+          "highValueDiscovery"
+        ]
       },
-      "monetization": { "affiliate": { "enabled": false } },
+      "monetization": {
+        "affiliate": {
+          "enabled": false
+        }
+      },
       "media": {
         "strategy": "hunter",
         "type": "image",
@@ -378,24 +445,56 @@
         "identity": "Artist Support Mode scaffold. Fill with the artist’s public-facing identity before enabling. Do not invent biography, credits, or taste.",
         "goal": "本人の手動投稿を置き換えず、Taste → 世界観 → プロフィール訪問 → 関心 → 楽曲発見 の入口を作り続ける。",
         "audience": "Define before enabling.",
-        "topics": ["taste", "craft", "worldview", "music discovery"],
-        "style": ["natural", "specific", "no fabricated personal experience"],
-        "avoid": ["fabricated personal experiences", "claiming to have used/heard/visited unverified things", "daily self-promo spam"]
+        "topics": [
+          "taste",
+          "craft",
+          "worldview",
+          "music discovery"
+        ],
+        "style": [
+          "natural",
+          "specific",
+          "no fabricated personal experience"
+        ],
+        "avoid": [
+          "fabricated personal experiences",
+          "claiming to have used/heard/visited unverified things",
+          "daily self-promo spam"
+        ]
       },
       "instructions": "artist-support mode. Personal experience language is allowed only for confirmed_personal evidence. taste_match may be curious/observational. external_discovery is objective only. Before posting, check recent manual posts and avoid repeating the same song, URL, or announcement.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
-        "times": ["12:00"],
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ],
+        "times": [
+          "12:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 280 },
-      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "generation": {
+        "maxChars": 280
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false,
+        "directFetch": false
+      },
       "linkPolicy": {
         "preferNoLink": true,
         "maxUrlPostsPerWeek": 2,
         "maxUrlPostsPerDay": 1,
-        "purposes": ["musicDiscovery", "release"]
+        "purposes": [
+          "musicDiscovery",
+          "release"
+        ]
       },
       "artist": {
         "hybridMode": true,
@@ -412,7 +511,9 @@
           "similarityThreshold": 0.55
         }
       },
-      "media": { "strategy": "none" }
+      "media": {
+        "strategy": "none"
+      }
     },
     "artist-instagram": {
       "platform": "instagram",
@@ -427,24 +528,52 @@
         "identity": "Artist Support Mode Instagram scaffold. Fill before enabling. Do not invent visuals of unowned work.",
         "goal": "Asset Library / verified owned media / brand card を優先し、Taste から本人への関心へつなぐ。",
         "audience": "Define before enabling.",
-        "topics": ["taste", "craft", "worldview", "music discovery"],
-        "style": ["visual", "clear", "no fabricated personal experience"],
-        "avoid": ["unsupported claims", "AI product UI", "unverified personal anecdotes"]
+        "topics": [
+          "taste",
+          "craft",
+          "worldview",
+          "music discovery"
+        ],
+        "style": [
+          "visual",
+          "clear",
+          "no fabricated personal experience"
+        ],
+        "avoid": [
+          "unsupported claims",
+          "AI product UI",
+          "unverified personal anecdotes"
+        ]
       },
       "instructions": "Reuse the brand research brief. Convert to Instagram caption form. Never generate a fake studio or fake artwork. Prefer owned assets from the Artist Asset Library.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["tue", "thu", "sat"],
-        "times": ["18:00"],
+        "days": [
+          "tue",
+          "thu",
+          "sat"
+        ],
+        "times": [
+          "18:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 1800 },
-      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "generation": {
+        "maxChars": 1800
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false,
+        "directFetch": false
+      },
       "linkPolicy": {
         "preferNoLink": true,
         "maxUrlPostsPerWeek": 2,
         "maxUrlPostsPerDay": 1,
-        "purposes": ["musicDiscovery", "release"]
+        "purposes": [
+          "musicDiscovery",
+          "release"
+        ]
       },
       "artist": {
         "hybridMode": true,
@@ -483,20 +612,43 @@
         "identity": "Unused brand scaffold. Fill identity, goal, audience, topics, style, and avoid before enabling. Do not invent a personality here.",
         "goal": "Define before enabling.",
         "audience": "Define before enabling.",
-        "topics": ["topic A", "topic B"],
-        "style": ["natural", "specific"],
-        "avoid": ["fabricated personal experiences", "unconfirmed facts"]
+        "topics": [
+          "topic A",
+          "topic B"
+        ],
+        "style": [
+          "natural",
+          "specific"
+        ],
+        "avoid": [
+          "fabricated personal experiences",
+          "unconfirmed facts"
+        ]
       },
       "instructions": "Scaffold only. Do not generate live content until an operator defines this brand.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["mon", "wed", "fri"],
-        "times": ["09:00"],
+        "days": [
+          "mon",
+          "wed",
+          "fri"
+        ],
+        "times": [
+          "09:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 280 },
-      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
-      "media": { "strategy": "none" }
+      "generation": {
+        "maxChars": 280
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false,
+        "directFetch": false
+      },
+      "media": {
+        "strategy": "none"
+      }
     },
     "brand-c-instagram": {
       "platform": "instagram",
@@ -511,19 +663,40 @@
         "identity": "Unused brand scaffold. Fill before enabling. Do not invent a visual identity.",
         "goal": "Define before enabling.",
         "audience": "Define before enabling.",
-        "topics": ["topic A", "topic B"],
-        "style": ["visual", "clear"],
-        "avoid": ["unsupported claims", "AI-invented product images"]
+        "topics": [
+          "topic A",
+          "topic B"
+        ],
+        "style": [
+          "visual",
+          "clear"
+        ],
+        "avoid": [
+          "unsupported claims",
+          "AI-invented product images"
+        ]
       },
       "instructions": "Scaffold only. Do not generate live content until an operator defines this brand.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["tue", "thu", "sat"],
-        "times": ["18:00"],
+        "days": [
+          "tue",
+          "thu",
+          "sat"
+        ],
+        "times": [
+          "18:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 1800 },
-      "research": { "webSearch": false, "trendIntelligence": false, "directFetch": false },
+      "generation": {
+        "maxChars": 1800
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false,
+        "directFetch": false
+      },
       "media": {
         "strategy": "hunter",
         "type": "image",
@@ -544,20 +717,46 @@
         "identity": "Describe who this account is.",
         "goal": "Describe what this account is trying to achieve.",
         "audience": "Describe the target audience.",
-        "topics": ["topic A", "topic B"],
-        "style": ["natural", "specific"],
-        "avoid": ["fabricated personal experiences", "repetitive hooks"]
+        "topics": [
+          "topic A",
+          "topic B"
+        ],
+        "style": [
+          "natural",
+          "specific"
+        ],
+        "avoid": [
+          "fabricated personal experiences",
+          "repetitive hooks"
+        ]
       },
       "instructions": "Put account-specific operating rules here.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
-        "times": ["08:00"],
+        "days": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ],
+        "times": [
+          "08:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 280 },
-      "research": { "webSearch": false, "trendIntelligence": false },
-      "media": { "strategy": "none" }
+      "generation": {
+        "maxChars": 280
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false
+      },
+      "media": {
+        "strategy": "none"
+      }
     },
     "example-instagram": {
       "platform": "instagram",
@@ -570,20 +769,42 @@
         "identity": "Describe who this account is.",
         "goal": "Describe what this account is trying to achieve.",
         "audience": "Describe the target audience.",
-        "topics": ["topic A", "topic B"],
-        "style": ["visual", "clear"],
-        "avoid": ["unsupported claims", "repetitive captions"]
+        "topics": [
+          "topic A",
+          "topic B"
+        ],
+        "style": [
+          "visual",
+          "clear"
+        ],
+        "avoid": [
+          "unsupported claims",
+          "repetitive captions"
+        ]
       },
       "instructions": "Put Instagram-specific operating rules here.",
       "schedule": {
         "timezone": "Asia/Tokyo",
-        "days": ["tue", "thu", "sat"],
-        "times": ["18:00"],
+        "days": [
+          "tue",
+          "thu",
+          "sat"
+        ],
+        "times": [
+          "18:00"
+        ],
         "windowMinutes": 30
       },
-      "generation": { "maxChars": 1800 },
-      "research": { "webSearch": false, "trendIntelligence": false },
-      "analytics": { "maxAgeDays": 14 },
+      "generation": {
+        "maxChars": 1800
+      },
+      "research": {
+        "webSearch": false,
+        "trendIntelligence": false
+      },
+      "analytics": {
+        "maxAgeDays": 14
+      },
       "media": {
         "strategy": "auto",
         "type": "image",
