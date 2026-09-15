@@ -106,10 +106,74 @@ const CANDIDATE_SCHEMA = {
   }
 };
 
+function responseUsageMetadata(response) {
+  const usage = response?.usage || {};
+  const outputTokens = Number(usage.output_tokens);
+  const reasoningTokens = Number(usage.output_tokens_details?.reasoning_tokens);
+  return {
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
+    reasoningTokens: Number.isFinite(reasoningTokens) ? reasoningTokens : null
+  };
+}
+
+// The Responses API's own top-level `status` is ground truth for whether output_text is even meant to be
+// complete JSON - checked BEFORE ever calling JSON.parse on it. Fixes the real production failure
+// ("Expected ',' or ']' after array element in JSON at position 2659...") where a cut-off/failed response
+// was fed straight into JSON.parse and surfaced as an opaque, untyped SyntaxError instead of a
+// diagnosable provider error. A missing/unrecognized status (every existing mocked test response, which
+// predates this check and never sets one) falls through unchanged to the parse path below - this can only
+// ever catch MORE failures than before, never reject a response that used to parse successfully.
+function assertResponseComplete(response, body) {
+  if (response?.status === 'incomplete') {
+    const usage = responseUsageMetadata(response);
+    const reason = response.incomplete_details?.reason || null;
+    const error = new Error(`OpenAI response was incomplete${reason ? ` (${reason})` : ''}.`);
+    error.code = 'OPENAI_RESPONSE_INCOMPLETE';
+    error.responseStatus = 'incomplete';
+    error.incompleteReason = reason;
+    error.requestedMaxOutputTokens = Number.isFinite(body?.max_output_tokens) ? body.max_output_tokens : null;
+    error.outputTokens = usage.outputTokens;
+    error.reasoningTokens = usage.reasoningTokens;
+    throw error;
+  }
+  if (response?.status === 'failed') {
+    const error = new Error(response.error?.message || 'OpenAI response failed.');
+    error.code = 'OPENAI_RESPONSE_FAILED';
+    error.responseStatus = 'failed';
+    error.providerErrorCode = response.error?.code || null;
+    throw error;
+  }
+}
+
 async function requestAndParse(body, meta) {
   const response = await openaiRequest('/responses', body, meta);
-  const parsed = parseJsonText(outputText(response));
+  assertResponseComplete(response, body);
+  let parsed;
+  try {
+    parsed = parseJsonText(outputText(response));
+  } catch {
+    // JSON.parse succeeding is not guaranteed just because status was "completed" - never let the raw
+    // SyntaxError (which carries no actionable metadata) escape as-is. structuredMode records what format
+    // was actually requested for THIS call, so a fallback retry (see responseJson below) reports its own
+    // mode correctly rather than always claiming "json_schema".
+    const error = new Error('OpenAI structured output was not valid JSON.');
+    error.code = 'OPENAI_STRUCTURED_OUTPUT_INVALID';
+    error.responseStatus = response?.status || null;
+    error.structuredMode = body?.text?.format?.type || 'text';
+    throw error;
+  }
   return { ...parsed, citations: extractUrlCitations(response) };
+}
+
+// A 400 does not, by itself, mean "this model/endpoint cannot do Structured Outputs" - it can just as
+// easily mean a bad prompt, an invalid model id, or a moderation-adjacent rejection, none of which get
+// fixed by dropping the schema. Only fall back when the error specifically names the structured-output
+// request shape (text.format/response_format) as the problem.
+function unsupportedStructuredOutputError(error) {
+  const param = error?.body?.error?.param;
+  if (param === 'text.format' || param === 'response_format') return true;
+  const message = String(error?.body?.error?.message || error?.message || '');
+  return /\b(response_format|json_schema|structured output)\b/i.test(message) && /not support|unsupported|invalid/i.test(message);
 }
 
 async function responseJson({ model, system, user, webSearch = false, schema = CANDIDATE_SCHEMA, name = 'social_output', accountId, account, operation, dryRun = false }) {
@@ -122,7 +186,15 @@ async function responseJson({ model, system, user, webSearch = false, schema = C
   try { return await requestAndParse(body, meta); }
   catch (error) {
     if (Number(error.status) !== 400) throw error;
-    delete body.text;
+    // Plugin Radar's entity<->evidence binding (features.trendEvidenceIndex - see generatePost() below)
+    // depends on the model actually returning the schema-enforced shape; silently dropping the schema for
+    // this account would defeat that safety net entirely, so it always fails closed on any 400 instead of
+    // guessing at an unstructured fallback.
+    if (account?.contentStrategy === 'plugin-radar') throw error;
+    if (!unsupportedStructuredOutputError(error)) throw error;
+    // Keep at least JSON validity even without the full schema (json_object mode still guarantees
+    // parseable JSON) rather than dropping to fully unstructured free-text output.
+    body.text = { format: { type: 'json_object' } };
     return requestAndParse(body, meta);
   }
 }
@@ -200,6 +272,25 @@ function lowScoreRetryFeedback(topScore, requiredScore) {
     `The best candidate scored ${topScore}, below the required minimum of ${requiredScore}.`,
     'Regenerate with genuinely stronger substance: a sharper and more specific angle, a clearer answer to why this matters to this reader now, and more concrete, source-grounded detail.',
     'Do NOT raise the score through exaggeration, clickbait, false urgency, fabricated benefits, fabricated personal experience, or unsupported comparisons - only real substance counts.'
+  ].join(' ');
+}
+
+// Feedback for the two recoverable response-reliability errors from responseJson() (see
+// assertResponseComplete/requestAndParse above): the provider either cut the response off before it
+// finished (OPENAI_RESPONSE_INCOMPLETE) or returned "completed" output that was not valid JSON
+// (OPENAI_STRUCTURED_OUTPUT_INVALID). Both are told to the model as a request to comply with the schema
+// and keep the output compact - never as an instruction to write worse/shorter *content*, and never
+// implying the token budget has changed (generatePost() does not alter maxOutputTokens based on this).
+function recoverableResponseFeedback(error) {
+  if (error.code === 'OPENAI_RESPONSE_INCOMPLETE') {
+    return [
+      'The previous response was cut off before it finished and could not be used.',
+      'Keep candidates concise and return strictly valid, complete JSON matching the schema - do not pad rationale or mediaPrompt fields.'
+    ].join(' ');
+  }
+  return [
+    'The previous response completed but was not valid JSON and could not be used.',
+    'Return strictly valid JSON that exactly matches the requested schema, with no trailing or malformed elements.'
   ].join(' ');
 }
 
@@ -345,7 +436,21 @@ export async function generatePost(accountId, account, history = [], context = {
   let qualityRetriesUsed = 0;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const prompt = generationPrompt(accountId, account, history, { ...context, route }, feedback);
-    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
+    let generated;
+    try {
+      generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
+    } catch (error) {
+      // OPENAI_RESPONSE_INCOMPLETE and OPENAI_STRUCTURED_OUTPUT_INVALID mean the provider failed to hand
+      // back usable structured output on this attempt, not that the provider is down (that's
+      // OPENAI_RESPONSE_FAILED, and everything else) - so, exactly like the quality-floor retry below, a
+      // retry may only consume an iteration this loop already had budgeted by `attempts`, never schedule a
+      // call beyond it. Any other error, or running out of attempts, propagates immediately.
+      if ((error.code === 'OPENAI_RESPONSE_INCOMPLETE' || error.code === 'OPENAI_STRUCTURED_OUTPUT_INVALID') && attempt < attempts) {
+        feedback = recoverableResponseFeedback(error);
+        continue;
+      }
+      throw error;
+    }
     const valid = [];
     // Why the discard reasons are kept: when every candidate is rejected the retry prompt used to say only
     // "they were invalid or repetitive", so the model had no idea WHICH rule it broke and typically broke it
@@ -444,5 +549,6 @@ export async function generateTrendBrief(accountId, account) {
 
 export const __test = {
   generationPrompt, lengthBudgetBrief, lowScoreRetryFeedback, PLUGIN_RADAR_CATEGORY_PRECISION_RULES,
-  trendBriefForPrompt, resolveTrendEvidence, assertPluginRadarTrendEvidence, dedupeSources
+  trendBriefForPrompt, resolveTrendEvidence, assertPluginRadarTrendEvidence, dedupeSources,
+  assertResponseComplete, unsupportedStructuredOutputError, responseUsageMetadata, recoverableResponseFeedback
 };

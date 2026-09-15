@@ -267,7 +267,13 @@ export async function runAutopilot({ now = new Date(), accountFilter, force = fa
         if (!dryRun && !nonCircuitCodes.includes(error.code)) await recordCircuitFailure(accountId, 'autopilot', error, account.resilience);
         await appendAudit({
           account: accountId, stage: 'autopilot-error', slotId: slot.slotId, code: error.code || null,
-          error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun
+          error: String(error.message || error).slice(0, 500), qa: error.qa ? { score: error.qa.score, issues: error.qa.issues?.slice(0, 5) || [] } : null, dryRun,
+          // Typed diagnostic metadata for the response-reliability errors (see assertResponseComplete/
+          // requestAndParse in src/lib/openai.mjs): null for every other error code. Deliberately no raw
+          // model output text here - only safe, structural facts about the failure (what the Responses API
+          // reported, why it was incomplete if it was, and which structured-output mode was in use).
+          responseStatus: error.responseStatus || null, incompleteReason: error.incompleteReason || null,
+          structuredMode: error.structuredMode || null
         }).catch(() => {});
         if (error.code === 'CONTENT_QUALITY_BELOW_THRESHOLD') {
           // A dedicated, easy-to-query audit stage for "the AI itself decided not to post today" -
