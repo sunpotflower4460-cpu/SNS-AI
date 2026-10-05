@@ -11,7 +11,7 @@ import { resolveArtistOsMode, MODE_MANAGED } from './artist-os-mode.mjs';
 
 const pkgVersion = async () => JSON.parse(await readFile(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')).version;
 
-export function buildServiceCapabilities({ env = process.env, policy, engagementPolicy, now = new Date(), version = null } = {}) {
+export function buildServiceCapabilities({ env = process.env, policy, engagementPolicy, now = new Date(), version = 'unknown' } = {}) {
   const { mode, modeInvalid } = resolveArtistOsMode(env, policy);
   const managed = mode === MODE_MANAGED;
   const sendPossible = !managed
