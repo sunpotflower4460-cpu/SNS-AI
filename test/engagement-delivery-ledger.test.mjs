@@ -281,6 +281,10 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
     process.env.SNS_DURABLE_STATE_BRANCH = 'sns-ai-state';
 
     const key = 'f'.repeat(32);
+    // Timestamps are relative to now: resolved guards are compacted after RESOLVED_RETENTION_MS (35 days),
+    // so a hard-coded calendar date turns this test red once the date passes (it did on 2026-09-24).
+    // The behavior under test (a durable sent/handled guard is never demoted) is unchanged.
+    const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60_000).toISOString();
     let remote = {
       schemaVersion: 1,
       records: {
@@ -291,10 +295,10 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
           publicInteraction: true,
           status: 'sent',
           attempts: 1,
-          createdAt: '2026-08-20T00:00:00Z',
-          startedAt: '2026-08-20T00:00:00Z',
-          updatedAt: '2026-08-20T01:00:00Z',
-          completedAt: '2026-08-20T01:00:00Z',
+          createdAt: hoursAgo(2),
+          startedAt: hoursAgo(2),
+          updatedAt: hoursAgo(1),
+          completedAt: hoursAgo(1),
           issueNumber: null
         }
       }
@@ -315,8 +319,8 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
     assert.equal(result.status, 'sent');
     assert.equal(remote.records[key].status, 'sent');
     assert.equal((await getDeliveryRecord(key)).status, 'sent');
-    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'sent', updatedAt: '2026-08-20T01:00:00Z' }, 'failed').status, 'sent');
-    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'handled', updatedAt: '2026-08-20T01:00:00Z' }, 'unknown').status, 'handled');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'sent', updatedAt: hoursAgo(1) }, 'failed').status, 'sent');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'handled', updatedAt: hoursAgo(1) }, 'unknown').status, 'handled');
   });
 });
 
