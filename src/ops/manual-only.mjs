@@ -6,6 +6,9 @@ export const RUNTIME_POLICY_FILE = fileURLToPath(new URL('../../config/runtime-p
 export async function loadRuntimePolicy(path = RUNTIME_POLICY_FILE) {
   const policy = JSON.parse(await readFile(path, 'utf8'));
   if (policy?.schemaVersion !== 1 || typeof policy.manualOnly !== 'boolean') throw new Error('Runtime policy is missing schemaVersion:1 or boolean manualOnly.');
+  if (policy.artistOsMode !== undefined && !['standalone', 'artist_os_managed'].includes(policy.artistOsMode)) {
+    throw new Error('Runtime policy artistOsMode must be "standalone" or "artist_os_managed" when present.');
+  }
   return policy;
 }
 

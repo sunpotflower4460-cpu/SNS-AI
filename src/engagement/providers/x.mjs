@@ -1,5 +1,6 @@
 import { xOAuth2FetchJson } from '../../providers/x-oauth2.mjs';
 import { assertProviderMutationAllowed, loadRuntimePolicy } from '../../ops/manual-only.mjs';
+import { assertInboundReplyExecutionAllowed } from '../../ops/artist-os-mode.mjs';
 
 const X_API = 'https://api.x.com/2';
 const DEFAULT_MAX_PAGES = 5;
@@ -61,7 +62,11 @@ async function paginateX(fetchPage, { kind = 'engagement', maxPages = DEFAULT_MA
 }
 
 async function assertLiveMutationAllowed(source) {
+  // Artist OS managed mode: My-SNS owns inbound-reply execution. Checked before anything else (also
+  // before reading policy files) so a direct call can never reach the network.
+  assertInboundReplyExecutionAllowed({ dryRun: false, operation: source });
   const runtimePolicy = await loadRuntimePolicy();
+  assertInboundReplyExecutionAllowed({ policy: runtimePolicy, dryRun: false, operation: source });
   assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
 }
 

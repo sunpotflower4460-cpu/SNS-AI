@@ -49,6 +49,7 @@ import {
   markEngagementSent,
   reserveInboundFetch
 } from './store.mjs';
+import { assertInboundReplyExecutionAllowed, MANAGED_BLOCKED_CODE } from '../ops/artist-os-mode.mjs';
 import { assertProviderMutationAllowed, assertAutomaticEngagementAllowed, loadRuntimePolicy } from '../ops/manual-only.mjs';
 
 function parseArgs(argv) {
@@ -379,8 +380,16 @@ async function resolveDeliveryReplay({ accountId, event, key, record }) {
   throw deliveryUnknownError(issue?.number || null);
 }
 
-async function sendResponseWithDeliveryGuard({ accountId, account, event, key, text, dryRun }) {
+export async function sendResponseWithDeliveryGuard({ accountId, account, event, key, text, dryRun }) {
   if (dryRun) return { state: 'dry-run', result: await sendResponse(account, event, text, true) };
+
+  // Artist OS managed mode: My-SNS is the canonical inbound-reply executor. Refuse BEFORE
+  // any ledger claim so none exists and nothing is ever marked sending/unknown/sent.
+  try { assertInboundReplyExecutionAllowed({ policy: await loadRuntimePolicy(), dryRun: false, operation: `engagement:${event.platform}:${event.kind}` }); }
+  catch (error) {
+    if (error?.code === MANAGED_BLOCKED_CODE) return { state: 'managed-blocked' };
+    throw error;
+  }
 
   const claim = await beginDelivery({
     key,
@@ -616,6 +625,9 @@ async function processEvent(accountId, account, event, globalPolicy, dryRun) {
 
   const delivery = await sendResponseWithDeliveryGuard({ accountId, account, event, key, text: decision.response, dryRun });
   if (dryRun) return { status: 'dry-run-reply', decision: privateSafeDecision(event, decision), result: event.public === true ? delivery.result : { dryRun: true, privateContentOmitted: true } };
+  // Managed mode: recommendation only. The event is left untouched (not marked sent/handled) so
+  // My-SNS, the canonical executor, owns the outcome.
+  if (delivery.state === 'managed-blocked') return { status: 'managed-blocked', reason: 'artist_os_managed' };
   if (delivery.state === 'handled') {
     await markEngagementEvent(accountId, key, { status: 'delivery_handled', dueAt, kind: event.kind, platform: event.platform, actorKey: aKey, category: decision.category });
     await appendEngagementAudit({ account: accountId, eventKey: key, platform: event.platform, kind: event.kind, status: 'delivery-handled', category: decision.category, public: event.public === true });
@@ -678,6 +690,7 @@ export async function resolveHumanEngagement({ accountId, key, action = 'reply',
   if (!dryRun) await moderateText(responseText, account, accountId);
   const delivery = await sendResponseWithDeliveryGuard({ accountId, account, event, key, text: responseText, dryRun });
   if (dryRun) return { status: 'dry-run-reply', eventKey: key, result: delivery.result };
+  if (delivery.state === 'managed-blocked') return { status: 'managed-blocked', eventKey: key, reason: 'artist_os_managed' };
 
   if (delivery.state === 'handled') {
     await markEngagementEvent(accountId, key, { status: 'delivery_handled', kind: event.kind, platform: event.platform, actorKey: actorKey(accountId, event), category: prior.category || 'human-resolved', resolvedAt: nowIso() });

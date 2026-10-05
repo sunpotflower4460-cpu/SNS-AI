@@ -1,5 +1,6 @@
 import { fetchJson } from '../../lib/http.mjs';
 import { assertProviderMutationAllowed, loadRuntimePolicy } from '../../ops/manual-only.mjs';
+import { assertInboundReplyExecutionAllowed } from '../../ops/artist-os-mode.mjs';
 
 const DEFAULT_MAX_PAGES = 5;
 const ABSOLUTE_MAX_PAGES = 20;
@@ -78,7 +79,11 @@ async function paginateGraphEdge(firstPage, { accessToken, kind = 'edge', maxPag
 }
 
 async function assertLiveMutationAllowed(source) {
+  // Artist OS managed mode: My-SNS owns inbound-reply execution. Checked before anything else (also
+  // before reading policy files) so a direct call can never reach the network.
+  assertInboundReplyExecutionAllowed({ dryRun: false, operation: source });
   const runtimePolicy = await loadRuntimePolicy();
+  assertInboundReplyExecutionAllowed({ policy: runtimePolicy, dryRun: false, operation: source });
   assertProviderMutationAllowed(runtimePolicy, { dryRun: false, source });
 }
 
