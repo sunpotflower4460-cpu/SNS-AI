@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchJson, downloadMedia } from '../src/lib/http.mjs';
 import { appendJsonl, readJson, readJsonl, writeJsonAtomic } from '../src/lib/json-store.mjs';
-import { openaiRequest } from '../src/lib/openai.mjs';
+import { generatePost, openaiRequest, parseJsonText } from '../src/lib/openai.mjs';
 import { usageToday } from '../src/ops/budget.mjs';
 import { getXOAuth2Session, xOAuth2FetchJson } from '../src/providers/x-oauth2.mjs';
 import { publishX } from '../src/providers/x.mjs';
@@ -335,6 +335,144 @@ test('GitHub release hosting creates a missing public release and recovers dupli
 
     const cachedRelease = { id: 7, assets: [{ name: 'a.png', browser_download_url: 'https://downloads.example/a.png' }] };
     assert.equal(await uploadReleaseAsset(cachedRelease, 'a.png', Buffer.from('abc'), 'image/png'), 'https://downloads.example/a.png');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+// --- JSON hardening for lib/openai.mjs (2026-11-11 dry-run failures) ---------------------------
+// Two live Autopilot dry runs died at post-generation because a smaller model returned malformed
+// JSON: once free-form prose, once a candidates payload truncated mid-array. The tests below pin
+// the three defences: parseJsonText truncation salvage, the responseJson 400-fallback order, and
+// generatePost spending its existing attempts budget on parse failures instead of aborting.
+
+function candidateFixture(text) {
+  return {
+    text, mediaPrompt: '', rationale: 'json hardening coverage', spreadPotential: 55, noveltyPotential: 52,
+    features: { topic: 'test', angle: 'angle', hook: 'statement', emotion: 'neutral', format: 'short', cta: 'none', mediaDecision: 'none', trendUsed: false }
+  };
+}
+
+function generationResponse(text) {
+  return { output_text: JSON.stringify({ candidates: [candidateFixture(text)] }) };
+}
+
+function generationAccount(overrides = {}) {
+  return {
+    platform: 'x', enabled: true, mode: 'auto', credentialKey: 'json-hardening-x', displayName: 'JSON Hardening X',
+    profile: { identity: 'test', goal: 'test', audience: 'test', topics: ['test'], style: ['clear'], avoid: [] },
+    instructions: 'Generate one test post.',
+    schedule: { timezone: 'Asia/Tokyo', days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], times: ['08:00'], windowMinutes: 30 },
+    generation: { model: 'gpt-5', maxChars: 280, historyWindow: 5, duplicateThreshold: 0.72, maxAttempts: 3, candidateCount: 1, maxOutputTokens: 1000 },
+    safety: { moderation: false, maxPostsPerDay: 10, minMinutesBetweenPosts: 0, anomalyBrake: { enabled: false } },
+    analytics: { enabled: false }, learning: { enabled: false },
+    research: { webSearch: false, trendIntelligence: false },
+    resilience: { enabled: true, failureThreshold: 2, cooldownMinutes: 60 },
+    budgets: { enabled: false },
+    experiments: { enabled: false }, media: { strategy: 'none', type: 'image' },
+    ...overrides
+  };
+}
+
+test('parseJsonText salvages a candidates payload truncated mid-string and mid-array', () => {
+  const full = JSON.stringify({ candidates: [candidateFixture('first post text'), candidateFixture('second post text with a much longer body')] });
+
+  // Cut inside the second candidate's text string: only the first, complete candidate survives.
+  const midString = parseJsonText(full.slice(0, full.indexOf('much longer')));
+  assert.deepEqual(midString.candidates.map((candidate) => candidate.text), ['first post text']);
+
+  // Cut right after a complete scalar inside the second candidate: its completed pairs survive,
+  // the pairs that were never fully written are dropped rather than invented.
+  const marker = '"spreadPotential":55,';
+  const midArray = parseJsonText(full.slice(0, full.indexOf(marker, full.indexOf('second')) + marker.length));
+  assert.equal(midArray.candidates.length, 2);
+  assert.equal(midArray.candidates[1].text, 'second post text with a much longer body');
+  assert.equal(midArray.candidates[1].spreadPotential, 55);
+  assert.equal(midArray.candidates[1].noveltyPotential, undefined);
+
+  // Truncation before ANY value completes is not salvageable and must still fail closed.
+  assert.throws(() => parseJsonText('{"candidates": [{"text": "cut off mid-str'), /not valid JSON/);
+});
+
+test('parseJsonText returns a top-level JSON array intact instead of corrupting it', () => {
+  // The old brace-slice fallback assumed an object top level: for a prose-wrapped array it sliced
+  // first '{' to last '}' and produced unparseable text. The array must come back as an array.
+  assert.deepEqual(
+    parseJsonText('Result: [{"topic":"a","score":1},{"topic":"b","score":2}] done'),
+    [{ topic: 'a', score: 1 }, { topic: 'b', score: 2 }]
+  );
+  assert.deepEqual(parseJsonText('[{"a":1}]'), [{ a: 1 }]);
+});
+
+test('a 400 on schema + web_search retries without the tool but keeps the strict schema', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY');
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  try {
+    const bodies = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target !== 'https://api.openai.com/v1/responses') throw new Error(`Unexpected mocked URL: ${target}`);
+      bodies.push(JSON.parse(options.body));
+      if (bodies.length === 1) return jsonResponse({ error: { message: 'json_schema is not supported with web_search' } }, 400);
+      return jsonResponse(generationResponse('Recovered post text.'));
+    };
+    const account = generationAccount({ research: { webSearch: true, trendIntelligence: false } });
+    const result = await generatePost('json-hardening-x', account, [], { dryRun: true });
+    assert.equal(result.text, 'Recovered post text.');
+    assert.equal(bodies.length, 2);
+    assert.ok(Array.isArray(bodies[0].tools), 'the first request carries the web_search tool');
+    assert.equal(bodies[1].tools, undefined, 'the 400 retry drops web_search');
+    assert.equal(bodies[1].text?.format?.type, 'json_schema', 'the 400 retry KEEPS the strict schema instead of going free-form');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('generatePost retries after a malformed-JSON response and succeeds on a later attempt', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY');
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  try {
+    const bodies = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target !== 'https://api.openai.com/v1/responses') throw new Error(`Unexpected mocked URL: ${target}`);
+      bodies.push(JSON.parse(options.body));
+      if (bodies.length === 1) return jsonResponse({ output_text: 'The model answered in prose instead of JSON {{{' });
+      return jsonResponse(generationResponse('Second attempt post.'));
+    };
+    const result = await generatePost('json-hardening-x', generationAccount(), [], { dryRun: true });
+    assert.equal(result.text, 'Second attempt post.');
+    assert.equal(result.attempt, 2);
+    assert.equal(bodies.length, 2);
+    // The retry prompt must name the failure, not just re-roll: retryFeedback is part of the user payload.
+    assert.match(bodies[1].input[1].content[0].text, /return compact strict JSON only/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+  }
+});
+
+test('generatePost rethrows the parse error when every attempt returns malformed JSON', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('OPENAI_API_KEY');
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  try {
+    let calls = 0;
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target !== 'https://api.openai.com/v1/responses') throw new Error(`Unexpected mocked URL: ${target}`);
+      calls += 1;
+      return jsonResponse({ output_text: 'not json at all' });
+    };
+    await assert.rejects(
+      generatePost('json-hardening-x', generationAccount(), [], { dryRun: true }),
+      /AI response was not valid JSON/
+    );
+    assert.equal(calls, 3, 'all maxAttempts are spent on parse retries before giving up');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);

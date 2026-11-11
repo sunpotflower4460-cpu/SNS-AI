@@ -76,9 +76,89 @@ function extractUrlCitations(response) {
   return [...found.values()].slice(0, 30);
 }
 
+// Truncation salvage, used only after the plain parse and the brace-slice above have both failed.
+// Model output cut off mid-stream (token cap, dropped connection) ends inside a string or with
+// containers still open, and the brace-slice makes it worse by assuming the top level is an object
+// (a top-level array response is corrupted by slicing first '{' to last '}'). Walk the text once,
+// tracking string/escape state and, per open container, whether a key, a colon, a value, or a
+// separator is expected next. Every position where a value has DEFINITELY completed (closing quote
+// of a value string, closing bracket, or a scalar ended by a delimiter - a trailing number/literal
+// is never trusted, it may be half of a longer token) is recorded together with the closers the
+// still-open containers would need. The longest such prefix, closed in reverse order, is the most
+// that can be recovered without inventing data; downstream validation (schema-shaped candidate
+// checks in generatePost) still decides whether the salvaged value is usable.
+function salvageTruncatedJson(text) {
+  const start = text.search(/[{[]/);
+  if (start < 0) return undefined;
+  const stack = []; // frames: { open: '{'|'[', state: 'key'|'colon'|'value'|'after' }
+  let inString = false;
+  let escaped = false;
+  let cut = -1;
+  let cutClosers = '';
+  const top = () => stack[stack.length - 1];
+  const noteCut = (end) => {
+    cut = end;
+    cutClosers = stack.map((frame) => (frame.open === '{' ? '}' : ']')).reverse().join('');
+  };
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === '"') {
+        inString = false;
+        const frame = top();
+        if (!frame) return undefined;
+        if (frame.open === '{' && frame.state === 'key') frame.state = 'colon';
+        else { frame.state = 'after'; noteCut(i + 1); }
+      }
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{' || ch === '[') { stack.push({ open: ch, state: ch === '{' ? 'key' : 'value' }); continue; }
+    if (ch === '}' || ch === ']') {
+      stack.pop();
+      const frame = top();
+      if (!frame) {
+        // Root value is complete and only trailing junk follows; earlier attempts own most of
+        // these, but a clean root prefix is still recoverable here.
+        try { return JSON.parse(text.slice(start, i + 1)); } catch { return undefined; }
+      }
+      frame.state = 'after';
+      noteCut(i + 1);
+      continue;
+    }
+    if (ch === ':') { const frame = top(); if (frame) frame.state = 'value'; continue; }
+    if (ch === ',') { const frame = top(); if (frame) frame.state = frame.open === '{' ? 'key' : 'value'; continue; }
+    if (/\s/.test(ch)) continue;
+    // Scalar (number / true / false / null) run: it only counts as complete when a real delimiter
+    // ends it; running into end-of-text means the token itself may be truncated, so drop it.
+    let j = i;
+    while (j < text.length && !/[\s,\]}{[":]/.test(text[j])) j += 1;
+    if (j >= text.length) break;
+    if (/[\s,\]}]/.test(text[j])) { const frame = top(); if (frame) { frame.state = 'after'; noteCut(j); } }
+    i = j - 1;
+  }
+  if (cut < 0) return undefined;
+  try { return JSON.parse(text.slice(start, cut) + cutClosers); } catch { return undefined; }
+}
+
 export function parseJsonText(text) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  try { return JSON.parse(cleaned); } catch { const s = cleaned.indexOf('{'); const e = cleaned.lastIndexOf('}'); if (s >= 0 && e > s) return JSON.parse(cleaned.slice(s, e + 1)); throw new Error('AI response was not valid JSON.'); }
+  try { return JSON.parse(cleaned); } catch { /* fall through to the recovery attempts below */ }
+  const s = cleaned.indexOf('{'); const e = cleaned.lastIndexOf('}');
+  if (s >= 0 && e > s) {
+    try { return JSON.parse(cleaned.slice(s, e + 1)); } catch { /* fall through to truncation salvage */ }
+  }
+  const salvaged = salvageTruncatedJson(cleaned);
+  if (salvaged !== undefined) return salvaged;
+  throw new Error('AI response was not valid JSON.');
+}
+
+// Parse failures from parseJsonText all surface as the 'AI response was not valid JSON.' error
+// above; a raw SyntaxError is accepted too so any other JSON.parse in the response path counts.
+function isJsonParseError(error) {
+  return error instanceof SyntaxError || /not valid JSON/i.test(String(error?.message || ''));
 }
 
 const CANDIDATE_SCHEMA = {
@@ -114,8 +194,23 @@ async function responseJson({ model, system, user, webSearch = false, schema = C
   try { return await requestAndParse(body, meta); }
   catch (error) {
     if (Number(error.status) !== 400) throw error;
+    // Why this order: a 400 here is usually the schema + web_search COMBINATION being rejected,
+    // not the schema itself. The old fallback deleted body.text first, silently downgrading every
+    // such call to free-form output - which smaller models then return as malformed JSON (the
+    // 2026-11-11 dry-run failures). Retry without the tool but WITH the schema; only a second 400
+    // earns the schema drop, as a last resort. The tool-less retries also stop charging web-search
+    // budget for calls that no longer carry the tool.
+    let activeMeta = meta;
+    if (webSearch) {
+      delete body.tools;
+      activeMeta = { ...meta, webSearch: false };
+      try { return await requestAndParse(body, activeMeta); }
+      catch (retryError) {
+        if (Number(retryError.status) !== 400) throw retryError;
+      }
+    }
     delete body.text;
-    return requestAndParse(body, meta);
+    return requestAndParse(body, activeMeta);
   }
 }
 
@@ -228,9 +323,25 @@ export async function generatePost(accountId, account, history = [], context = {
   const webSearch = Boolean(account.research?.webSearch) && context.allowWebSearch !== false;
   let feedback = '';
   let lastFallback = [];
+  let lastParseError = null;
+  let parseErrorAttempts = 0;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const prompt = generationPrompt(accountId, account, history, { ...context, route }, feedback);
-    const generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
+    let generated;
+    try {
+      generated = await responseJson({ model, system: prompt.system, user: prompt.user, webSearch, accountId, account, operation: 'post-generation', dryRun });
+    } catch (error) {
+      // A malformed-JSON response used to abort the whole slot on the spot, even though a fresh
+      // generation usually parses (the 2026-11-11 dry-run failures were exactly this, twice in a
+      // row). The attempts budget already exists for retries, so spend it - and tell the model
+      // precisely what went wrong instead of re-rolling blind. Non-parse errors (budget, network,
+      // provider) still abort immediately; they are not fixed by asking again.
+      if (!isJsonParseError(error)) throw error;
+      lastParseError = error;
+      parseErrorAttempts += 1;
+      feedback = 'Previous response was not valid JSON; return compact strict JSON only.';
+      continue;
+    }
     const valid = [];
     // Why the discard reasons are kept: when every candidate is rejected the retry prompt used to say only
     // "they were invalid or repetitive", so the model had no idea WHICH rule it broke and typically broke it
@@ -274,6 +385,10 @@ export async function generatePost(accountId, account, history = [], context = {
       rejections.length ? `Previous candidates were rejected for: ${rejections.join(' | ')}` : ''
     ].filter(Boolean).join(' ');
   }
+  // When every attempt died on malformed JSON, surface that root cause rather than the generic
+  // exhaustion message: the model never produced a single parseable response, which points at the
+  // model/route, not at the candidate rules.
+  if (lastParseError && parseErrorAttempts === attempts) throw lastParseError;
   if (lastFallback.length) throw new Error('Candidates existed but none could satisfy ranking/experiment constraints.');
   throw new Error(`Could not generate a sufficiently original post after ${attempts} attempts.`);
 }
