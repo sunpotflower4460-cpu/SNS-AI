@@ -296,6 +296,9 @@
           "critical": { "provider": "openai", "model": "gpt-6.1-sol" }
         }
       },
+      "analytics": {
+        "checkpointsMinutes": [1440, 4320, 10080]
+      },
       "safety": {
         "maxPostsPerDay": 2,
         "minMinutesBetweenPosts": 360,
