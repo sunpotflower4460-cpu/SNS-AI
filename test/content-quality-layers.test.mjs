@@ -90,6 +90,127 @@ test('a malformed duplicateThreshold must not let a naturalization edit through 
   }
 });
 
+test('naturalization settings parse reviewAlways as an explicit opt-in', () => {
+  assert.equal(naturalizationSettings({ generation: { naturalization: { reviewAlways: true } } }).reviewAlways, true);
+  assert.equal(naturalizationSettings({ generation: { naturalization: {} } }).reviewAlways, false);
+  assert.equal(naturalizationSettings({ generation: { naturalization: { reviewAlways: 'yes' } } }).reviewAlways, false);
+});
+
+test('reviewAlways runs the deep review on a locally-clean draft and applies a guarded light edit', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  let fetchCalls = 0;
+  let reviewSystemPrompt = '';
+  const editedText = '新しいサンプラー触った。録り逃しがない。作業の流れが止まらないのがいい。';
+  globalThis.fetch = async (url, options) => {
+    fetchCalls += 1;
+    if (String(url) === 'https://api.openai.com/v1/responses') {
+      reviewSystemPrompt = JSON.parse(options.body).input[0].content[0].text;
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: 'light_edit', naturalnessScore: 60, aiPatternRisk: 55, voiceFitScore: 82,
+          issues: ['文末のリズムが均一'], editedText, reason: 'AI markers found; light polish applied'
+        })
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const result = await naturalizeDraft('example-x', {
+      platform: 'x',
+      generation: {
+        maxChars: 280, duplicateThreshold: 0.72,
+        naturalization: { enabled: true, deepReview: true, reviewAlways: true }
+      },
+      safety: { maxLinks: 4, maxHashtags: 4 },
+      budgets: { openaiCallsPerDay: 100 }
+    }, {
+      text: '新しいサンプラー触った。録り逃しがなくて、作業の流れが止まらないのがいい。',
+      features: {}
+    }, { history: [], dryRun: true });
+    assert.equal(fetchCalls, 1, 'the deep review must run even though the local audit was clean');
+    assert.match(reviewSystemPrompt, /Actively hunt for generic-AI markers/);
+    assert.match(reviewSystemPrompt, /まとめると/);
+    assert.equal(result.text, editedText);
+    assert.equal(result.naturalization.applied, true);
+    assert.equal(result.naturalization.localOnly, false);
+    assert.equal(result.naturalization.reviewAlways, true);
+    assert.equal(result.naturalization.action, 'light_edit');
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('without reviewAlways, a locally-clean draft still short-circuits without an API call', async () => {
+  const previousFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('unexpected network call'); };
+  try {
+    const result = await naturalizeDraft('example-x', {
+      platform: 'x',
+      generation: { maxChars: 280, duplicateThreshold: 0.72, naturalization: { enabled: true, deepReview: true } },
+      safety: { maxLinks: 4, maxHashtags: 4 }
+    }, {
+      text: '新しいサンプラー触った。録り逃しがなくて、作業の流れが止まらないのがいい。',
+      features: {}
+    }, { history: [] });
+    assert.equal(fetchCalls, 0);
+    assert.equal(result.naturalization.applied, false);
+    assert.equal(result.naturalization.localOnly, true);
+    assert.equal(result.naturalization.chatReviewRecommended, false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('reviewAlways still rejects an edit that drops a protected hashtag', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  const original = 'このプラグイン、音作りの偶然をそのまま残せる。詳しくは https://example.com/x を見て。 #DTM';
+  globalThis.fetch = async (url) => {
+    if (String(url) === 'https://api.openai.com/v1/responses') {
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: 'light_edit', naturalnessScore: 55, aiPatternRisk: 60, voiceFitScore: 80,
+          issues: ['formulaic'], editedText: '音作りの偶然をそのまま残せるプラグイン。詳しくは https://example.com/x を見て。', reason: 'polish'
+        })
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const result = await naturalizeDraft('example-x', {
+      platform: 'x',
+      generation: {
+        maxChars: 280, duplicateThreshold: 0.72,
+        naturalization: { enabled: true, deepReview: true, reviewAlways: true }
+      },
+      safety: { maxLinks: 4, maxHashtags: 4 },
+      budgets: { openaiCallsPerDay: 100 }
+    }, {
+      text: original,
+      features: {}
+    }, { history: [], dryRun: true });
+    assert.equal(result.text, original);
+    assert.equal(result.naturalization.applied, false);
+    assert.match(result.naturalization.rejectedEditReason || '', /protected URL\/hashtag/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('new Japanese AI-ism patterns raise the local audit risk', () => {
+  const flagged = naturalizeTest.localNaturalnessAudit('この方法なら誰でも音作りを楽しむことができます。まとめると、とても便利と言えるでしょう。いかがでしょうか。してみてはいかが。');
+  assert.ok(flagged.aiPatternRisk >= 48, `expected the new patterns to score, got ${flagged.aiPatternRisk}`);
+  assert.ok(flagged.issues.length >= 4);
+  const clean = naturalizeTest.localNaturalnessAudit('新しいサンプラー触った。録り逃しがなくて助かる。');
+  assert.equal(clean.aiPatternRisk, 0);
+});
+
 test('visual QA score threshold is retained as a soft target with bounded config', () => {
   assert.equal(qaTest.qaSettings({ media: { qa: { minScore: 82 } } }).minScore, 82);
   assert.equal(qaTest.qaSettings({ media: { qa: { minScore: 200 } } }).minScore, 75);

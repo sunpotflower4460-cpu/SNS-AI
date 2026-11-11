@@ -87,6 +87,7 @@ export function validateStrictConfig(config) {
       const naturalization = generation.naturalization;
       strictBoolean(errors, id, 'generation.naturalization.enabled', naturalization.enabled);
       strictBoolean(errors, id, 'generation.naturalization.deepReview', naturalization.deepReview);
+      strictBoolean(errors, id, 'generation.naturalization.reviewAlways', naturalization.reviewAlways);
       strictRange(errors, id, 'generation.naturalization.minNaturalness', naturalization.minNaturalness, 0, 100);
       strictRange(errors, id, 'generation.naturalization.maxAiPatternRisk', naturalization.maxAiPatternRisk, 0, 100);
       strictRange(errors, id, 'generation.naturalization.minVoiceFit', naturalization.minVoiceFit, 0, 100);
