@@ -291,7 +291,7 @@
         },
         "router": {
           "cheap": { "provider": "openai", "model": "gpt-5.6-luna" },
-          "balanced": { "provider": "openai", "model": "gpt-6-luna" },
+          "balanced": { "provider": "openai", "model": "gpt-6.1-sol" },
           "high": { "provider": "openai", "model": "gpt-6.1-sol" },
           "critical": { "provider": "openai", "model": "gpt-6.1-sol" }
         }
