@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "accounts": {
+    "music-tools-x": {
+      "alg": "A256GCM",
+      "iv": "hRMk3VAwxhd6kX+0",
+      "tag": "EzOE1lEwQpEvdf5+TRs5Cg==",
+      "ciphertext": "1ELhcg7q6QQlqPrrTxVXLL/4Hs4v7ilr5+ariQ/vQ3KRD+SUSXFTwx/Y99rkhpq7hcLHLAyKjMKR0wOXRpsX/ojks9vY1orf2bLW0u3j/8Wbkqg6pFsW/HE7/c1du/+ZjmAhBeH0Hh83WZH/FSoIf8iJHdUbwFiTQOBFm6T1+OxWRI9JpE/3//kD3NGyW8vqEeBN1+TN9YnpfmhVtAQnXRI2V/DHVX3lgMRTxeH6qCjopsrirnJZeDI7Q7bmuJLni1Zypl/vOGywbnwCZIj0/SLxxpoP7ghwaocn+HyggpLT29uoS0HAz9U8LizNE0b5UxwG6108x/cDimhgoXcga9PaJ3YEYA9EA4Cuvu+lNGO+dnQzc9HIZLIByeDqwjXURDlp3kRBYWnsIQm7LPE4rOUrRCvHKZLKOrRbU3njm43Cvo8mCl8NgQEuG2ctq0tklMI=",
+      "updatedAt": "2026-11-11T13:50:28.487Z"
+    }
+  },
+  "updatedAt": "2026-11-11T13:50:28.487Z"
+}
