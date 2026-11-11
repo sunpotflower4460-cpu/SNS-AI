@@ -1,3 +1,10 @@
 {
-  "slots": {}
+  "slots": {
+    "music-tools-x:workflow:43015607515": {
+      "status": "published",
+      "at": "2026-11-11T11:53:16.676Z",
+      "account": "music-tools-x",
+      "providerPostId": "2120485004857758093"
+    }
+  }
 }
