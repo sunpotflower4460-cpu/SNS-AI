@@ -232,8 +232,9 @@ test('top-level autonomous runtime wires generation, publishing, preflight, and 
     assert.equal(metric?.metrics?.privateMetricsAvailable, false);
     assert.match(metric?.warning || '', /Private X metrics unavailable/);
 
-    config.accounts['example-x'].enabled = false;
-    config.accounts['example-x'].mode = 'pause';
+    // Disable every account, not just the fixture one: the shipped config may
+    // legitimately have real accounts enabled (controlled launch).
+    for (const account of Object.values(config.accounts)) { account.enabled = false; account.mode = 'pause'; }
     await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     const nothingEnabled = await runLivePreflight();
     // Deliberately ok:false. With nothing enabled, preflight contacts neither OpenAI nor the provider

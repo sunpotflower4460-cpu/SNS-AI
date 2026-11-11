@@ -230,6 +230,11 @@ test('preflight handles nothing-enabled and unknown-account branches without ext
   const files = await snapshotFiles([CONFIG_FILE]);
   try {
     globalThis.fetch = async () => { throw new Error('network must not be called'); };
+    // The shipped config may legitimately have accounts enabled (controlled launch),
+    // so construct the nothing-enabled state explicitly instead of assuming it.
+    const config = JSON.parse(await readFile(CONFIG_FILE, 'utf8'));
+    for (const account of Object.values(config.accounts)) { account.enabled = false; account.mode = 'pause'; }
+    await writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     const nothing = await runLivePreflight();
     assert.equal(nothing.state, 'nothing_enabled');
     assert.equal(nothing.accounts.length, 0);

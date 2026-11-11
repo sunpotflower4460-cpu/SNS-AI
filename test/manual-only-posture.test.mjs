@@ -29,12 +29,18 @@ test('manual-only posture forbids operational schedule triggers', async () => {
   }
 });
 
-test('manual-only posture keeps every configured SNS account disabled', async () => {
+test('manual-only posture keeps every configured SNS account disabled except the one approved launch account', async () => {
   const config = JSON.parse(await readFile('config/accounts.json', 'utf8'));
   const entries = Object.entries(config.accounts || {});
   assert.ok(entries.length > 0, 'expected at least one configured account');
   for (const [id, account] of entries) {
-    assert.notEqual(account.enabled, true, `${id} must remain disabled in manual-only posture`);
+    if (id === 'music-tools-x') {
+      // Controlled launch exception (PR #100): the single approved account may be
+      // enabled, but only in approval mode while Manual-Only stays locked.
+      assert.equal(account.mode, 'approval', 'music-tools-x must stay in approval mode in manual-only posture');
+    } else {
+      assert.notEqual(account.enabled, true, `${id} must remain disabled in manual-only posture`);
+    }
   }
 });
 
