@@ -270,7 +270,10 @@
         "candidateCount": 6,
         "model": "gpt-6.1-sol",
         "naturalization": {
-          "model": "gpt-6-luna"
+          "model": "gpt-6-luna",
+          "enabled": true,
+          "deepReview": true,
+          "reviewAlways": true
         }
       },
       "research": {

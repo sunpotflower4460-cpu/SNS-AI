@@ -14,6 +14,11 @@ const AIISH_PATTERNS = [
   /〜だけではありません/gu,
   /だけではありません/gu,
   /いかがでしたか/gu,
+  /いかがでしょうか/gu,
+  /してみてはいかが/gu,
+  /することができます/gu,
+  /と言えるでしょう/gu,
+  /まとめると/gu,
   /ぜひ(?:試して|活用して|チェックして)みてください/gu,
   /(?:一緒に|まずは).{0,12}していきましょう/gu,
   /(?:圧倒的|革命的|劇的)に/gu,
@@ -62,6 +67,9 @@ export function naturalizationSettings(account = {}) {
     // Deep API editing is an explicit fallback only. The normal path is local detection + ChatGPT
     // conversational review when a human/editor wants a semantic judgment.
     deepReview: cfg.deepReview === true,
+    // Opt-in: with deepReview on, review EVERY draft instead of only locally-suspicious ones, for
+    // accounts that want the anti-AI-feel polish applied as a matter of routine.
+    reviewAlways: cfg.reviewAlways === true,
     model: cfg.model || account.generation?.model || process.env.OPENAI_MODEL || 'gpt-5',
     minNaturalness: finiteSetting(cfg.minNaturalness, 72),
     maxAiPatternRisk: finiteSetting(cfg.maxAiPatternRisk, 45),
@@ -108,10 +116,16 @@ async function requestReview(accountId, account, draft, context, settings, dryRu
   const recentPosts = (context.history || []).slice(0, 12).map((row) => String(row?.text || '')).filter(Boolean);
   const system = [
     'You are a restrained final editor for one social-media account.',
-    'Detect generic AI-writing patterns and make only small edits when clearly better.',
+    'Detect generic AI-writing patterns and fix them with small edits.',
     'Preserve quirks, fragments, casual rhythm, uneven sentence lengths, account voice, meaning, facts, URLs, hashtags, disclosures, and calls to action.',
     'Never invent personal experience, results, credentials, emotions, numbers, facts, certainty, or a sales angle.',
-    'Choose keep unless a light edit is meaningfully better. This is a soft quality layer, not a rejection gate.'
+    // The bias used to be "keep unless clearly better", which let polished-but-generic drafts pass
+    // untouched. Hunt actively instead: any marker found earns a light edit; keep is for text that
+    // is genuinely free of markers.
+    'Actively hunt for generic-AI markers and choose light_edit whenever any are present: uniform sentence lengths and rhythm, stock transitions and summary phrases, over-parallel list structure, generic enthusiasm or superlatives, template calls to action, over-explained conclusions.',
+    'For Japanese text, vary sentence endings naturally (です/ます mixed with plain forms where the voice allows), remove repeated 〜することができます / と言えるでしょう and まとめると-type summary closers, and keep fragments and casual unevenness that sound human.',
+    'Let the scores reflect the markers you found: a draft with real AI markers is not already-clean, so score its naturalness and aiPatternRisk accordingly and list the markers in issues.',
+    'This is a soft quality layer, not a rejection gate.'
   ].join('\n');
   const user = JSON.stringify({
     version: NATURALIZATION_VERSION, platform: account.platform, profile: account.profile || {},
@@ -146,7 +160,9 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
   const original = validateDraftText(account, draft?.text || '');
   const local = localNaturalnessAudit(original);
   const suspicious = local.aiPatternRisk > settings.maxAiPatternRisk;
-  if (!suspicious || !settings.deepReview) {
+  // reviewAlways accounts skip the local-suspicion gate: the deep review runs on every draft so the
+  // anti-AI-feel polish is routine, not a fallback for drafts the heuristic happened to catch.
+  if (!settings.deepReview || (!suspicious && !settings.reviewAlways)) {
     return {
       ...draft, text: original,
       naturalization: {
@@ -168,6 +184,7 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
       ...draft, text: original,
       naturalization: {
         version: NATURALIZATION_VERSION, applied: false, fallback: true, chatReviewRecommended: true,
+        reviewAlways: settings.reviewAlways,
         naturalnessScore: local.naturalnessScore, aiPatternRisk: local.aiPatternRisk, issues: local.issues,
         reason: `deep review unavailable; original preserved: ${String(error?.message || error).slice(0, 240)}`
       }
@@ -204,7 +221,7 @@ export async function naturalizeDraft(accountId, account, draft, context = {}) {
     ...draft, text: finalText,
     naturalization: {
       version: NATURALIZATION_VERSION, applied, action: review.action === 'light_edit' ? 'light_edit' : 'keep',
-      localOnly: false, naturalnessScore, aiPatternRisk, voiceFitScore, issues,
+      localOnly: false, reviewAlways: settings.reviewAlways, naturalnessScore, aiPatternRisk, voiceFitScore, issues,
       chatReviewRecommended: !applied && aiPatternRisk > settings.maxAiPatternRisk,
       reason: String(review.reason || '').slice(0, 600), rejectedEditReason
     }
