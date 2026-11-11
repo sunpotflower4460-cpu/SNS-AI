@@ -11,7 +11,7 @@
   "autoReply": false,
   "autoDmReply": false,
   "approvalRequired": true,
-  "xAutomationProfileComplianceConfirmedAccounts": [],
+  "xAutomationProfileComplianceConfirmedAccounts": ["music-tools-x"],
   "xAiReplyBotApprovalRequiredAccounts": [
     "music-tools-x"
   ],

@@ -115,8 +115,9 @@ test('X automation compliance preflight blocks missing profile disclosure and AI
   assert.equal(instagram.ok, true);
 
   const realConfigReport = await runXAutomationCompliance({ accountFilter: 'music-tools-x' });
-  assert.equal(realConfigReport.ok, false);
+  assert.equal(realConfigReport.ok, true);
   assert.equal(realConfigReport.accounts[0].account, 'music-tools-x');
+  assert.equal(realConfigReport.accounts[0].profileComplianceConfirmed, true);
   await assert.rejects(() => runXAutomationCompliance({ accountFilter: 'missing-account' }), /Unknown account/);
 });
 
