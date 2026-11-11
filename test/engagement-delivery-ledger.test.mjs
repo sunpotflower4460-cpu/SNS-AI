@@ -281,6 +281,10 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
     process.env.SNS_DURABLE_STATE_BRANCH = 'sns-ai-state';
 
     const key = 'f'.repeat(32);
+    // Fixture timestamps must stay inside the ledger's 35-day resolved-guard
+    // retention window, so derive them from the current time.
+    const t0 = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const t1 = new Date(Date.now() - 1 * 3_600_000).toISOString();
     let remote = {
       schemaVersion: 1,
       records: {
@@ -291,10 +295,10 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
           publicInteraction: true,
           status: 'sent',
           attempts: 1,
-          createdAt: '2026-08-20T00:00:00Z',
-          startedAt: '2026-08-20T00:00:00Z',
-          updatedAt: '2026-08-20T01:00:00Z',
-          completedAt: '2026-08-20T01:00:00Z',
+          createdAt: t0,
+          startedAt: t0,
+          updatedAt: t1,
+          completedAt: t1,
           issueNumber: null
         }
       }
@@ -315,8 +319,8 @@ test('markDelivery refuses to demote a durable sent/handled guard to unknown or 
     assert.equal(result.status, 'sent');
     assert.equal(remote.records[key].status, 'sent');
     assert.equal((await getDeliveryRecord(key)).status, 'sent');
-    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'sent', updatedAt: '2026-08-20T01:00:00Z' }, 'failed').status, 'sent');
-    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'handled', updatedAt: '2026-08-20T01:00:00Z' }, 'unknown').status, 'handled');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'sent', updatedAt: t1 }, 'failed').status, 'sent');
+    assert.equal(deliveryTest.applyDeliveryStatus({ status: 'handled', updatedAt: t1 }, 'unknown').status, 'handled');
   });
 });
 
