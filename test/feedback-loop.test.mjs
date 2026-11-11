@@ -32,7 +32,7 @@ test('learning aggregates feature lift without changing identity', () => {
     { account: 'a', platform: 'x', providerPostId: '1', checkpointMinutes: 1440, metrics: { impressions: 2000, reposts: 50 } },
     { account: 'a', platform: 'x', providerPostId: '2', checkpointMinutes: 1440, metrics: { impressions: 500, reposts: 1 } }
   ];
-  const strategy = buildStrategy({ accountId: 'a', account, history, snapshots });
+  const strategy = buildStrategy({ accountId: 'a', account, history, snapshots, now: new Date('2026-08-12T10:00:00Z') });
   assert.equal(strategy.sampleSize, 2); assert.ok(strategy.featureStats.hook.story);
 });
 
