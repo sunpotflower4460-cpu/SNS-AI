@@ -8,6 +8,22 @@ import { assertOperationAllowed } from '../budget/governor.mjs';
 
 function hashString(value) { let hash = 2166136261; for (const char of String(value)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return hash >>> 0; }
 function poolUrl(media, slotId) { const urls = (media.urls || media.libraryUrls || []).filter(Boolean); return urls.length ? urls[hashString(slotId) % urls.length] : null; }
+
+// The fetch adapter Media Hunter's canonical acquisition was designed for (src/media/acquire.mjs):
+// read the product page through the SSRF-guarded transport so og:image / twitter:image can be
+// extracted. Wired only for accounts that set media.acquireFromCanonical - everywhere else the
+// hunter keeps its previous candidates-only behaviour. Fail-soft on purpose: an unreachable or
+// non-HTML page means "no image found" (decision 'none' on X), never a failed post.
+async function fetchCanonicalHtml(url) {
+  try {
+    const response = await fetchPublicHttps(url, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { Accept: 'text/html,application/xhtml+xml' }
+    }, 'media.canonicalUrl');
+    if (!response.ok) return '';
+    return await response.text();
+  } catch { return ''; }
+}
 const dryRunUrl = (decision, mediaType = 'image') => `https://dry-run.invalid/${decision || 'media'}.${mediaType === 'reel' ? 'mp4' : 'png'}`;
 
 async function requestMediaEndpoint(accountId, account, slotId, draft, mode) {
@@ -79,7 +95,8 @@ async function resolveRawMediaDetailed(accountId, account, slotId, draft, { dryR
       candidates: [...(media.ownedAssets || []), ...(media.libraryAssets || []), ...libraryCandidates],
       allowBrandCard: account.platform === 'instagram',
       now,
-      acquireFromCanonical: media.acquireFromCanonical === true
+      acquireFromCanonical: media.acquireFromCanonical === true,
+      fetchHtml: media.acquireFromCanonical === true ? fetchCanonicalHtml : null
     });
     if (hunted.decision === 'skip') {
       const error = new Error('Media Hunter skipped: no verified product image and no usable brand card.');

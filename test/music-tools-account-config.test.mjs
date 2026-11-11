@@ -20,7 +20,9 @@ test('music-tools-x is activated for the approval-mode launch with research enab
   assert.equal(account.research?.trendIntelligence, true);
   assert.ok(Number(account.research?.trendRefreshHours) > 0);
 
-  assert.equal(account.media?.strategy, 'none', 'initial launch stays text-only to avoid premature media OAuth requirements');
+  assert.equal(account.media?.strategy, 'hunter', 'posts carry the real product image when the media hunter can obtain one (owner direction 2026-11-11: text-only is not enough)');
+  assert.equal(account.media?.acquireFromCanonical, true, 'the hunter may extract the product image from the post canonical (product) page');
+  assert.equal(account.media?.internalImageGeneration, false, 'AI-generated images must never stand in for product photos');
   assert.equal(account.safety?.maxPostsPerDay, 2);
   assert.ok(Number(account.safety?.minMinutesBetweenPosts) >= 360);
   assert.ok(Number(account.safety?.maxLinks) <= 1);
@@ -32,17 +34,21 @@ test('music-tools-x is activated for the approval-mode launch with research enab
   assert.match(account.instructions || '', /使用感.*捏造|使用した.*捏造/);
 });
 
-test('music-tools-x runs the low-cost direct-fetch research path with a budgeted, purpose-restricted link policy, and affiliate stays disabled', async () => {
+test('music-tools-x runs the low-cost direct-fetch research path with a source-URL link policy, and affiliate stays disabled', async () => {
   const config = JSON.parse(await readFile(CONFIG, 'utf8'));
   const account = config.accounts['music-tools-x'];
 
   assert.equal(account.research?.directFetch, true);
   assert.ok(Number(account.research?.minDirectCandidates) > 0);
 
-  assert.equal(account.linkPolicy?.preferNoLink, true);
-  assert.equal(account.linkPolicy?.maxUrlPostsPerDay, 1);
-  assert.equal(account.linkPolicy?.maxUrlPostsPerWeek, 3);
-  assert.ok(Array.isArray(account.linkPolicy?.purposes) && account.linkPolicy.purposes.length > 0);
+  // Owner direction 2026-11-11 supersedes the launch posture below: posts should carry the
+  // researched product page URL (the previous caps of 1/day and 3/week plus preferNoLink made
+  // linked posts the rare exception, which is exactly what is being reversed).
+  assert.equal(account.linkPolicy?.preferNoLink, false);
+  assert.equal(account.linkPolicy?.includeSourceUrl, true, 'drafts attach the researched product page URL when it fits');
+  assert.equal(account.linkPolicy?.maxUrlPostsPerDay, null, 'no daily URL cap - the URL is a default part of the post, not a rationed extra');
+  assert.equal(account.linkPolicy?.maxUrlPostsPerWeek, null, 'no weekly URL cap');
+  assert.ok(Array.isArray(account.linkPolicy?.purposes) && account.linkPolicy.purposes.includes('product'));
 
   assert.equal(account.monetization?.affiliate?.enabled, false, 'no live affiliate rollout in this change');
 });

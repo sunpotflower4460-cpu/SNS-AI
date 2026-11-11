@@ -61,6 +61,12 @@ export function decideUrlInvestment({
   });
 
   if (!wantsLink) return { action: 'no-link', gate, value };
+  // Accounts that opt into carrying the researched source URL (linkPolicy.includeSourceUrl) keep
+  // it whenever the link gate itself allows the URL. The expected-value threshold below exists to
+  // ration a scarce URL budget; these accounts resolve to uncapped, so there is nothing to ration,
+  // and stripping the URL would also remove the media hunter's canonical page (no product image).
+  // A gate denial (purpose/cap) still wins - the flag never overrides an explicit policy "no".
+  if (mergedAccount?.linkPolicy?.includeSourceUrl === true && gate.allowed) return { action: 'publish-url', gate, value };
   if (gate.allowed && value >= 40) return { action: 'publish-url', gate, value };
 
   if (urlMeaningDependsOnLink(draft?.text)) {

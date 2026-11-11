@@ -153,6 +153,7 @@ export function validateStrictConfig(config) {
 
     const linkPolicy = merged(config, account, 'linkPolicy');
     strictBoolean(errors, id, 'linkPolicy.preferNoLink', linkPolicy.preferNoLink);
+    strictBoolean(errors, id, 'linkPolicy.includeSourceUrl', linkPolicy.includeSourceUrl);
     if (linkPolicy.maxUrlPostsPerWeek != null) strictNonNegativeInteger(errors, id, 'linkPolicy.maxUrlPostsPerWeek', linkPolicy.maxUrlPostsPerWeek);
     if (linkPolicy.maxUrlPostsPerDay != null) strictNonNegativeInteger(errors, id, 'linkPolicy.maxUrlPostsPerDay', linkPolicy.maxUrlPostsPerDay);
     if (linkPolicy.purposes != null && !(Array.isArray(linkPolicy.purposes) && linkPolicy.purposes.every((value) => typeof value === 'string'))) {
@@ -179,6 +180,7 @@ export function validateStrictConfig(config) {
     if (!MEDIA_STRATEGIES.has(strategy)) errors.push(`${id}: unsupported media.strategy "${strategy}"`);
     strictBoolean(errors, id, 'media.internalImageGeneration', media.internalImageGeneration);
     strictBoolean(errors, id, 'media.internalVideoGeneration', media.internalVideoGeneration);
+    strictBoolean(errors, id, 'media.acquireFromCanonical', media.acquireFromCanonical);
     if (media.defaultInstagramDecision != null && !INSTAGRAM_DECISIONS.has(media.defaultInstagramDecision)) {
       errors.push(`${id}: unsupported media.defaultInstagramDecision "${media.defaultInstagramDecision}" (expected ${[...INSTAGRAM_DECISIONS].join(', ')})`);
     }

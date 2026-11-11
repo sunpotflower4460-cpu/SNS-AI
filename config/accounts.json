@@ -315,10 +315,11 @@
         ]
       },
       "linkPolicy": {
-        "preferNoLink": true,
-        "maxUrlPostsPerWeek": 3,
-        "maxUrlPostsPerDay": 1,
-        "purposes": ["affiliate", "sale", "roundup", "highValueDiscovery"]
+        "preferNoLink": false,
+        "includeSourceUrl": true,
+        "maxUrlPostsPerWeek": null,
+        "maxUrlPostsPerDay": null,
+        "purposes": ["product"]
       },
       "monetization": {
         "affiliate": {
@@ -326,7 +327,12 @@
         }
       },
       "media": {
-        "strategy": "none"
+        "strategy": "hunter",
+        "type": "image",
+        "internalImageGeneration": false,
+        "internalVideoGeneration": false,
+        "acquireFromCanonical": true,
+        "maxHostedImageBytes": 5242880
       }
     },
     "plugin-radar-instagram": {
