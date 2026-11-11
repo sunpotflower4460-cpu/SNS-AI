@@ -267,7 +267,11 @@
         "maxChars": 280,
         "historyWindow": 60,
         "duplicateThreshold": 0.68,
-        "candidateCount": 6
+        "candidateCount": 6,
+        "model": "gpt-6.1-sol",
+        "naturalization": {
+          "model": "gpt-6-luna"
+        }
       },
       "research": {
         "webSearch": true,
@@ -275,7 +279,25 @@
         "trendRefreshHours": 6,
         "directFetch": true,
         "minDirectCandidates": 3,
-        "maxTriageCandidates": 20
+        "maxTriageCandidates": 20,
+        "model": "gpt-5.6-luna"
+      },
+      "ai": {
+        "openaiTriageModel": "gpt-5.6-luna",
+        "tasks": {
+          "research-triage": {
+            "providers": ["openai", "groq"]
+          }
+        },
+        "router": {
+          "cheap": { "provider": "openai", "model": "gpt-5.6-luna" },
+          "balanced": { "provider": "openai", "model": "gpt-6-luna" },
+          "high": { "provider": "openai", "model": "gpt-6.1-sol" },
+          "critical": { "provider": "openai", "model": "gpt-6.1-sol" }
+        }
+      },
+      "analytics": {
+        "checkpointsMinutes": [1440, 4320, 10080]
       },
       "safety": {
         "maxPostsPerDay": 2,
