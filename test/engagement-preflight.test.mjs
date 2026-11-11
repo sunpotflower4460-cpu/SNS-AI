@@ -106,8 +106,11 @@ function installFetchMock({ tokenScopes }) {
     if (target === 'https://api.openai.com/v1/moderations') {
       return response({ results: [{ flagged: false, categories: {} }] });
     }
-    if (target === 'https://api.openai.com/v1/models/gpt-5') {
-      return response({ id: 'gpt-5', owned_by: 'openai' });
+    const modelMatch = target.match(/^https:\/\/api\.openai\.com\/v1\/models\/(.+)$/);
+    if (modelMatch) {
+      // Answer for whatever model the shipped config names; model choices are
+      // operator policy and change without this test needing to track them.
+      return response({ id: modelMatch[1], owned_by: 'openai' });
     }
     if (target === 'https://api.x.com/2/oauth2/token' && method === 'POST') {
       oauth2Attempted = true;
