@@ -60,6 +60,10 @@ function videoInitializePayload(bytes, contentType) {
   return { media_category: 'tweet_video', media_type: normalizedType, shared: false, total_bytes: bytes.byteLength };
 }
 
+function imageInitializePayload(bytes, contentType) {
+  return { media_category: 'tweet_image', media_type: contentType, shared: false, total_bytes: bytes.byteLength };
+}
+
 function createPostPayload({ text = '', mediaIds = [], paidPartnership = false }) {
   const payload = {};
   if (text) payload.text = text;
@@ -103,6 +107,44 @@ function isOAuth2AuthError(error) {
   return /unauthorized_client/i.test(detail);
 }
 
+async function uploadImageChunkedOAuth1(bytes, contentType, credentials) {
+  // Chunked upload (initialize/append/finalize) signed with OAuth 1.0a. Verified
+  // live on 2026-11-12: the single-request POST /2/media/upload refuses this
+  // app's uploads with HTTP 403 under BOTH OAuth2 bearer and OAuth1 signing,
+  // while the chunked endpoints accept OAuth1 and return a media id. This
+  // mirrors the video chunk flow, but every step is OAuth1-signed because the
+  // OAuth2 session is exactly what is broken when this path runs.
+  const buffer = Buffer.from(bytes);
+  await assertLiveMutationAllowed('publish:x:image-initialize');
+  const initBody = await fetchJson(MEDIA_INIT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: oauthHeader('POST', MEDIA_INIT_URL, credentials) },
+    body: JSON.stringify(imageInitializePayload(buffer, contentType))
+  });
+  const mediaId = initBody?.data?.id || initBody?.data?.id_str || initBody?.media_id_string;
+  if (!mediaId) throw new Error('X image initialize returned no media id.');
+  const chunkBytes = 4 * 1024 * 1024;
+  let segment = 0;
+  for (let offset = 0; offset < buffer.byteLength; offset += chunkBytes) {
+    const chunk = buffer.subarray(offset, Math.min(buffer.byteLength, offset + chunkBytes));
+    const url = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/append`;
+    await assertLiveMutationAllowed('publish:x:image-append');
+    await fetchJson(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: oauthHeader('POST', url, credentials) },
+      body: JSON.stringify({ media: chunk.toString('base64'), segment_index: segment })
+    });
+    segment += 1;
+  }
+  const finalizeUrl = `${MEDIA_UPLOAD_URL}/${encodeURIComponent(mediaId)}/finalize`;
+  await assertLiveMutationAllowed('publish:x:image-finalize');
+  await fetchJson(finalizeUrl, {
+    method: 'POST',
+    headers: { Authorization: oauthHeader('POST', finalizeUrl, credentials) }
+  });
+  return String(mediaId);
+}
+
 async function uploadImageWithAuth(mediaUrl, credentials, mediaAltText = '') {
   const maxBytes = X_MAX_IMAGE_BYTES;
   let bytes;
@@ -122,26 +164,24 @@ async function uploadImageWithAuth(mediaUrl, credentials, mediaAltText = '') {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(imageUploadPayload(bytes, contentType))
   };
-  let body;
+  let mediaId;
   let authMode = 'oauth2';
   try {
-    body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, request, credentials);
+    const body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, request, credentials);
+    mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
+    if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
   } catch (error) {
     if (!isOAuth2AuthError(error)) throw error;
     // OAuth2 is configured but X is rejecting it (e.g. the token refresh is failing
-    // with 401 unauthorized_client). The single-request v2 media endpoint also
-    // accepts OAuth 1.0a user-context signing, and those credentials do not depend
-    // on the OAuth2 token state, so retry the same upload signed with OAuth1.
+    // with 401 unauthorized_client, or the bearer token gets a 403 from the upload
+    // endpoint). Retrying the same single-request endpoint with OAuth1 signing does
+    // not help — it refuses OAuth1 too (verified live 2026-11-12) — but the chunked
+    // endpoints accept OAuth1, so the fallback uploads in chunks signed with OAuth1.
     // authMode tells publishX to create the post with the scheme that actually
     // uploaded the media.
-    body = await fetchJson(MEDIA_UPLOAD_URL, {
-      ...request,
-      headers: { ...request.headers, Authorization: oauthHeader('POST', MEDIA_UPLOAD_URL, credentials) }
-    });
+    mediaId = await uploadImageChunkedOAuth1(bytes, contentType, credentials);
     authMode = 'oauth1';
   }
-  const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
-  if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
   if (mediaAltText) await setAltText(mediaId, mediaAltText, credentials);
   return { mediaId: String(mediaId), authMode };
 }
@@ -274,4 +314,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   }
 }
 
-export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload, uploadImage, uploadImageWithAuth, isOAuth2AuthError, readAccessLevel };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, imageInitializePayload, createPostPayload, uploadImage, uploadImageWithAuth, uploadImageChunkedOAuth1, isOAuth2AuthError, readAccessLevel };

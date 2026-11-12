@@ -375,16 +375,22 @@ test('X image publishing falls back to OAuth1 upload and post creation when the 
       if (target === 'https://media.example/a.png') {
         return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } });
       }
-      if (target === 'https://api.x.com/2/media/upload') return jsonResponse({ data: { id: 'media-fallback' } });
+      if (target === 'https://api.x.com/2/media/upload/initialize') return jsonResponse({ data: { id: 'media-fallback' } });
+      if (target === 'https://api.x.com/2/media/upload/media-fallback/append') return jsonResponse({});
+      if (target === 'https://api.x.com/2/media/upload/media-fallback/finalize') return jsonResponse({ data: { id: 'media-fallback' } });
       if (target === 'https://api.x.com/2/tweets') return jsonResponse({ data: { id: 'post-fallback', text: 'hello' } });
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
 
     const result = await publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential });
     assert.equal(result.postId, 'post-fallback');
-    const upload = seen.find((row) => row.target === 'https://api.x.com/2/media/upload');
+    const chunked = ['initialize', 'append', 'finalize'].map((step) => seen.findIndex((row) => row.target.endsWith(step === 'initialize' ? '/media/upload/initialize' : `/${step}`)));
+    assert.ok(chunked.every((index) => index >= 0), 'the fallback must run initialize, append and finalize');
+    assert.ok(chunked[0] < chunked[1] && chunked[1] < chunked[2], 'chunked steps must run in order');
+    for (const index of chunked) {
+      assert.ok(seen[index].authorization?.startsWith('OAuth '), 'chunked fallback steps must be OAuth1-signed');
+    }
     const create = seen.find((row) => row.target === 'https://api.x.com/2/tweets');
-    assert.ok(upload.authorization?.startsWith('OAuth '), 'media upload must be retried with OAuth1 signing');
     assert.ok(create.authorization?.startsWith('OAuth '), 'post creation must use OAuth1 when the media was uploaded with OAuth1');
     assert.equal(seen.some((row) => row.authorization?.startsWith('Bearer ')), false);
   } finally {
@@ -423,15 +429,20 @@ test('X image publishing falls back to OAuth1 when the OAuth2 upload itself is f
         if (authorization?.startsWith('Bearer ')) return jsonResponse({ title: 'Forbidden' }, 403);
         return jsonResponse({ data: { id: 'media-403' } });
       }
+      if (target === 'https://api.x.com/2/media/upload/initialize') return jsonResponse({ data: { id: 'media-403' } });
+      if (target === 'https://api.x.com/2/media/upload/media-403/append') return jsonResponse({});
+      if (target === 'https://api.x.com/2/media/upload/media-403/finalize') return jsonResponse({ data: { id: 'media-403' } });
       if (target === 'https://api.x.com/2/tweets') return jsonResponse({ data: { id: 'post-403', text: 'hello' } });
       throw new Error(`Unexpected mocked URL: ${target}`);
     };
 
     const result = await publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential });
     assert.equal(result.postId, 'post-403');
-    assert.equal(uploads.length, 2);
+    assert.equal(uploads.length, 1, 'the single-request endpoint must not be retried under a different auth scheme');
     assert.ok(uploads[0].startsWith('Bearer '), 'the first upload attempt stays on OAuth2');
-    assert.ok(uploads[1].startsWith('OAuth '), 'the retry after a 403 is OAuth1-signed');
+    const chunked = seen.filter((row) => /\/media\/upload\/(initialize|media-403\/append|media-403\/finalize)$/.test(row.target));
+    assert.equal(chunked.length, 3, 'the fallback after a 403 runs the chunked flow');
+    assert.ok(chunked.every((row) => row.authorization?.startsWith('OAuth ')), 'the chunked fallback is OAuth1-signed');
     const create = seen.find((row) => row.target === 'https://api.x.com/2/tweets');
     assert.ok(create.authorization?.startsWith('OAuth '), 'post creation follows the OAuth1 upload');
   } finally {
@@ -453,9 +464,11 @@ test('X image publishing does not fall back to OAuth1 on non-auth OAuth2 failure
     accessToken: 'oauth1-user-token', accessTokenSecret: 'oauth1-user-secret'
   };
   const uploads = [];
+  const targets = [];
   try {
     globalThis.fetch = async (url, options = {}) => {
       const target = String(url);
+      targets.push(target);
       if (target === 'https://api.x.com/2/oauth2/token') {
         return jsonResponse({ access_token: 'access-media', refresh_token: 'refresh-media', expires_in: 7200 });
       }
@@ -475,6 +488,7 @@ test('X image publishing does not fall back to OAuth1 on non-auth OAuth2 failure
     );
     assert.equal(uploads.length, 1, 'a 500 from the upload endpoint must not be retried under a different auth scheme');
     assert.ok(uploads[0].startsWith('Bearer '));
+    assert.equal(targets.some((target) => target.endsWith('/media/upload/initialize')), false, 'a 500 must not trigger the chunked fallback either');
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnv(env);
