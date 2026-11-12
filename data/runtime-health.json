@@ -1,11 +1,11 @@
 {
   "circuits": {
     "music-tools-x:publish": {
-      "failures": 2,
-      "lastFailure": "2026-11-12T03:15:20.883Z",
+      "failures": 3,
+      "lastFailure": "2026-11-12T03:57:14.527Z",
       "lastSuccess": "2026-11-11T11:53:16.677Z",
-      "lastError": "HTTP 401: {\"error\":\"unauthorized_client\",\"error_description\":\"Missing valid authorization header\"}",
-      "openUntil": null
+      "lastError": "HTTP 403: Forbidden",
+      "openUntil": "2026-11-12T04:57:14.527Z"
     }
   }
 }
