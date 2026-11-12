@@ -1,11 +1,11 @@
 {
   "circuits": {
     "music-tools-x:publish": {
-      "failures": 3,
-      "lastFailure": "2026-11-12T03:57:14.527Z",
+      "failures": 4,
+      "lastFailure": "2026-11-12T05:05:08.227Z",
       "lastSuccess": "2026-11-11T11:53:16.677Z",
       "lastError": "HTTP 403: Forbidden",
-      "openUntil": "2026-11-12T04:57:14.527Z"
+      "openUntil": "2026-11-12T06:05:08.227Z"
     }
   }
 }
