@@ -304,9 +304,25 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
     // while OAuth2 auth is broken (the situation the upload fallback exists for),
     // an OAuth2 create would fail on the same credentials, so a post whose image
     // went up via OAuth1 is also created via OAuth1.
-    const body = mediaUrl && mediaAuthMode !== 'oauth1'
-      ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
-      : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
+    const createWithOAuth1 = () => fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
+    let body;
+    if (mediaUrl && mediaAuthMode !== 'oauth1') {
+      try {
+        body = await xOAuth2FetchJson(CREATE_POST_URL, options, credential);
+      } catch (error) {
+        if (!isOAuth2AuthError(error)) throw error;
+        // The media-upload endpoint accepts this app's OAuth2 bearer, but POST
+        // /2/tweets rejects it with an empty-body 403 (the same rejection seen on
+        // GET /2/users/me). The audit log for 2026-11-12 shows every publish that
+        // day passing the media stage and failing at create-post for exactly this
+        // reason. A media id is scoped to the user, not the auth scheme, so retry
+        // the create signed with OAuth1. A 403 means the post was not created, so
+        // the retry cannot duplicate it.
+        body = await createWithOAuth1();
+      }
+    } else {
+      body = await createWithOAuth1();
+    }
     return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
   } catch (error) {
     error.publishStage ||= 'create-post';

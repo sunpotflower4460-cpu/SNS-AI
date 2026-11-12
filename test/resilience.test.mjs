@@ -351,6 +351,51 @@ test('X image publishing runs OAuth2 media upload, alt text, and post creation e
   }
 });
 
+test('X media publishing retries post creation with OAuth1 when the OAuth2 create is forbidden', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'k'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  const credential = {
+    oauth2StateId: `create-fallback-${process.pid}`,
+    oauth2ClientId: 'client-id', oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key', consumerSecret: 'oauth1-secret',
+    accessToken: 'oauth1-user-token', accessTokenSecret: 'oauth1-user-secret'
+  };
+  const creates = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const authorization = options.headers?.Authorization || null;
+      if (target === 'https://api.x.com/2/oauth2/token') {
+        return jsonResponse({ access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 7200 });
+      }
+      if (target === 'https://media.example/a.png') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      if (target === 'https://api.x.com/2/media/upload') return jsonResponse({ data: { id: 'media-1' } });
+      if (target === 'https://api.x.com/2/tweets') {
+        creates.push(authorization);
+        // The production failure: the bearer is accepted for the upload but
+        // POST /2/tweets rejects it with a 403; the OAuth1-signed retry succeeds.
+        if (authorization?.startsWith('Bearer ')) return jsonResponse({ title: 'Forbidden' }, 403);
+        return jsonResponse({ data: { id: 'post-1', text: 'hello' } });
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const result = await publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential });
+    assert.equal(result.postId, 'post-1');
+    assert.equal(creates.length, 2, 'the forbidden OAuth2 create must be retried exactly once');
+    assert.ok(creates[0].startsWith('Bearer '), 'the first create attempt stays on OAuth2');
+    assert.ok(creates[1].startsWith('OAuth '), 'the create retry is OAuth1-signed');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
 test('X image publishing falls back to OAuth1 upload and post creation when the OAuth2 refresh is rejected', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('X_OAUTH2_STATE_KEY');
