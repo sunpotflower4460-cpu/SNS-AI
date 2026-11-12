@@ -28,7 +28,7 @@ function xUsesMedia(account) {
 function credentialRequirements(account) {
   if (account.platform === 'x') {
     const required = ['consumerKey', 'consumerSecret', 'accessToken', 'accessTokenSecret'];
-    if (xUsesMedia(account)) required.push('oauth2ClientId', 'oauth2RefreshToken');
+    if (xUsesMedia(account)) required.push('oauth2ClientId', 'oauth2RefreshToken', 'oauth2ClientSecret');
     return required;
   }
   if (account.platform === 'instagram') return ['accessToken', 'igUserId'];

@@ -80,6 +80,18 @@ function initialSession(credential) {
   };
 }
 
+function oauth2ClientKind(clientId) {
+  // X OAuth2 client ids are base64 of "<id>:<version>:<kind>", where the kind suffix is "ci"
+  // for a confidential (web) client and "na" for a public (native) client. Anything that does
+  // not decode to a recognizable suffix returns null so callers keep the historical behavior.
+  try {
+    const decoded = Buffer.from(String(clientId || ''), 'base64').toString('utf8');
+    if (decoded.endsWith(':ci')) return 'confidential';
+    if (decoded.endsWith(':na')) return 'public';
+  } catch { /* fall through to null */ }
+  return null;
+}
+
 function refreshHeaders(credential) {
   const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
   if (credential?.oauth2ClientSecret) {
@@ -112,6 +124,15 @@ export async function refreshXOAuth2(credential, { force = false, staleAccessTok
       if (!force) return current;
       // 401-forced refresh: reuse only when another waiter already rotated past the stale token.
       if (staleAccessToken && current.accessToken !== staleAccessToken) return current;
+    }
+
+    // A confidential client MUST authenticate the token request with its client secret
+    // (HTTP Basic). Without one, X answers 401 unauthorized_client ("Missing valid
+    // authorization header"), so fail here with the actual cause instead of burning a
+    // request whose outcome is already known. Public (native) clients legitimately have
+    // no secret and keep the client_id-in-body flow below.
+    if (!credential?.oauth2ClientSecret && oauth2ClientKind(clientId) === 'confidential') {
+      throw new Error('X OAuth2 refresh requires credential.oauth2ClientSecret: this oauth2ClientId is a confidential client (decodes to a ":ci" suffix), and X rejects secret-less token requests from confidential clients with 401 unauthorized_client. Copy the OAuth2 client secret from the X developer portal into the credential, or re-authorize with a public (native) client.');
     }
 
     const params = new URLSearchParams({ refresh_token: refreshToken, grant_type: 'refresh_token' });
@@ -179,4 +200,4 @@ export async function verifyXOAuth2Session(credential) {
   };
 }
 
-export const __test = { credentialId };
+export const __test = { credentialId, oauth2ClientKind };

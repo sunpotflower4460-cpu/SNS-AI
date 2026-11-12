@@ -194,6 +194,75 @@ test('X OAuth2 bootstrap rotates tokens and persists only encrypted token state'
   }
 });
 
+test('X OAuth2 refresh refuses a confidential client without a client secret before any token request', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'c'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  // X client ids are base64 of "<id>:<version>:<kind>"; ":ci" marks a confidential client,
+  // which must authenticate the token request with its secret (HTTP Basic).
+  const credential = {
+    oauth2StateId: `confidential-${process.pid}`,
+    oauth2ClientId: Buffer.from('1234567890:1:ci').toString('base64'),
+    oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key',
+    accessToken: 'oauth1-user-token'
+  };
+  try {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      throw new Error('fetch must not be called when the refresh is refused up front');
+    };
+    await assert.rejects(getXOAuth2Session(credential), (error) => {
+      assert.match(error.message, /oauth2ClientSecret/);
+      assert.match(error.message, /confidential/);
+      assert.match(error.message, /unauthorized_client/);
+      return true;
+    });
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
+test('X OAuth2 refresh still allows a public (native) client without a client secret', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'p'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  // ":na" marks a public (native) client: no secret exists, so the refresh keeps the
+  // historical client_id-in-body flow with no Authorization header.
+  const clientId = Buffer.from('1234567890:1:na').toString('base64');
+  const credential = {
+    oauth2StateId: `public-${process.pid}`,
+    oauth2ClientId: clientId,
+    oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key',
+    accessToken: 'oauth1-user-token'
+  };
+  try {
+    let calls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      calls += 1;
+      assert.equal(String(url), 'https://api.x.com/2/oauth2/token');
+      assert.equal(options.headers.Authorization, undefined);
+      assert.match(String(options.body), /refresh_token=refresh-0/);
+      assert.ok(String(options.body).includes(`client_id=${encodeURIComponent(clientId)}`));
+      return jsonResponse({ access_token: 'access-public', refresh_token: 'refresh-public', expires_in: 7200 });
+    };
+    const session = await getXOAuth2Session(credential);
+    assert.equal(session.accessToken, 'access-public');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
 test('X OAuth2 retries exactly once with a refreshed token after a 401', async () => {
   const previousFetch = globalThis.fetch;
   const env = saveEnv('X_OAUTH2_STATE_KEY');

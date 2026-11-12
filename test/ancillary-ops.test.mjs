@@ -72,7 +72,7 @@ test('readiness doctor blocks missing secrets, becomes ready with complete crede
       process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
         'example-x': {
           consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as',
-          oauth2ClientId: 'client', oauth2RefreshToken: 'refresh',
+          oauth2ClientId: 'client', oauth2RefreshToken: 'refresh', oauth2ClientSecret: 'client-secret',
           expiresAt: new Date(Date.now() + 10 * 86_400_000).toISOString()
         }
       });
@@ -85,6 +85,39 @@ test('readiness doctor blocks missing secrets, becomes ready with complete crede
       const reportText = `${await readFile(pathOf('../data/reports/readiness.json'), 'utf8')}\n${await readFile(pathOf('../data/reports/readiness.md'), 'utf8')}`;
       assert.equal(reportText.includes('super-secret-openai-value'), false);
       await assert.rejects(buildReadinessReport({ accountFilter: 'missing-account' }), /Unknown account/);
+    });
+  } finally { restoreEnv(env); }
+});
+
+test('readiness doctor blocks an X media account whose credentials omit only oauth2ClientSecret', async () => {
+  const env = saveEnv('OPENAI_API_KEY', 'SOCIAL_CREDENTIALS_JSON', 'X_OAUTH2_STATE_KEY', 'MEDIA_SERVICE_TOKEN');
+  try {
+    await isolated(async () => {
+      const config = JSON.parse(await readFile(CONFIG, 'utf8'));
+      config.accounts['example-x'] = {
+        ...config.accounts['example-x'], enabled: true, mode: 'auto',
+        media: { strategy: 'fixed', type: 'image', url: 'https://media.example/x.png' }
+      };
+      config.accounts['example-instagram'].enabled = false;
+      config.accounts['example-instagram'].mode = 'pause';
+      await writeJson(CONFIG, config);
+
+      process.env.OPENAI_API_KEY = 'super-secret-openai-value';
+      process.env.X_OAUTH2_STATE_KEY = 'k'.repeat(48);
+      // Everything a media-enabled X account needs EXCEPT oauth2ClientSecret: a confidential
+      // OAuth2 client cannot refresh its token without the secret (X answers 401
+      // unauthorized_client), so the doctor must name the missing field as a blocker instead
+      // of reporting the account ready and letting the failure surface at publish time.
+      process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
+        'example-x': {
+          consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as',
+          oauth2ClientId: 'client', oauth2RefreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 10 * 86_400_000).toISOString()
+        }
+      });
+      const report = await buildReadinessReport({ accountFilter: 'example-x' });
+      assert.equal(report.ready, false);
+      assert.equal(report.accounts[0].blockers.some((x) => x.includes('oauth2ClientSecret')), true);
     });
   } finally { restoreEnv(env); }
 });
@@ -124,7 +157,7 @@ test('readiness doctor does not falsely warn X Reel accounts that only ever reso
       process.env.OPENAI_API_KEY = 'k';
       process.env.X_OAUTH2_STATE_KEY = 'k'.repeat(48);
       process.env.SOCIAL_CREDENTIALS_JSON = JSON.stringify({
-        'example-x': { consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as', oauth2ClientId: 'client', oauth2RefreshToken: 'refresh' }
+        'example-x': { consumerKey: 'ck', consumerSecret: 'cs', accessToken: 'at', accessTokenSecret: 'as', oauth2ClientId: 'client', oauth2RefreshToken: 'refresh', oauth2ClientSecret: 'client-secret' }
       });
 
       const report = await buildReadinessReport({ accountFilter: 'example-x' });
