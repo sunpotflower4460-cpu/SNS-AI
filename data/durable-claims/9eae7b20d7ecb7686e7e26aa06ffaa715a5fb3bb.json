@@ -1,0 +1,21 @@
+{
+  "slotId": "music-tools-x:workflow:43146434796",
+  "status": "failed",
+  "createdAt": "2026-11-12T03:11:01.240Z",
+  "updatedAt": "2026-11-12T03:11:01.484Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "録音ボタンを押す前の「今の音」を拾いたい人へ。 Bird'sのRolling Samplerは、通った音を循環録音し、欲しい部分だけドラッグで取り出せる。 音作り中の偶然を残す道具。DAWの遡及録音で足りているなら追加不要。",
+  "textHash": "b73a94f8b69151d38341",
+  "mediaUrl": "https://www.birdsthings.com/s/rs-themes.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "errorStatus": null,
+  "publishStage": "media",
+  "lastError": "Could not download media (403)."
+}
