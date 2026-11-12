@@ -92,7 +92,18 @@ function oversizedImage(message) {
   return error;
 }
 
-async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
+function isOAuth2AuthError(error) {
+  // Only authentication/authorization failures justify abandoning OAuth2: an HTTP
+  // 401/403 status, or X's OAuth2 token-endpoint error code (unauthorized_client),
+  // which is what a rejected token refresh surfaces as. Anything else (5xx, network
+  // errors, malformed responses) keeps failing on the OAuth2 path instead of
+  // silently switching auth schemes mid-publish.
+  if (Number(error?.status) === 401 || Number(error?.status) === 403) return true;
+  const detail = `${error?.message || ''} ${JSON.stringify(error?.body || '')}`;
+  return /unauthorized_client/i.test(detail);
+}
+
+async function uploadImageWithAuth(mediaUrl, credentials, mediaAltText = '') {
   const maxBytes = X_MAX_IMAGE_BYTES;
   let bytes;
   let contentType;
@@ -106,15 +117,38 @@ async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
   if (bytes.byteLength > maxBytes) throw oversizedImage('X image exceeds the 5 MB API upload limit.');
 
   await assertLiveMutationAllowed('publish:x:image-upload');
-  const body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, {
+  const request = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(imageUploadPayload(bytes, contentType))
-  }, credentials);
+  };
+  let body;
+  let authMode = 'oauth2';
+  try {
+    body = await xOAuth2FetchJson(MEDIA_UPLOAD_URL, request, credentials);
+  } catch (error) {
+    if (!isOAuth2AuthError(error)) throw error;
+    // OAuth2 is configured but X is rejecting it (e.g. the token refresh is failing
+    // with 401 unauthorized_client). The single-request v2 media endpoint also
+    // accepts OAuth 1.0a user-context signing, and those credentials do not depend
+    // on the OAuth2 token state, so retry the same upload signed with OAuth1.
+    // authMode tells publishX to create the post with the scheme that actually
+    // uploaded the media.
+    body = await fetchJson(MEDIA_UPLOAD_URL, {
+      ...request,
+      headers: { ...request.headers, Authorization: oauthHeader('POST', MEDIA_UPLOAD_URL, credentials) }
+    });
+    authMode = 'oauth1';
+  }
   const mediaId = body?.data?.id || body?.data?.id_str || body?.media_id_string;
   if (!mediaId) throw new Error(`X media upload succeeded but returned no media id: ${JSON.stringify(body)}`);
   if (mediaAltText) await setAltText(mediaId, mediaAltText, credentials);
-  return String(mediaId);
+  return { mediaId: String(mediaId), authMode };
+}
+
+async function uploadImage(mediaUrl, credentials, mediaAltText = '') {
+  const { mediaId } = await uploadImageWithAuth(mediaUrl, credentials, mediaAltText);
+  return mediaId;
 }
 
 async function initializeVideo(bytes, contentType, credentials) {
@@ -207,12 +241,16 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
 
   await assertLiveMutationAllowed('publish:x');
   const payload = createPostPayload({ text, paidPartnership });
+  let mediaAuthMode = null;
   if (mediaUrl) {
     try {
-      const mediaId = mediaType === 'reel'
-        ? await uploadVideo(mediaUrl, credential)
-        : await uploadImage(mediaUrl, credential, mediaAltText);
-      payload.media = { media_ids: [mediaId] };
+      if (mediaType === 'reel') {
+        payload.media = { media_ids: [await uploadVideo(mediaUrl, credential)] };
+      } else {
+        const uploaded = await uploadImageWithAuth(mediaUrl, credential, mediaAltText);
+        mediaAuthMode = uploaded.authMode;
+        payload.media = { media_ids: [uploaded.mediaId] };
+      }
     } catch (error) {
       error.publishStage ||= 'media';
       throw error;
@@ -222,7 +260,11 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
   try {
     await assertLiveMutationAllowed('publish:x:create-post');
-    const body = mediaUrl
+    // Media posts are created with the same auth scheme that uploaded the media:
+    // while OAuth2 auth is broken (the situation the upload fallback exists for),
+    // an OAuth2 create would fail on the same credentials, so a post whose image
+    // went up via OAuth1 is also created via OAuth1.
+    const body = mediaUrl && mediaAuthMode !== 'oauth1'
       ? await xOAuth2FetchJson(CREATE_POST_URL, options, credential)
       : await fetchJson(CREATE_POST_URL, { ...options, headers: { ...options.headers, Authorization: oauthHeader('POST', CREATE_POST_URL, credential) } });
     return { platform: 'x', postId: body?.data?.id, text: body?.data?.text ?? text, raw: body };
@@ -232,4 +274,4 @@ export async function publishX({ text = '', mediaUrl, mediaType = 'image', media
   }
 }
 
-export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload, uploadImage, readAccessLevel };
+export const __test = { pct, mediaMetadataPayload, imageUploadPayload, videoInitializePayload, createPostPayload, uploadImage, uploadImageWithAuth, isOAuth2AuthError, readAccessLevel };

@@ -282,6 +282,137 @@ test('X image publishing runs OAuth2 media upload, alt text, and post creation e
   }
 });
 
+test('X image publishing falls back to OAuth1 upload and post creation when the OAuth2 refresh is rejected', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'f'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  const credential = {
+    oauth2StateId: `oauth1-fallback-${process.pid}`,
+    oauth2ClientId: 'client-id', oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key', consumerSecret: 'oauth1-secret',
+    accessToken: 'oauth1-user-token', accessTokenSecret: 'oauth1-user-secret'
+  };
+  const seen = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      seen.push({ target, authorization: options.headers?.Authorization || null });
+      if (target === 'https://api.x.com/2/oauth2/token') {
+        // The production failure: X rejects the refresh itself with 401
+        // unauthorized_client, before any media request can be attempted.
+        return jsonResponse({ error: 'unauthorized_client', error_description: 'Missing valid authorization header' }, 401);
+      }
+      if (target === 'https://media.example/a.png') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      if (target === 'https://api.x.com/2/media/upload') return jsonResponse({ data: { id: 'media-fallback' } });
+      if (target === 'https://api.x.com/2/tweets') return jsonResponse({ data: { id: 'post-fallback', text: 'hello' } });
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const result = await publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential });
+    assert.equal(result.postId, 'post-fallback');
+    const upload = seen.find((row) => row.target === 'https://api.x.com/2/media/upload');
+    const create = seen.find((row) => row.target === 'https://api.x.com/2/tweets');
+    assert.ok(upload.authorization?.startsWith('OAuth '), 'media upload must be retried with OAuth1 signing');
+    assert.ok(create.authorization?.startsWith('OAuth '), 'post creation must use OAuth1 when the media was uploaded with OAuth1');
+    assert.equal(seen.some((row) => row.authorization?.startsWith('Bearer ')), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
+test('X image publishing falls back to OAuth1 when the OAuth2 upload itself is forbidden', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'g'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  const credential = {
+    oauth2StateId: `oauth1-forbidden-${process.pid}`,
+    oauth2ClientId: 'client-id', oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key', consumerSecret: 'oauth1-secret',
+    accessToken: 'oauth1-user-token', accessTokenSecret: 'oauth1-user-secret'
+  };
+  const uploads = [];
+  const seen = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      const authorization = options.headers?.Authorization || null;
+      seen.push({ target, authorization });
+      if (target === 'https://api.x.com/2/oauth2/token') {
+        return jsonResponse({ access_token: 'access-media', refresh_token: 'refresh-media', expires_in: 7200 });
+      }
+      if (target === 'https://media.example/a.png') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      if (target === 'https://api.x.com/2/media/upload') {
+        uploads.push(authorization);
+        if (authorization?.startsWith('Bearer ')) return jsonResponse({ title: 'Forbidden' }, 403);
+        return jsonResponse({ data: { id: 'media-403' } });
+      }
+      if (target === 'https://api.x.com/2/tweets') return jsonResponse({ data: { id: 'post-403', text: 'hello' } });
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    const result = await publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential });
+    assert.equal(result.postId, 'post-403');
+    assert.equal(uploads.length, 2);
+    assert.ok(uploads[0].startsWith('Bearer '), 'the first upload attempt stays on OAuth2');
+    assert.ok(uploads[1].startsWith('OAuth '), 'the retry after a 403 is OAuth1-signed');
+    const create = seen.find((row) => row.target === 'https://api.x.com/2/tweets');
+    assert.ok(create.authorization?.startsWith('OAuth '), 'post creation follows the OAuth1 upload');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
+test('X image publishing does not fall back to OAuth1 on non-auth OAuth2 failures', async () => {
+  const previousFetch = globalThis.fetch;
+  const env = saveEnv('X_OAUTH2_STATE_KEY');
+  process.env.X_OAUTH2_STATE_KEY = 'h'.repeat(48);
+  await rm(X_STATE_FILE, { force: true });
+  const credential = {
+    oauth2StateId: `oauth1-no-fallback-${process.pid}`,
+    oauth2ClientId: 'client-id', oauth2RefreshToken: 'refresh-0',
+    consumerKey: 'oauth1-key', consumerSecret: 'oauth1-secret',
+    accessToken: 'oauth1-user-token', accessTokenSecret: 'oauth1-user-secret'
+  };
+  const uploads = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const target = String(url);
+      if (target === 'https://api.x.com/2/oauth2/token') {
+        return jsonResponse({ access_token: 'access-media', refresh_token: 'refresh-media', expires_in: 7200 });
+      }
+      if (target === 'https://media.example/a.png') {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      if (target === 'https://api.x.com/2/media/upload') {
+        uploads.push(options.headers?.Authorization || null);
+        return jsonResponse({ title: 'Internal Server Error' }, 500);
+      }
+      throw new Error(`Unexpected mocked URL: ${target}`);
+    };
+
+    await assert.rejects(
+      publishX({ text: 'hello', mediaUrl: 'https://media.example/a.png', mediaType: 'image', credential }),
+      /HTTP 500/
+    );
+    assert.equal(uploads.length, 1, 'a 500 from the upload endpoint must not be retried under a different auth scheme');
+    assert.ok(uploads[0].startsWith('Bearer '));
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv(env);
+    await rm(X_STATE_FILE, { force: true });
+  }
+});
+
 test('Instagram publish completes create-status-publish flow with multipart bodies', async () => {
   const previousFetch = globalThis.fetch;
   const calls = [];
