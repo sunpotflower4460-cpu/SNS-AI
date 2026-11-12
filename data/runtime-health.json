@@ -1,10 +1,10 @@
 {
   "circuits": {
     "music-tools-x:publish": {
-      "failures": 1,
-      "lastFailure": "2026-11-12T03:11:01.517Z",
+      "failures": 2,
+      "lastFailure": "2026-11-12T03:15:20.883Z",
       "lastSuccess": "2026-11-11T11:53:16.677Z",
-      "lastError": "Could not download media (403).",
+      "lastError": "HTTP 401: {\"error\":\"unauthorized_client\",\"error_description\":\"Missing valid authorization header\"}",
       "openUntil": null
     }
   }
