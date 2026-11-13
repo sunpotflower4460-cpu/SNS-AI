@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43416025364",
+  "status": "published",
+  "createdAt": "2026-11-13T11:18:51.587Z",
+  "updatedAt": "2026-11-13T11:18:52.545Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "録ったボーカルや旋律を、音符単位で動かす無料ピッチエディタ「bubblegum」。音程だけでなく、音符の位置や長さも編集できます。手作業でフレーズを整えたい人向け。自動補正だけで足りるなら追加不要。",
+  "textHash": "3f2a6805984d0da7f8a9",
+  "mediaUrl": "https://i.ytimg.com/vi/Mre7T837yqE/maxresdefault.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121201122769510777",
+  "publishedAt": "2026-11-13T11:18:52.544Z"
+}
