@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43335320079",
+  "status": "published",
+  "createdAt": "2026-11-13T00:13:34.735Z",
+  "updatedAt": "2026-11-13T00:13:35.034Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "エフェクトをケーブルで自由につなぎたい人へ。TangleはDAW内で組むモジュラーFXラック。ラックと6モジュール、CV・クロック系は無料。残りは別料金なので、まず無料分でパッチングが自分に合うか試せます。 https://weaveraudio.com/",
+  "textHash": "4b481a68a0f16cd0e0af",
+  "mediaUrl": null,
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121033696811589894",
+  "publishedAt": "2026-11-13T00:13:35.032Z"
+}
