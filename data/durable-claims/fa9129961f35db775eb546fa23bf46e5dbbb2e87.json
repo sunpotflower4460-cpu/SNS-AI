@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43589294647",
+  "status": "published",
+  "createdAt": "2026-11-14T11:17:33.823Z",
+  "updatedAt": "2026-11-14T11:17:34.889Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "口琴のような倍音をシンセで探したい人へ。SuperDuper DSPのKubyzは、倍音や母音の響きを調整できる無料のオープンソース音源。一般的なシンセの音色で足りているなら、追加は不要。",
+  "textHash": "ec814cb181419cd64326",
+  "mediaUrl": "https://raw.githubusercontent.com/fortunto2/superduper-dsp/main/docs/screenshots/kubyz.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121563184771314046",
+  "publishedAt": "2026-11-14T11:17:34.888Z"
+}
