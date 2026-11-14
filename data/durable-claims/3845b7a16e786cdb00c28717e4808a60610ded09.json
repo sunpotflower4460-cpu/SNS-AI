@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43535087499",
+  "status": "published",
+  "createdAt": "2026-11-14T00:34:34.325Z",
+  "updatedAt": "2026-11-14T00:34:36.082Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "音を「音程のある響き」に変えたい人へ。Polarity-RESは最大32個の共鳴点をスペクトラム上に置ける無料エフェクト。音符や倍音に合わせて配置でき、ノイズから音階感のある質感も作れます。普通のEQで十分なら追加は不要。",
+  "textHash": "773ffbe13219b4f62812",
+  "mediaUrl": "https://polarity.productions/polarity-res/assets/images/polarity-res-cover.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121401373564514444",
+  "publishedAt": "2026-11-14T00:34:36.081Z"
+}
