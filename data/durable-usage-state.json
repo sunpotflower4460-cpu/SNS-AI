@@ -17,10 +17,10 @@
     "music-tools-x::dry-run-preview": {
       "localDate": "2026-11-14",
       "counts": {
-        "openai": 3,
+        "openai": 4,
         "webSearch": 2
       }
     }
   },
-  "updatedAt": "2026-11-14T11:10:34.816Z"
+  "updatedAt": "2026-11-14T11:11:28.898Z"
 }
