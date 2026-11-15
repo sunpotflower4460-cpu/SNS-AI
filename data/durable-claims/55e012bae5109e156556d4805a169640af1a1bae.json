@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43707814426",
+  "status": "published",
+  "createdAt": "2026-11-15T11:12:50.502Z",
+  "updatedAt": "2026-11-15T11:12:52.845Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "今週の無料プラグインまとめ ・bubblegum（Your Smile is Art）— 音符単位で直せる無料ピッチエディタ ・Polarity-RES（Polarity）— 最大32点の共鳴エフェクト ・Tin Roof（Brownie Digital）— 残響を凍らせるリバーブ 定番で足りるなら追加は不要。",
+  "textHash": "a9c1a3372be2f77bc582",
+  "mediaUrl": "https://polarity.productions/polarity-res/assets/images/polarity-res-cover.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121924389406904733",
+  "publishedAt": "2026-11-15T11:12:52.844Z"
+}
