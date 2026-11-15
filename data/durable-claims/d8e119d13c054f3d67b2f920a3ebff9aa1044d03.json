@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43659898871",
+  "status": "published",
+  "createdAt": "2026-11-15T00:47:20.794Z",
+  "updatedAt": "2026-11-15T00:47:21.613Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "残響を「部屋」より「パッド」に使いたい人へ。無料のTin Roofは、リバーブの尾をHOLDで凍らせ、拍に合わせて刻めるプラグイン。きれいな部屋鳴りが欲しい人には別の選択肢がよさそう。",
+  "textHash": "005c84dfe4b086e6e922",
+  "mediaUrl": "https://kikiwafford.com/tinroof/img/roof.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2121766972555948467",
+  "publishedAt": "2026-11-15T00:47:21.613Z"
+}
