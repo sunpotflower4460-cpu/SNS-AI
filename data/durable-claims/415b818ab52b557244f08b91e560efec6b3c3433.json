@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43781163571",
+  "status": "published",
+  "createdAt": "2026-11-16T00:34:33.427Z",
+  "updatedAt": "2026-11-16T00:34:35.754Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "粒の一つひとつを空間に散らす、IEMのGranularEncoder。モノ／ステレオ音を細かな断片に分け、Ambisonics空間へ配置する発想が面白い。通常のステレオ制作向けというより、立体音響やサウンドデザインを試す人向けです。",
+  "textHash": "8a6cfc4bec258a35d1a9",
+  "mediaUrl": "https://plugins.iem.at/docs/granularencoder/granularEncoder_screenshot.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2122126148096143544",
+  "publishedAt": "2026-11-16T00:34:35.754Z"
+}
