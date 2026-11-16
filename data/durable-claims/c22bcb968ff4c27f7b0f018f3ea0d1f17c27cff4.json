@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:43856574140",
+  "status": "published",
+  "createdAt": "2026-11-16T11:18:35.601Z",
+  "updatedAt": "2026-11-16T11:18:37.518Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "欲しいエフェクトを言葉で説明し、DAW内で形にする。Amorphは楽器・エフェクト・MIDIツールを作れる無料プラグインです。定番音源の置き換えというより、自分用の小さな道具を試作したい人向け。公開ベータなので、完成品を求める人は様子見でも。",
+  "textHash": "8f1640aaca03d88a7edd",
+  "mediaUrl": "https://artistsindsp.com/wp-content/uploads/2026/10/og-card.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2122288223300747504",
+  "publishedAt": "2026-11-16T11:18:37.518Z"
+}
