@@ -5,6 +5,12 @@
       "lastSuccess": "2026-11-16T11:18:37.520Z",
       "openUntil": null,
       "lastError": null
+    },
+    "music-tools-x:research": {
+      "failures": 0,
+      "lastSuccess": "2026-11-16T13:47:09.226Z",
+      "openUntil": null,
+      "lastError": null
     }
   }
 }

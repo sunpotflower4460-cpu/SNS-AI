@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-20T07:25:35.336Z",
+  "generatedAt": "2026-11-16T13:47:09.326Z",
   "policies": {
     "x": null,
     "instagram": null
@@ -7,10 +7,36 @@
   "accounts": {
     "music-tools-x": {
       "platform": "x",
-      "enabled": false,
+      "enabled": true,
       "mode": "approval",
-      "postCount": 0,
-      "lastPost": null,
+      "postCount": 10,
+      "lastPost": {
+        "at": "2026-11-16T11:18:37.518Z",
+        "account": "music-tools-x",
+        "platform": "x",
+        "status": "published",
+        "source": "manual",
+        "slotId": "music-tools-x:workflow:43856574140",
+        "text": "欲しいエフェクトを言葉で説明し、DAW内で形にする。Amorphは楽器・エフェクト・MIDIツールを作れる無料プラグインです。定番音源の置き換えというより、自分用の小さな道具を試作したい人向け。公開ベータなので、完成品を求める人は様子見でも。",
+        "mediaUrl": "https://artistsindsp.com/wp-content/uploads/2026/10/og-card.png",
+        "mediaType": "image",
+        "mediaAltText": null,
+        "mediaQa": null,
+        "mediaResolution": null,
+        "commercial": {
+          "kind": "organic",
+          "paidPartnership": false
+        },
+        "providerPostId": "2122288223300747504",
+        "ai": null,
+        "features": null,
+        "rationale": null,
+        "predictedScore": null,
+        "selectionMode": null,
+        "experiment": null,
+        "sources": [],
+        "textHash": "8f1640aaca03d88a7edd"
+      },
       "bestRecent": null,
       "strategy": {
         "generatedAt": "2026-08-19T18:00:19.352Z",
@@ -19,7 +45,194 @@
         "preferred": [],
         "avoid": []
       },
-      "trends": null,
+      "trends": {
+        "generatedAt": "2026-11-16T13:47:09.224Z",
+        "summary": "Direct-fetch triage of 20 candidate(s) from 2 source(s).",
+        "top": [
+          {
+            "topic": "GullDSP Phathom：無料オープンソースのベース用プリアンプ／ディストーション",
+            "whyNow": "無料で、モダンなファジー・グロウル・クランチ系ベース音色に特化している。",
+            "angle": "定番のベース歪みとどう違うか、Windowsユーザー向けの無料候補として紹介。",
+            "relevance": 93,
+            "novelty": 84,
+            "usefulness": 86,
+            "priceValue": 98,
+            "newsworthiness": 78,
+            "japanNovelty": 89,
+            "audienceFit": 92,
+            "confidence": 88,
+            "risk": 12,
+            "url": "https://bedroomproducersblog.com/2026/11/16/gulldsp-phathom/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-11-16T13:44:03.000Z",
+            "opportunityScore": 90.9
+          },
+          {
+            "topic": "Audiomodern Filterstep 2：無料リズミック・フィルターの大型アップデート",
+            "whyNow": "無料プラグインにシーケンス機能と5つの追加エフェクトエンジンが加わった。",
+            "angle": "パッドやドローンを動かす無料候補として、初代所有者が更新する価値を整理。",
+            "relevance": 95,
+            "novelty": 83,
+            "usefulness": 90,
+            "priceValue": 99,
+            "newsworthiness": 88,
+            "japanNovelty": 84,
+            "audienceFit": 94,
+            "confidence": 93,
+            "risk": 10,
+            "url": "https://bedroomproducersblog.com/2026/11/16/audiomodern-filterstep-2/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-11-16T12:45:03.000Z",
+            "opportunityScore": 90.8
+          },
+          {
+            "topic": "Algoriffix Pitch Perfekt v2：ボーカル変換と4声ハーモニー対応",
+            "whyNow": "ボーカルからMIDIを生成するツールに、ボーカル変換と4声アレンジ機能が追加された。",
+            "angle": "歌メロのMIDI化からハーモニー生成まで、AI／音声処理ワークフローでの用途を紹介。",
+            "relevance": 91,
+            "novelty": 91,
+            "usefulness": 85,
+            "priceValue": 55,
+            "newsworthiness": 87,
+            "japanNovelty": 91,
+            "audienceFit": 89,
+            "confidence": 88,
+            "risk": 25,
+            "url": "https://bedroomproducersblog.com/2026/11/15/algoriffix-pitch-perfekt-v2/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-11-15T17:20:30.000Z",
+            "opportunityScore": 89.9
+          },
+          {
+            "topic": "RiverFlux Audio RF-BUS：Relicバンドルに追加された無料バスコンプレッサー",
+            "whyNow": "Relic 0.4.7で無料のステレオ・バスコンプレッサーが追加され、対応OSも広い。",
+            "angle": "既存のRelicバンドル所有者向けアップデート情報として、無料追加の実用性を確認。",
+            "relevance": 87,
+            "novelty": 79,
+            "usefulness": 82,
+            "priceValue": 96,
+            "newsworthiness": 78,
+            "japanNovelty": 88,
+            "audienceFit": 85,
+            "confidence": 86,
+            "risk": 13,
+            "url": "https://bedroomproducersblog.com/2026/11/15/riverflux-audio-rf-bus-free/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-11-15T17:33:45.000Z",
+            "opportunityScore": 86.9
+          },
+          {
+            "topic": "Tone Empire OptoRED：無料配布中のオプティカル・コンプレッサー",
+            "whyNow": "通常価格79ドルのプラグインが、クーポンコードで無料。終了日は未確認。",
+            "angle": "無料化の手順と、ボーカル・ベース・バス用途で試す価値を紹介。ただし終了条件を要確認。",
+            "relevance": 94,
+            "novelty": 72,
+            "usefulness": 87,
+            "priceValue": 99,
+            "newsworthiness": 93,
+            "japanNovelty": 79,
+            "audienceFit": 94,
+            "confidence": 89,
+            "risk": 28,
+            "url": "https://bedroomproducersblog.com/2026/11/16/tone-empire-optored-black-friday/",
+            "sourceId": "bedroom-producers-blog",
+            "vendor": null,
+            "product": null,
+            "publishedAt": "2026-11-16T12:39:19.000Z",
+            "opportunityScore": 86.1
+          }
+        ],
+        "sources": [
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/16/gulldsp-phathom/",
+            "title": "GullDSP Phathom is a FREE bass preamp and distortion plugin for Windows"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/16/dyal-solo-kalimba/",
+            "title": "In Session Audio offers Dyad: Solo Kalimba FREE for Kontakt Player"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/16/soundtrap-arturia-partnership/",
+            "title": "Soundtrap adds VST instrument support and partners with Arturia"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/16/audiomodern-filterstep-2/",
+            "title": "Audiomodern updates FREE Filterstep 2 with new effects and sequencing modes"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/16/tone-empire-optored-black-friday/",
+            "title": "Tone Empire offers OptoRED optical compressor FREE this Black Friday"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/15/riverflux-audio-rf-bus-free/",
+            "title": "RiverFlux Audio adds RF-BUS FREE bus compressor to the Relic bundle"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/15/algoriffix-pitch-perfekt-v2/",
+            "title": "Algoriffix Pitch Perfekt v2 adds vocal transformation and four-part harmony"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/15/xfer-records-shrub/",
+            "title": "Xfer Records releases Shrub, a FREE Serum-based synthesizer for macOS, Windows, and Linux"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/13/audio-plugin-deals-black-friday/",
+            "title": "Audio Plugin Deals offers 17 plugins and sound packs in a FREE Black Friday Mega Bundle"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/13/stereoghost-releases-phasekicker-an-automatic-kick-bass-phase-alignment-plugin/",
+            "title": "StereoGhost releases PhaseKicker, an automatic kick-bass phase alignment plugin"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/13/six-cheap-plugin-boutique-deals/",
+            "title": "Six cheap Plugin Boutique deals starting at $5, plus a FREE gift"
+          },
+          {
+            "url": "https://bedroomproducersblog.com/2026/11/13/dztl8-merg/",
+            "title": "DZTL8 releases Merg, a FREE stereo-to-mono plugin for macOS and Windows"
+          },
+          {
+            "url": "https://rekkerd.org/fabfilter-black-friday-sale-plugins-bundles/",
+            "title": "FabFilter Black Friday Sale: Save 25% on plugins &#038; bundles"
+          },
+          {
+            "url": "https://rekkerd.org/pointblank-plugin-boutique-launch-basic-audio-programming-tutorial-course/",
+            "title": "Save 50% on Basic Audio Programming tutorial course by Pointblank"
+          },
+          {
+            "url": "https://rekkerd.org/muze-everything-kontakt-instrument-library-bundle-sale/",
+            "title": "Muze Everything Bundle: 47 Kontakt libraries for $39.95 USD"
+          },
+          {
+            "url": "https://rekkerd.org/initial-audio-updates-difro-melody-generator-to-v2-5-incl-vst3-au/",
+            "title": "Initial Audio updates Difro melody generator to v2.5 incl. VST3/AU"
+          },
+          {
+            "url": "https://rekkerd.org/soundghost-releases-fragment-cycling-audio-fragmenter-plugin/",
+            "title": "SoundGhost releases Fragment cycling audio fragmenter plugin"
+          },
+          {
+            "url": "https://rekkerd.org/free-filterstep-2-creative-motion-filter-by-audiomodern/",
+            "title": "FREE: Filterstep 2 creative motion filter by Audiomodern"
+          },
+          {
+            "url": "https://rekkerd.org/bandlab-pro-plan-on-sale/",
+            "title": "Black Friday Sale: Get 60% OFF BandLab Pro plan + Exclusive deal"
+          },
+          {
+            "url": "https://rekkerd.org/ultimate-patches-releases-u-he-diva-ultimate-patches-volumes-12/",
+            "title": "Ultimate Patches releases U-he Diva Ultimate Patches — Volumes 1+2"
+          }
+        ]
+      },
       "experiment": null,
       "completedExperiments": [],
       "humanFeedback": [
@@ -59,6 +272,74 @@
           "open": false
         },
         "publish": {
+          "failures": 0,
+          "lastSuccess": "2026-11-16T11:18:37.520Z",
+          "openUntil": null,
+          "lastError": null,
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "failures": 0,
+          "lastSuccess": "2026-11-16T13:47:09.226Z",
+          "openUntil": null,
+          "lastError": null,
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 1,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": [
+        {
+          "at": "2026-11-15T00:13:59.592Z",
+          "schemaVersion": 1,
+          "account": "music-tools-x",
+          "stage": "autopilot-error",
+          "slotId": "music-tools-x:manual:2026-11-15T00:11",
+          "code": null,
+          "error": "AI response was not valid JSON.",
+          "qa": null,
+          "dryRun": true
+        }
+      ]
+    },
+    "plugin-radar-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
           "open": false
         },
         "analytics": {
@@ -85,7 +366,200 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "artist-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "artist-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "brand-c-x": {
+      "platform": "x",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
+      },
+      "recentErrors": []
+    },
+    "brand-c-instagram": {
+      "platform": "instagram",
+      "enabled": false,
+      "mode": "pause",
+      "postCount": 0,
+      "lastPost": null,
+      "bestRecent": null,
+      "strategy": null,
+      "trends": null,
+      "experiment": null,
+      "completedExperiments": [],
+      "humanFeedback": [],
+      "circuits": {
+        "autopilot": {
+          "open": false
+        },
+        "publish": {
+          "open": false
+        },
+        "analytics": {
+          "open": false
+        },
+        "research": {
+          "open": false
+        }
+      },
+      "anomalyBrake": {
+        "open": false
+      },
+      "recentMediaQa": [],
+      "usageToday": {
+        "openai": 0,
+        "webSearch": 0,
+        "media": 0,
+        "image": 0,
+        "video": 0
+      },
+      "budgets": {
+        "enabled": true,
+        "openaiCallsPerDay": 300,
+        "webSearchCallsPerDay": 60,
+        "mediaCallsPerDay": 60,
+        "imageGenerationsPerDay": 10,
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     },
@@ -138,7 +612,8 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     },
@@ -191,7 +666,8 @@
         "webSearchCallsPerDay": 60,
         "mediaCallsPerDay": 60,
         "imageGenerationsPerDay": 10,
-        "videoGenerationsPerDay": 4
+        "videoGenerationsPerDay": 4,
+        "groqCallsPerDay": 300
       },
       "recentErrors": []
     }

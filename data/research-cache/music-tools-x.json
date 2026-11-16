@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "entries": {
+    "36f1277be9c6a0c6cf0b05d524681e494414bd25f1e81f173c4ce81a3f4a38c7": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 0,
+        "topic": "GullDSP Phathom：無料オープンソースのベース用プリアンプ／ディストーション",
+        "whyNow": "無料で、モダンなファジー・グロウル・クランチ系ベース音色に特化している。",
+        "angle": "定番のベース歪みとどう違うか、Windowsユーザー向けの無料候補として紹介。",
+        "relevance": 93,
+        "novelty": 84,
+        "usefulness": 86,
+        "priceValue": 98,
+        "newsworthiness": 78,
+        "japanNovelty": 89,
+        "audienceFit": 92,
+        "confidence": 88,
+        "risk": 12
+      }
+    },
+    "992f1cdb366e1fb0250123d40efb3d2aee566288d7a8445e14971c4378decdba": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 1,
+        "topic": "In Session Audio Dyad: Solo Kalimba：Kontakt Player向け無料カリンバ音源",
+        "whyNow": "11月25日までの期間限定無料配布で、無料Kontakt Playerに対応している。",
+        "angle": "パターン演奏型のカリンバ音源として、通常のサンプル音源と用途を比較。",
+        "relevance": 82,
+        "novelty": 75,
+        "usefulness": 76,
+        "priceValue": 96,
+        "newsworthiness": 78,
+        "japanNovelty": 82,
+        "audienceFit": 80,
+        "confidence": 90,
+        "risk": 14
+      }
+    },
+    "bffeaad86e1e98c8940574d50ac2e529b8d14cd977df1c0ac3f518459c6dd152": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 2,
+        "topic": "Soundtrap：VSTインストゥルメント対応とArturia提携",
+        "whyNow": "クラウド型制作環境にVSTインストゥルメント対応が追加され、PigmentsとEfx MOTIONSが30日間利用可能。",
+        "angle": "ブラウザ／クラウドDAWにVSTを持ち込める意味と、既存DTM環境との使い分け。",
+        "relevance": 84,
+        "novelty": 82,
+        "usefulness": 79,
+        "priceValue": 78,
+        "newsworthiness": 88,
+        "japanNovelty": 83,
+        "audienceFit": 78,
+        "confidence": 87,
+        "risk": 18
+      }
+    },
+    "7c2af6c8a831060b77596e8c37510487fde1cc328a23b452e7ca5e0dff1a8698": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 3,
+        "topic": "Audiomodern Filterstep 2：無料リズミック・フィルターの大型アップデート",
+        "whyNow": "無料プラグインにシーケンス機能と5つの追加エフェクトエンジンが加わった。",
+        "angle": "パッドやドローンを動かす無料候補として、初代所有者が更新する価値を整理。",
+        "relevance": 95,
+        "novelty": 83,
+        "usefulness": 90,
+        "priceValue": 99,
+        "newsworthiness": 88,
+        "japanNovelty": 84,
+        "audienceFit": 94,
+        "confidence": 93,
+        "risk": 10
+      }
+    },
+    "fb0a2b017039d0bcc22e9a3b0e091b1a524409ef79fc2346c8829c7b8e8acb04": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 4,
+        "topic": "Tone Empire OptoRED：無料配布中のオプティカル・コンプレッサー",
+        "whyNow": "通常価格79ドルのプラグインが、クーポンコードで無料。終了日は未確認。",
+        "angle": "無料化の手順と、ボーカル・ベース・バス用途で試す価値を紹介。ただし終了条件を要確認。",
+        "relevance": 94,
+        "novelty": 72,
+        "usefulness": 87,
+        "priceValue": 99,
+        "newsworthiness": 93,
+        "japanNovelty": 79,
+        "audienceFit": 94,
+        "confidence": 89,
+        "risk": 28
+      }
+    },
+    "edd259617430f33b23d524aa4a5d4bb76c9b76176482dc12fdb3f16c138451af": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 5,
+        "topic": "RiverFlux Audio RF-BUS：Relicバンドルに追加された無料バスコンプレッサー",
+        "whyNow": "Relic 0.4.7で無料のステレオ・バスコンプレッサーが追加され、対応OSも広い。",
+        "angle": "既存のRelicバンドル所有者向けアップデート情報として、無料追加の実用性を確認。",
+        "relevance": 87,
+        "novelty": 79,
+        "usefulness": 82,
+        "priceValue": 96,
+        "newsworthiness": 78,
+        "japanNovelty": 88,
+        "audienceFit": 85,
+        "confidence": 86,
+        "risk": 13
+      }
+    },
+    "49de3fd412d10b9fe1f681274f9493110c3a8e009b96649afbac7aad39e7e811": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 6,
+        "topic": "Algoriffix Pitch Perfekt v2：ボーカル変換と4声ハーモニー対応",
+        "whyNow": "ボーカルからMIDIを生成するツールに、ボーカル変換と4声アレンジ機能が追加された。",
+        "angle": "歌メロのMIDI化からハーモニー生成まで、AI／音声処理ワークフローでの用途を紹介。",
+        "relevance": 91,
+        "novelty": 91,
+        "usefulness": 85,
+        "priceValue": 55,
+        "newsworthiness": 87,
+        "japanNovelty": 91,
+        "audienceFit": 89,
+        "confidence": 88,
+        "risk": 25
+      }
+    },
+    "55348b9c68b194ec20e0112113176c7a18c44c850b3907a28873f9d5d16adadc": {
+      "firstSeenAt": "2026-11-16T13:47:09.223Z",
+      "lastSeenAt": "2026-11-16T13:47:09.223Z",
+      "evaluatedAt": "2026-11-16T13:47:09.223Z",
+      "evaluation": {
+        "index": 7,
+        "topic": "Xfer Records Shrub：Serumベースの無料ウェーブテーブル・シンセ",
+        "whyNow": "macOS・Windows・Linux対応のベータ版無料シンセとして登場した。"
+      }
+    }
+  }
+}
