@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44007073529",
+  "status": "published",
+  "createdAt": "2026-11-17T03:00:48.802Z",
+  "updatedAt": "2026-11-17T03:00:50.244Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "ベースの歪みを「ファズ」か「ザラついたクランチ」かで選べる、GullDSPの無料プラグインPhathom。歪ませる前に低域・高域を調整できるのが特徴です。Windows専用なので、Macユーザーは対象外。定番のベース歪みで困っていなければ、無理に足す必要はありません。",
+  "textHash": "a2209e4316aa857e07ce",
+  "mediaUrl": "https://i.ytimg.com/vi/S1kcLkOGD1U/maxresdefault.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2122525338345299969",
+  "publishedAt": "2026-11-17T03:00:50.243Z"
+}

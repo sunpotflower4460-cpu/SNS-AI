@@ -1,11 +1,10 @@
 {
   "circuits": {
     "music-tools-x:publish": {
-      "failures": 4,
-      "lastFailure": "2026-11-17T01:58:03.187Z",
-      "lastSuccess": "2026-11-16T11:18:37.520Z",
-      "lastError": "Could not download media (403).",
-      "openUntil": "2026-11-17T02:58:03.187Z"
+      "failures": 0,
+      "lastSuccess": "2026-11-17T03:00:50.247Z",
+      "openUntil": null,
+      "lastError": null
     },
     "music-tools-x:research": {
       "failures": 0,
