@@ -1,0 +1,21 @@
+{
+  "slotId": "music-tools-x:workflow:43990816455",
+  "status": "failed",
+  "createdAt": "2026-11-17T00:50:18.162Z",
+  "updatedAt": "2026-11-17T00:50:18.366Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "カリンバの演奏パターンを手早く作りたい人へ。Dyad: Solo Kalimbaは左右の親指を模したパターン機能付きKontakt音源。11月25日まで無料。Kontakt Playerを使わない人は見送りでOK。",
+  "textHash": "eb9502a0e3ecbbfa244d",
+  "mediaUrl": "https://insessionaudio.com/wp-content/uploads/2026/11/DyadSoloKalimba-UI-2-Patterns.avif",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "errorStatus": null,
+  "publishStage": "media",
+  "lastError": "Could not download media (403)."
+}
