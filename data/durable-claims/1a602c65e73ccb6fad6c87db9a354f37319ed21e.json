@@ -1,0 +1,21 @@
+{
+  "slotId": "music-tools-x:workflow:43999438337",
+  "status": "failed",
+  "createdAt": "2026-11-17T01:58:02.968Z",
+  "updatedAt": "2026-11-17T01:58:03.186Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "フィルターを動かすだけでなく、5つのFXもシーケンスに結びつけられるFilterstep 2。パッドやドローンにリズムを足したい人向け。普通のオートフィルターで足りるなら急がなくてOK。",
+  "textHash": "3cbf8932213ffe14e535",
+  "mediaUrl": "https://audiomodern.com/wp-content/uploads/2026/11/Filterstep_2_Products_Page_1000.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "errorStatus": null,
+  "publishStage": "media",
+  "lastError": "Could not download media (403)."
+}
