@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44081397054",
+  "status": "published",
+  "createdAt": "2026-11-17T12:15:25.711Z",
+  "updatedAt": "2026-11-17T12:15:27.412Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "Soundtrapのデスクトップ版で、手持ちのVST3音源を読み込めるように。ブラウザ中心の共同制作は続けつつ、外部シンセも使いたい人には選択肢が広がります。対象プランとデスクトップアプリが必要なので、既存DAWで完結する人は急がなくてよさそう。",
+  "textHash": "02d3e8f871f0537e556b",
+  "mediaUrl": "https://support.soundtrap.com/hc/article_attachments/40798474318482",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2122664912665108811",
+  "publishedAt": "2026-11-17T12:15:27.412Z"
+}
