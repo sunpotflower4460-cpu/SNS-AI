@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44209652495",
+  "status": "published",
+  "createdAt": "2026-11-18T00:40:00.469Z",
+  "updatedAt": "2026-11-18T00:40:02.308Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "鍵盤で打ち込む代わりに、歌った旋律をMIDIにする。Algoriffix Pitch Perfekt 2.0は、ボーカルからリアルタイムで音符を拾うツール。新バージョンでは歌声の変換や4声ハーモニーも追加。鼻歌を編曲の入口にしたい人向けで、鍵盤入力が速い人には急ぎの導入ではなさそう。",
+  "textHash": "105baa29e34fc50909cc",
+  "mediaUrl": "https://www.algoriffix.com/assets/pitch_perfekt-DEimQhGU.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2122852292437131359",
+  "publishedAt": "2026-11-18T00:40:02.307Z"
+}
