@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44516414961",
+  "status": "published",
+  "createdAt": "2026-11-19T11:37:14.061Z",
+  "updatedAt": "2026-11-19T11:37:15.042Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "サンプルのドラムに、音ごとの揺れも加えたい人へ。無料のDrumlabooh 14は、サンプラーに加えてドラム音を数式から作るエンジンを搭載。フィルターと新しいLiveノブで、単発音に変化をつけられます。Linux／Windows向け。",
+  "textHash": "fa1617a648a15dfc141f",
+  "mediaUrl": "https://psemiletov.github.io/drumlabooh/v14-small.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2123380074313625698",
+  "publishedAt": "2026-11-19T11:37:15.041Z"
+}
