@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44433371377",
+  "status": "published",
+  "createdAt": "2026-11-19T00:59:27.321Z",
+  "updatedAt": "2026-11-19T00:59:28.562Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "キックが鳴るたび、ベースとの位相を調整するPhaseKicker。ベースに挿し、キックをサイドチェインへ送る設計です。低域の調整を自動化したい人向け。ただし処理遅延が大きく、録音やライブ用途には向きません。",
+  "textHash": "44de9ca68bc7aacbcd86",
+  "mediaUrl": "https://cdn.rekkerd.org/wp-content/uploads/2026/11/StereoGhost-PhaseKicker.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2123219572534776316",
+  "publishedAt": "2026-11-19T00:59:28.561Z"
+}
