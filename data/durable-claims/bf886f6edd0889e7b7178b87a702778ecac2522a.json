@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44649060819",
+  "status": "published",
+  "createdAt": "2026-11-20T00:50:53.146Z",
+  "updatedAt": "2026-11-20T00:50:54.734Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "プラグインの「アナログらしい」を数字でも確かめたい人へ。無料のTHE_LABは、VST3やAUを単体で測定し、周波数特性・歪み・遅延などを比較。音の良し悪しを決める道具ではなく、挙動を自分で調べたい人向け。",
+  "textHash": "b6c6316ef0fbb89dc61f",
+  "mediaUrl": "https://www.philspeiser.com/images/productpages/the_lab_frequency.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2123579805056541077",
+  "publishedAt": "2026-11-20T00:50:54.733Z"
+}
