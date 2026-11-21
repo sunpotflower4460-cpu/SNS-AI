@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44900538514",
+  "status": "published",
+  "createdAt": "2026-11-21T11:44:47.369Z",
+  "updatedAt": "2026-11-21T11:44:49.591Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "シンセの音に、別の演奏の抑揚を移す。2B Played MusicのAttributeは、参照音からリズム・強弱・明るさ・ステレオの動きを読み取り、別の音へ反映するプラグイン。音色そのものを置き換えず、動きを加えたい人向け。一般的なモジュレーションで足りるなら見送りでも。",
+  "textHash": "14f14933b355107630a1",
+  "mediaUrl": "https://2bplayed.com/wp-content/uploads/2026/11/Attribute-2B-Played-Music.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2124106755873308913",
+  "publishedAt": "2026-11-21T11:44:49.590Z"
+}
