@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44846586940",
+  "status": "published",
+  "createdAt": "2026-11-21T00:51:59.269Z",
+  "updatedAt": "2026-11-21T00:52:00.931Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "録音中の一瞬を、動き続ける素材に変えたい人へ。SoundGhost Fragmentは音声を一時保持し、最大4つの断片を別々の速さ・音程・位置で循環。サンプルも読み込めます。ループ素材を細かく組み替えたい人向け。単純な録音保存だけなら、別の道具で足りるかも。",
+  "textHash": "8ecb15f73a23044d0ea6",
+  "mediaUrl": "https://soundghost.net/wp-content/uploads/2026/08/Fragment_SQ_1.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2123942471197749306",
+  "publishedAt": "2026-11-21T00:52:00.930Z"
+}
