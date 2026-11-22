@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45018334777",
+  "status": "published",
+  "createdAt": "2026-11-22T11:38:56.042Z",
+  "updatedAt": "2026-11-22T11:38:57.743Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "決まったドラムループではなく、鳴るたびに変化するパーカッションを探す人へ。Envoyは600種のアナログ音源を再構成しながら鳴らすKontakt音源。リズムの揺れを作りたい人向けです。自分のサンプルは読み込めないので、手持ち素材を使いたい人は見送りでも。",
+  "textHash": "5c55aab1ed9bb176c4aa",
+  "mediaUrl": "https://emergenceaudio.com/wp-content/uploads/2026/07/1x1-cover-copy-scaled.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2124467667490968002",
+  "publishedAt": "2026-11-22T11:38:57.742Z"
+}
