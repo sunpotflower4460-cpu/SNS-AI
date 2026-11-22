@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:44966223084",
+  "status": "published",
+  "createdAt": "2026-11-22T00:21:43.913Z",
+  "updatedAt": "2026-11-22T00:21:44.947Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "録った生ドラムのノリを残して、音だけ差し替えたい人へ。Prism: Drumsは演奏を9種類のドラム音に分け、タイミングや強弱をMIDI化。別キットで試したい人向けです。アコースティック録音向けなので、電子ドラム中心なら試用で確認を。",
+  "textHash": "6e9bd27bf60c0700fd86",
+  "mediaUrl": "https://aurallysound.com/cdn/shop/files/Screenshot_1.png?v=1791570525&width=1200",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2124297241993289987",
+  "publishedAt": "2026-11-22T00:21:44.946Z"
+}
