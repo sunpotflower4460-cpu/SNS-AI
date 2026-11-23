@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45088192630",
+  "status": "published",
+  "createdAt": "2026-11-23T00:20:40.538Z",
+  "updatedAt": "2026-11-23T00:20:41.736Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "サンプルを並べるのでなく、弓や指の動きからバイオリン音を生成するBovo Violin。無料の物理モデリング音源です。旋律の強弱やビブラートまでMIDIで調整したい人に。オーケストラ全体の音源を探している人向けではありません。",
+  "textHash": "d789fb8fd4deb52c8c0c",
+  "mediaUrl": "https://bovo.ai/images/generated/violin/bovo-violin-release-1179.webp",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2124659364946755814",
+  "publishedAt": "2026-11-23T00:20:41.735Z"
+}
