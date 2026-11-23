@@ -14,12 +14,11 @@
       }
     },
     "music-tools-x::dry-run-preview": {
-      "localDate": "2026-11-22",
+      "localDate": "2026-11-23",
       "counts": {
-        "openai": 14,
-        "webSearch": 10
+        "openai": 1
       }
     }
   },
-  "updatedAt": "2026-11-22T11:31:02.066Z"
+  "updatedAt": "2026-11-23T00:11:21.441Z"
 }
