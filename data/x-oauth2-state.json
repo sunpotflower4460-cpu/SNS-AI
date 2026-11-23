@@ -3,11 +3,11 @@
   "accounts": {
     "music-tools-x": {
       "alg": "A256GCM",
-      "iv": "O2szml0Y+kinYapK",
-      "tag": "+uAHyr6usiV2OkrxWxTzsw==",
-      "ciphertext": "0ZC2smnnjth5nDOqyKh5xE+ib2pq43zrxHmKWo1cgto8FNYcH36wGywKMfRvjbA6e2olepC8g7n1Xk2NQ1b3Q55BWyU/2G2WsQwplI0NDMmEomeUi/TFGfqNhhJRJq6vWqieOOu0wjxVqkBTPf1usFKISZF9NKu5ATgp61Ox35jFD0Z4eeVaXWh5buv9/bJHfxYVgzPdUr9yh7Ew0HdZNkV2i+EXRHf9k5GdUsigNcd1OqJsgyQBCAKY952Zp5M9EgHwrj4pv60o8UC/MtpkSH/TEzkHjZO45B3salNsEdcqLhjqYz1tXc3vWuwNlFFhnlfp067wjiavQ2xQloWRxN6qy3GcF7CqNQ4MJMUvEwcS0DylLEXjDF3KVyZwOBSldsJP5XqwhI42LsqYN4EmJLz2BLafcczUSCnJEOvN74cuJ8qKeqF492fypp1fWYP5kR4=",
-      "updatedAt": "2026-11-23T00:20:41.010Z"
+      "iv": "WgQQsB+46vGAowla",
+      "tag": "lQT5XG1dNhCjfTkNY49Flg==",
+      "ciphertext": "oReWo+RdnYHFB30w5e5q0OIN9YRKDeAnwdH0fwegPJratRX8o287r7nslPfyrAlCOjTJIWWkCoCYaqo6MtxyuOVYuqn9e+e8imXto6RINublHpX0hZUs2tWLkg02fivr0KOQNBTtVcmGGH+q4rjjkHL8VuNg/HKFJbwfrLZg+ustd8ERYOLO/l24Ldbz/XclvF89fv1FwyN4+hfOwhb+9H6GU5OkUQ3a8xFQLsmgLCTVOkQ6xect5YH1uQZJjyr96TiG651ESBu+Hu/7IgC2iIA0UOAcBPaBMsfYB79dY2DLIPB+BWm4lPijuteWflgT9AqQIvZZJ16V7cCCCF9lRmIaYR0cQi9oDm3Hlyk78RbakfQ7ruQOuFrM/QfoXCuCh2zR8LEIEc4FE9LPGqQQUMpnAg62rV/AnVa5jiAfV8XVGrij2DAnt46sxkcEijlSY7w=",
+      "updatedAt": "2026-11-23T11:24:53.547Z"
     }
   },
-  "updatedAt": "2026-11-23T00:20:41.010Z"
+  "updatedAt": "2026-11-23T11:24:53.547Z"
 }

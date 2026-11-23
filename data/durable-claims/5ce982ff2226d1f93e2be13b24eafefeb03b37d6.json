@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45164946424",
+  "status": "published",
+  "createdAt": "2026-11-23T11:24:52.569Z",
+  "updatedAt": "2026-11-23T11:24:54.233Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "ステレオ素材を、別アプリに書き出さずモノ化する無料ツール「Merg」。左右の比率や極性、時間差も調整できます。キックやベースの低域整理に便利。単純なモノ化だけならDAW標準機能で足りる人も。",
+  "textHash": "a0994a990520220f518d",
+  "mediaUrl": "https://dztl8.com/images/merg/merge-blend-2.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2124826518551511548",
+  "publishedAt": "2026-11-23T11:24:54.232Z"
+}
