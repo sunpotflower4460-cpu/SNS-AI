@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45383078940",
+  "status": "published",
+  "createdAt": "2026-11-24T11:19:22.608Z",
+  "updatedAt": "2026-11-24T11:19:23.810Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "EQのカットを、曲のコードやキックに追従させる。無料のAURORA 1.7は、音程や音源を基準に動くEQバンドを作れます。固定の周波数で十分なら、急いで追加しなくても。",
+  "textHash": "bbc758e5795a667eb11e",
+  "mediaUrl": "https://13x.audio/shots/aurora-1.5-og.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2125187520094720234",
+  "publishedAt": "2026-11-24T11:19:23.808Z"
+}
