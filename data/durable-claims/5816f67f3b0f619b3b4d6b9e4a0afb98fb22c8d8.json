@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45302231663",
+  "status": "published",
+  "createdAt": "2026-11-24T01:04:45.561Z",
+  "updatedAt": "2026-11-24T01:04:46.818Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "音を左右だけでなく、前後・上下へ置いて動かす無料プラグイン「8DM8」。軌道を描いてDAWの拍に同期でき、ヘッドホン向けの空間演出に。普通のステレオミックスを作るだけなら、急いで足さなくてもよさそう。",
+  "textHash": "b35a84f3a38e157e428a",
+  "mediaUrl": "https://leitaudio.com/img/8dm8.webp",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2125032847085867466",
+  "publishedAt": "2026-11-24T01:04:46.817Z"
+}
