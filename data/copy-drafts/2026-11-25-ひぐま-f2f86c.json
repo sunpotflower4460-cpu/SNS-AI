@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "generated_at": "2026-11-25T05:25:11.379Z",
+    "model": "gpt-6-luna",
+    "prompt_version": "copy-drafts-2026-11-v1",
+    "brief": {
+      "character": "ひぐま",
+      "scene": "ひぐまが頭の炎をたいまつとしておじいさんに渡すと、おじいさんは聖火リレーのように走り去り、ひぐまが置いていかれる",
+      "media": "video",
+      "platforms": [
+        "instagram",
+        "threads",
+        "youtube",
+        "tiktok",
+        "x"
+      ]
+    }
+  },
+  "variants": [
+    {
+      "id": 1,
+      "angle": "置いていかれるオチ",
+      "caption_jp": "頭の炎をたいまつとして渡したひぐま。聖火リレーのように走り去るおじいさん、残されたひぐま。",
+      "caption_en": "Higuma hands over the flame on his head as a torch. The old man runs off like he’s in a torch relay, leaving Higuma behind.",
+      "youtube_title_jp": "たいまつを渡したひぐま、置いていかれる",
+      "youtube_title_en": "Higuma Hands Over the Torch—and Gets Left Behind",
+      "x_text": "頭の炎をたいまつとして渡したひぐま。おじいさんは走り去り、ひぐまは置いてきぼり。 #ひぐま #オリジナルキャラクター",
+      "hashtags": [
+        "#オリジナルキャラクター",
+        "#ひぐま",
+        "#たいまつ",
+        "#聖火リレー"
+      ]
+    },
+    {
+      "id": 2,
+      "angle": "手渡しの一瞬",
+      "caption_jp": "ひぐまの頭の炎が、おじいさんのたいまつに。聖火リレーさながらの走り出しと、ひぐまの取り残され感。",
+      "caption_en": "The flame on Higuma’s head becomes the old man’s torch. He sets off like a torch relay runner, while Higuma is left behind.",
+      "youtube_title_jp": "ひぐまの頭の炎がおじいさんのたいまつに",
+      "youtube_title_en": "Higuma’s Head Flame Becomes the Old Man’s Torch",
+      "x_text": "ひぐまからおじいさんへ、頭の炎をたいまつとしてバトンタッチ。走り出すおじいさんと、残るひぐま。 #ひぐま #オリジナルキャラクター",
+      "hashtags": [
+        "#オリジナルキャラクター",
+        "#ひぐま",
+        "#炎",
+        "#たいまつ"
+      ]
+    },
+    {
+      "id": 3,
+      "angle": "走り出すおじいさん視点",
+      "caption_jp": "たいまつを手に、聖火リレーのように走り去るおじいさん。頭の炎を渡したひぐまは、その場に残されたまま。",
+      "caption_en": "With the torch in hand, the old man runs off like a torch relay runner. Higuma, who handed over the flame on his head, is left behind.",
+      "youtube_title_jp": "たいまつを手に走り去るおじいさん",
+      "youtube_title_en": "The Old Man Runs Off With the Torch",
+      "x_text": "たいまつを受け取ったおじいさんは、聖火リレーのように走り去る。頭の炎を渡したひぐまはその場に。 #オリジナルキャラクター #ひぐま",
+      "hashtags": [
+        "#オリジナルキャラクター",
+        "#ひぐま",
+        "#おじいさん",
+        "#聖火リレー"
+      ]
+    },
+    {
+      "id": 4,
+      "angle": "静かな余韻",
+      "caption_jp": "頭の炎をたいまつとして渡したあと。遠ざかるおじいさんと、置いていかれたひぐま。",
+      "caption_en": "After handing over the flame on his head as a torch: the old man running off, and Higuma left behind.",
+      "youtube_title_jp": "炎を渡したあとに残るひぐま",
+      "youtube_title_en": "Higuma, Left Behind After Passing On the Flame",
+      "x_text": "頭の炎を渡したあと、走り去るおじいさんと残されたひぐま。短い聖火リレーの一幕。 #ひぐま #オリジナルキャラクター",
+      "hashtags": [
+        "#オリジナルキャラクター",
+        "#ひぐま",
+        "#炎",
+        "#ショート動画"
+      ]
+    }
+  ]
+}
