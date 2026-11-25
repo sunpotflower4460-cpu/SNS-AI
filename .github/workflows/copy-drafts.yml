@@ -1,0 +1,94 @@
+name: SNS Copy Drafts
+
+# Generation-only step. One brief -> one OpenAI call -> data/copy-drafts/<date>-<slug>.json.
+# It NEVER posts or publishes anything (no X / Instagram / YouTube / TikTok / Threads API is called or
+# configured here); the operator reads the drafts, picks and edits one, and posts manually.
+# Manual-only: workflow_dispatch is the single trigger. See docs/COPY_DRAFTS.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      brief:
+        description: 'Brief JSON, e.g. {"character":"ひぐま","scene":"...","media":"video","platforms":["instagram","x"]}. Leave empty to use brief_file.'
+        required: false
+        type: string
+      brief_file:
+        description: Repo-relative path to a brief JSON file (used when brief is empty)
+        required: false
+        type: string
+      hard:
+        description: Use gpt-6.1-sol instead of gpt-6-luna (only for briefs that are genuinely hard)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sns-ai-write
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SNS_DURABLE_BUDGETS: 'true'
+      SNS_DURABLE_STATE_BRANCH: sns-ai-state
+      BRIEF_JSON: ${{ inputs.brief }}
+      BRIEF_FILE: ${{ inputs.brief_file }}
+      HARD: ${{ inputs.hard }}
+    steps:
+      - name: Authorize command actor
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+          EXTRA_ADMINS: ${{ vars.SNS_COMMAND_ADMINS }}
+        shell: bash
+        run: |
+          normalized=",$(printf '%s' "${EXTRA_ADMINS:-}" | tr -d ' '),"
+          if [[ "$ACTOR" != "$OWNER" && "$normalized" != *",$ACTOR,"* ]]; then
+            echo "::error::Actor '$ACTOR' is not authorized to run SNS Copy Drafts."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Runtime static guards
+        run: |
+          npm run validate
+          npm run check
+          npm run secret-scan
+          npm run manual-only-audit
+      - name: Generate copy drafts
+        id: copy_run
+        shell: bash
+        run: |
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            echo "::error::OPENAI_API_KEY is not configured; cannot generate copy drafts."
+            exit 1
+          fi
+          # The brief is passed through the environment (BRIEF_JSON / BRIEF_FILE), never interpolated
+          # into the shell command line.
+          node src/copy-drafts/run.mjs
+      - name: Persist drafts
+        if: steps.copy_run.outcome == 'success'
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- data/copy-drafts/)" ]]; then exit 0; fi
+          git config user.name "sns-ai-bot"
+          git config user.email "sns-ai-bot@users.noreply.github.com"
+          git add data/copy-drafts/
+          git commit -m "chore: add SNS copy drafts"
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((attempt * 3))
+          done
+          exit 1

@@ -22,6 +22,7 @@ on:
       - SNS Human Feedback
       - SNS Live Preflight
       - SNS Maintenance
+      - SNS Copy Drafts
       - SNS-AI CI
     types: [completed]
 

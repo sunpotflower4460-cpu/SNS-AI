@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "note": "Copy-draft generation step (docs/COPY_DRAFTS.md). Generation + file save only: this step never calls any publish API. Models follow the repository policy: gpt-6-luna by default, gpt-6.1-sol only for explicitly hard briefs. gpt-6-astra and gpt-5.6 family are never allowed.",
+  "promptVersion": "copy-drafts-2026-11-v1",
+  "accountId": "copy-drafts",
+  "models": {
+    "standard": "gpt-6-luna",
+    "hard": "gpt-6.1-sol",
+    "allowed": ["gpt-6-luna", "gpt-6.1-sol"]
+  },
+  "budgets": {
+    "enabled": true,
+    "openaiCallsPerDay": 3
+  },
+  "generation": {
+    "minVariants": 3,
+    "maxVariants": 5,
+    "maxOutputTokens": 6000
+  }
+}
