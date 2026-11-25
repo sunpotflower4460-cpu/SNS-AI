@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45604928272",
+  "status": "published",
+  "createdAt": "2026-11-25T11:29:51.751Z",
+  "updatedAt": "2026-11-25T11:29:53.299Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "1985年のハイブリッドシンセを、現代の制作環境へ。Cherry Audio「DW-8K」はKorg DW-8000を再構築し、2レイヤーやMPEにも対応。あの時代のデジタル波形が欲しい人向け。すでに似た音源が揃っているなら、まずデモで違いを確認したい。",
+  "textHash": "51743b34d745d4df7f02",
+  "mediaUrl": "https://cherryaudio.com/img/asset/YXNzZXRzL3Byb2R1Y3RzL25hdi9kdy04ay1pbWctbmF2LmpwZw/dw-8k-img-nav.jpg?p=seo_pro_og&s=bb05fd620c996e535ee7b6cc88670457",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2125552548501209337",
+  "publishedAt": "2026-11-25T11:29:53.298Z"
+}
