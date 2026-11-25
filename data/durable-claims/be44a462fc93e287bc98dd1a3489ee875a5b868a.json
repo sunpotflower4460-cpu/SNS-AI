@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45518698099",
+  "status": "published",
+  "createdAt": "2026-11-25T00:31:25.230Z",
+  "updatedAt": "2026-11-25T00:31:26.285Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "「OTT系の圧縮を、まず無料で試したい」人にMinimal AudioのSquash。音を押しつぶすような強い圧縮を手早く加えるツールです。細かなダイナミクス調整や自然な整音が目的なら、手持ちのコンプで足りるかも。",
+  "textHash": "a3f95f2746b37de197a8",
+  "mediaUrl": "https://www.minimal.audio/vite/assets/squash-DBIlf-3l.webp",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2125386844099481741",
+  "publishedAt": "2026-11-25T00:31:26.284Z"
+}
