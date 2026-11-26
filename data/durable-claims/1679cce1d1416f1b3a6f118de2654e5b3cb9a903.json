@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45809184862",
+  "status": "published",
+  "createdAt": "2026-11-26T11:17:20.051Z",
+  "updatedAt": "2026-11-26T11:17:21.848Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "録音素材を、サンプル再生ではなく「弾ける音源」にしたい人へ。Krate AudioのInnexusは音声を最大96の倍音に分解し、演奏できる音色として再合成。素材の質感を鍵盤で展開する発想が面白い。普通のサンプラーで足りるなら見送りでも。",
+  "textHash": "a0521b8e4ecbebbca61e",
+  "mediaUrl": "https://krateaudio.com/innexus/images/hero.png",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2125911783424864559",
+  "publishedAt": "2026-11-26T11:17:21.847Z"
+}
