@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45917445566",
+  "status": "published",
+  "createdAt": "2026-11-27T00:34:02.185Z",
+  "updatedAt": "2026-11-27T00:34:03.348Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "カメラの前で手を動かして、左右別々の音を演奏する。Suzan Studioは物理モデリングや微分音階も備えたブラウザ音源です。DAW用シンセの置き換えというより、思いつきを試すスケッチ場として面白い。",
+  "textHash": "4dde16465be09fd958c7",
+  "mediaUrl": "https://suzanstudio.com/audio-showcase/unit_06_gesture.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2126112278739296555",
+  "publishedAt": "2026-11-27T00:34:03.347Z"
+}
