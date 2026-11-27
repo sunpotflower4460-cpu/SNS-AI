@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:45990275445",
+  "status": "published",
+  "createdAt": "2026-11-27T11:25:04.097Z",
+  "updatedAt": "2026-11-27T11:25:05.073Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "リバーブの尾が、鳴っている間に少しずつ変化する。LeseのHermanは、残響のフィードバック内でエフェクトを繰り返す設計。定番の部屋鳴りより、動く残響や音作りを試したい人向け。自然な空間再現だけなら、手持ちで足りるかも。",
+  "textHash": "f0ac5e3536a68f3311a2",
+  "mediaUrl": "https://lese.io/wp-content/uploads/edd/2026/11/herman_thumb.jpg",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2126276115492671496",
+  "publishedAt": "2026-11-27T11:25:05.072Z"
+}
