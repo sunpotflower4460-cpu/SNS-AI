@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:46140241996",
+  "status": "published",
+  "createdAt": "2026-11-28T11:31:10.110Z",
+  "updatedAt": "2026-11-28T11:31:11.225Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "ループ素材を切り刻んで、別のフレーズに組み替える。Lunacy AudioとVirtual RiotのSuperslicerは、スライスを並べ替え、ワンクリックで再シーケンスできる音源。サンプルを弾ける形にしたい人向け。ループをそのまま使うなら出番は少なそう。",
+  "textHash": "6b98f9a52f2f86ffbd5d",
+  "mediaUrl": "https://krxigzaljuxxiegavhyv.supabase.co/storage/v1/object/public/payload%20media/media/0a65ef5f-c9f8-4b68-8f3f-f052fb22e24c/superslicer-og@1x-1200x630.png?v=2026-11-24T17%3A03%3A43.791Z",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2126640039002083526",
+  "publishedAt": "2026-11-28T11:31:11.223Z"
+}
