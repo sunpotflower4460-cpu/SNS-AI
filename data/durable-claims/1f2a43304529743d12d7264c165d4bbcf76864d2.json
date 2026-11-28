@@ -1,0 +1,20 @@
+{
+  "slotId": "music-tools-x:workflow:46088035885",
+  "status": "published",
+  "createdAt": "2026-11-28T00:28:24.095Z",
+  "updatedAt": "2026-11-28T00:28:25.271Z",
+  "account": "music-tools-x",
+  "platform": "x",
+  "source": "manual",
+  "text": "クリップした成分だけ聴いて、削った場所を確かめられる。Tonehus QuickClipperは3種類のクリップ方式に加え、差分再生と直近4秒の表示を搭載。ピーク処理を目で確認したい人向け。無料取得は12/1まで。",
+  "textHash": "60e2a768db14c876117e",
+  "mediaUrl": "https://tonehus.com/_astro/ui-screenshot.Cm4-IH43_Z9XFtJ.webp",
+  "mediaType": "image",
+  "mediaAltText": null,
+  "commercial": {
+    "kind": "organic",
+    "paidPartnership": false
+  },
+  "providerPostId": "2126473248531451944",
+  "publishedAt": "2026-11-28T00:28:25.271Z"
+}

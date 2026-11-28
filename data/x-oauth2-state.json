@@ -3,11 +3,11 @@
   "accounts": {
     "music-tools-x": {
       "alg": "A256GCM",
-      "iv": "piqLsmTI9iPeq/gU",
-      "tag": "VOaie6uLAyC6Lh4tqyfzLQ==",
-      "ciphertext": "IMIGFX1AR9OeB6659p+yL2toI1IYc6CDC/PlxGeRFoQ0WOB8nvXG/j1HTaZFTk0wwFgaz0Ds0wskJoXKeEE3QAJhcHyo2X2MXjHIMVmqIK7HuX05gyp+pLs4d/5SY87HjRPZRSUvKPKrnx4s3raWRce8uhecwty6JJZ4f3abwvsMHFqstZcSx0ItQlu5mdwU5xF/kRgBeYtv5QM2ExI470ZJscgHMBNNKuz5l0CWIqAjTK9k9Fx5QTJUXhjkJaC8YiX8s0Vc7Us3kyI5+b7KkcBb5ITgOe5RYobj4R4B6MvoNBg+0BtJUt98N454napVKGi2oouS0rvSSViv1tQ84o5henjEBe1gmoKYG1Hm4bEjSGbA/l0dTmEHeMHbCqjrSW/0ylgCdUjIoNsUjoJim1nT0x+uZZHCPhEh9xjW7uFa4ci9ymUk5voCWmzeTFkINU8=",
-      "updatedAt": "2026-11-27T11:25:04.461Z"
+      "iv": "snDP8hmWfRiyEzyh",
+      "tag": "Dfz0/pk12bMJf+//q0aN+w==",
+      "ciphertext": "/CRt9G57vKgqK16VFIyFI9h8zKCut5TSNoprqiANlR5kb4rrgM10xDeGsGt3liJeKvDYGqzNma1x/kFjnRaSvv5/UuQuHJr3bB4SjheGodPwElENv1zsPm2eicEgi1qLqseu1XQBlrHqOY2kNeuVR5kx9kEmKPEmEl1r82nZRci8XyIrNqgHureOPSNDCifel1czDk0ZFPZzRN8BmPViwFdagVvSjI5/LKuaAxwnOk5gYzGiOoiCcYgzMTTM3xTx5Vdx12avNkzx89LLW+pV63mvoIlOVXKj73O4XUH2y6UHml1E9vS4vipWKkcB1kUAEi083eYcl5ElSoKN2Mp1FfXgjibjBXxCSy2cbjH8CV/e3YFFhjUK8Hlah1FXseb0gomEWBvlLiUvkLjpGF8Zf1ilIiFnvf5gIcxUoFwIa5NeyQU5mdCZzhDd0imrtBsxzRc=",
+      "updatedAt": "2026-11-28T00:28:24.629Z"
     }
   },
-  "updatedAt": "2026-11-27T11:25:04.461Z"
+  "updatedAt": "2026-11-28T00:28:24.629Z"
 }
